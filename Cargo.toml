@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "Platform/engine_platform",
+    "Platform/platform_winit",
+    "examples/platform_smoke",
+]
+resolver = "2"
