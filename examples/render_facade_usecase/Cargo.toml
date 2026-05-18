@@ -1,0 +1,8 @@
+[package]
+name = "render_facade_usecase"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+engine_renderer = { path = "../../Render/engine_renderer" }

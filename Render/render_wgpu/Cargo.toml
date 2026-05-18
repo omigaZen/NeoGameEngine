@@ -1,0 +1,10 @@
+[package]
+name = "render_wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = "1"
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+engine_render = { path = "../engine_render" }
+graphics_wgpu = { path = "../../Graphics/graphics_wgpu" }

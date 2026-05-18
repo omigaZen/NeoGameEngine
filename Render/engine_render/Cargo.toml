@@ -1,0 +1,11 @@
+[package]
+name = "engine_render"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+flate2 = "1.0"
+image = { version = "0.25", default-features = false, features = ["webp"] }
+jpeg-decoder = "0.3"
+png = "0.17"

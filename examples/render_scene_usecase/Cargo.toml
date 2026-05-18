@@ -1,0 +1,7 @@
+[package]
+name = "render_scene_usecase"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_render = { path = "../../Render/engine_render" }

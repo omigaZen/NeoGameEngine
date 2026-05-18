@@ -1,0 +1,31 @@
+[package]
+name = "engine_renderer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+engine_platform = { path = "../../Platform/engine_platform", optional = true }
+engine_render = { path = "../engine_render", optional = true }
+graphics_wgpu = { path = "../../Graphics/graphics_wgpu", optional = true }
+render_wgpu = { path = "../render_wgpu", optional = true }
+
+[features]
+default = ["backend-wgpu", "pbr", "render-graph"]
+backend-wgpu = ["dep:engine_platform", "dep:engine_render", "dep:graphics_wgpu", "dep:render_wgpu"]
+backend-vulkan = []
+backend-metal = []
+backend-d3d12 = []
+ray-tracing = []
+mesh-shader = []
+bindless = []
+multi-draw-indirect = []
+pipeline-statistics = []
+async-compute = []
+variable-rate-shading = []
+gpu-driven = []
+virtual-texturing = []
+gpu-profiler = []
+editor = []
+pbr = []
+render-graph = []

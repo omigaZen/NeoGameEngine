@@ -1,0 +1,10 @@
+[package]
+name = "graphics_wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../engine_graphics" }
+engine_platform = { path = "../../Platform/engine_platform" }
+pollster = "0.3"
+wgpu = "0.20"

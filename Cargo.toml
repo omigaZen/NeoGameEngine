@@ -1,7 +1,16 @@
 [workspace]
 members = [
+    "Graphics/engine_graphics",
+    "Graphics/graphics_wgpu",
     "Platform/engine_platform",
     "Platform/platform_winit",
+    "Render/engine_render",
+    "Render/engine_renderer",
+    "Render/render_wgpu",
     "examples/platform_smoke",
+    "examples/render_scene_usecase",
+    "examples/render_facade_usecase",
+    "examples/render_smoke",
+    "examples/render_feature_showcase",
 ]
 resolver = "2"
