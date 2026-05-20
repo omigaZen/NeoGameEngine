@@ -16010,13 +16010,17 @@ fn fs_main() -> @location(0) vec4<f32> {
         &mut self,
     ) -> Result<BackendSubmissionCompletionReport, RendererError> {
         let report = self.backend_submission_completion_report();
-        if report.true_nonblocking_completion_supported {
-            return Ok(report);
+        if report.backend_active {
+            #[cfg(feature = "backend-wgpu")]
+            if let Some(runtime) = &mut self.wgpu_runtime {
+                let _ = runtime.poll_backend_resource_retirements();
+                return Ok(self.backend_submission_completion_report());
+            }
         }
         Err(RendererError::Validation(format!(
-            "true nonblocking backend submission completion polling is unavailable: {}",
+            "backend submission completion polling is unavailable: {}",
             report.limitation.unwrap_or(
-                "backend did not expose a true nonblocking per-submission completion query"
+                "backend-wgpu runtime is not active"
             )
         )))
     }
@@ -32873,8 +32877,53 @@ mod tests {
         assert!(matches!(
             renderer.poll_backend_submission_completion_nonblocking(),
             Err(RendererError::Validation(message))
-                if message.contains("true nonblocking backend submission completion polling is unavailable")
+                if message.contains("backend submission completion polling is unavailable")
         ));
+    }
+
+    #[test]
+    fn backend_submission_completion_poll_uses_queue_empty_fallback() {
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            let mut renderer = Renderer::new_headless(RendererConfig::default());
+            assert!(matches!(
+                renderer.poll_backend_submission_completion_nonblocking(),
+                Err(RendererError::Validation(message))
+                    if message.contains("backend submission completion polling is unavailable")
+            ));
+            return;
+        }
+
+        #[cfg(feature = "backend-wgpu")]
+        {
+            let mut renderer = match block_on_ready(Renderer::new(RendererConfig {
+                backend: BackendPreference::Wgpu,
+                ..RendererConfig::default()
+            })) {
+                Ok(renderer) => renderer,
+                Err(error) => {
+                    eprintln!(
+                        "skipping backend submission completion poll fallback test: {error}"
+                    );
+                    return;
+                }
+            };
+
+            let report = renderer
+                .poll_backend_submission_completion_nonblocking()
+                .unwrap_or_else(|error| panic!("unexpected completion poll error: {error}"));
+            assert!(report.backend_active);
+            assert!(report.queue_empty_poll_supported);
+            assert!(report.last_poll_used_queue_empty_fallback);
+            assert!(!report.true_nonblocking_completion_supported);
+            assert!(report
+                .limitation
+                .is_some_and(|reason| reason.contains("queue-empty polling")));
+            assert_eq!(
+                report.backend_active,
+                renderer.backend_submission_completion_report().backend_active
+            );
+        }
     }
 
     #[test]
