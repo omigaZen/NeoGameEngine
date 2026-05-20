@@ -1,0 +1,7 @@
+[package]
+name = "physics_showcase"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_physics = { path = "../../Physics/engine_physics" }

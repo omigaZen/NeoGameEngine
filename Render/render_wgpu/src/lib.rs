@@ -6,7 +6,8 @@ mod texture;
 
 pub use mesh::WgpuMesh;
 pub use mesh_renderer::{
-    MeshBatchDraw, MeshDraw, MeshRenderStats, MeshRenderer, WgpuMaterial, WgpuMeshInstance,
+    wgpu_material_layout_info, MeshBatchDraw, MeshDraw, MeshRenderStats, MeshRenderer,
+    WgpuMaterial, WgpuMaterialLayoutInfo, WgpuMeshInstance, WgpuPostProcessOptions,
 };
 pub use probe::{
     select_environment_probe_blend, BakedEnvironmentProbe, BakedEnvironmentProbeFormat,

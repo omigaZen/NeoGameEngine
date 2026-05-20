@@ -1,0 +1,13 @@
+[package]
+name = "physics_render_window"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+engine_physics = { path = "../../Physics/engine_physics", features = ["backend_rapier"] }
+engine_platform = { path = "../../Platform/engine_platform" }
+engine_render = { path = "../../Render/engine_render" }
+graphics_wgpu = { path = "../../Graphics/graphics_wgpu" }
+platform_winit = { path = "../../Platform/platform_winit" }
+render_wgpu = { path = "../../Render/render_wgpu" }

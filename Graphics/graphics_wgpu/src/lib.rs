@@ -6,7 +6,8 @@ use engine_graphics::{GraphicsError, GraphicsResult};
 use engine_platform::PlatformWindow;
 
 pub use surface::{
-    WgpuFrameContext, WgpuSurface, WgpuSurfaceOptions, DEFAULT_DEPTH_FORMAT, DEFAULT_SAMPLE_COUNT,
+    WgpuFrameContext, WgpuFrameReadback, WgpuSurface, WgpuSurfaceOptions, DEFAULT_DEPTH_FORMAT,
+    DEFAULT_SAMPLE_COUNT,
 };
 pub use wgpu;
 
@@ -55,6 +56,12 @@ impl WgpuGraphics {
         {
             required_features |=
                 wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        }
+        if adapter
+            .features()
+            .contains(wgpu::Features::VERTEX_ATTRIBUTE_64BIT)
+        {
+            required_features |= wgpu::Features::VERTEX_ATTRIBUTE_64BIT;
         }
 
         let (device, queue) = adapter

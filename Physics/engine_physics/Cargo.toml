@@ -1,0 +1,20 @@
+[package]
+name = "engine_physics"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["3d", "backend_rapier"]
+3d = []
+2d = []
+backend_rapier = ["dep:rapier3d"]
+serde = ["dep:serde", "rapier3d?/serde-serialize"]
+debug_draw = []
+parallel = ["rapier3d?/parallel"]
+deterministic = ["rapier3d?/enhanced-determinism"]
+
+[dependencies]
+bitflags = { version = "2.11.1", features = ["serde"] }
+thiserror = "2"
+serde = { version = "1.0", features = ["derive"], optional = true }
+rapier3d = { version = "0.32.0", optional = true }

@@ -532,6 +532,36 @@ impl WgpuRenderScene {
         )
     }
 
+    pub fn render_with_post_pass<F>(
+        &self,
+        renderer: &mut MeshRenderer,
+        surface: &mut WgpuSurface,
+        queue: &RenderQueue,
+        environment_probes: &[crate::EnvironmentProbeBlend<'_>],
+        mut post_pass: F,
+    ) -> GraphicsResult<()>
+    where
+        F: FnMut(&mut wgpu::RenderPass<'_>),
+    {
+        let pass = queue.pass();
+        renderer.set_clear_color(pass.clear_color);
+        renderer.set_depth(pass.depth);
+        renderer.set_lighting(pass.lighting);
+        renderer.set_camera_position(pass.camera.position());
+        renderer.set_shadow_camera(pass.camera, pass.aspect_ratio);
+        let prepared_environment_texture =
+            prepared_environment_texture(&self.textures, &pass.lighting.environment)?;
+        let draws = self.build_draws(queue)?;
+
+        renderer.render_batches_with_environment_probes_and_post_pass(
+            surface,
+            &draws,
+            prepared_environment_texture,
+            environment_probes,
+            |pass| post_pass(pass),
+        )
+    }
+
     pub fn render_with_environment_texture(
         &self,
         renderer: &mut MeshRenderer,
@@ -849,12 +879,12 @@ fn prepared_environment_texture<'a>(
         })?;
 
     let environment_texture = prepared.environment_texture.as_ref().ok_or_else(|| {
-            GraphicsError::InvalidResource(format!(
-                "lighting environment texture {}:{} was not prepared as an environment texture",
-                texture_handle.index(),
-                texture_handle.generation()
-            ))
-        })?;
+        GraphicsError::InvalidResource(format!(
+            "lighting environment texture {}:{} was not prepared as an environment texture",
+            texture_handle.index(),
+            texture_handle.generation()
+        ))
+    })?;
 
     Ok(Some(environment_texture))
 }

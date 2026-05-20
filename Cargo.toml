@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "Physics/engine_physics",
     "Graphics/engine_graphics",
     "Graphics/graphics_wgpu",
     "Platform/engine_platform",
@@ -10,7 +11,10 @@ members = [
     "examples/platform_smoke",
     "examples/render_scene_usecase",
     "examples/render_facade_usecase",
+    "examples/render_facade_window_usecase",
     "examples/render_smoke",
     "examples/render_feature_showcase",
+    "examples/physics_showcase",
+    "examples/physics_render_window",
 ]
 resolver = "2"

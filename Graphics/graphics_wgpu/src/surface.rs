@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 
 use engine_graphics::{
     Color, GraphicsError, GraphicsResult, PresentMode, RenderSurface, SurfaceSize,
@@ -35,6 +35,21 @@ pub struct WgpuSurface {
     sample_count: u32,
     supported_sample_counts: Vec<u32>,
     size: SurfaceSize,
+    copy_src_supported: bool,
+    frame_readback_enabled: bool,
+    pending_frame_readback: Option<PendingSurfaceFrameReadback>,
+    last_frame_readback: Option<WgpuFrameReadback>,
+    last_submission_index: Option<wgpu::SubmissionIndex>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WgpuFrameReadback {
+    pub width: u32,
+    pub height: u32,
+    pub format: wgpu::TextureFormat,
+    pub bytes_per_row: u32,
+    pub rows_per_image: u32,
+    pub bytes: Vec<u8>,
 }
 
 pub struct WgpuFrameContext<'a> {
@@ -117,12 +132,19 @@ impl WgpuSurface {
         let supported_sample_counts =
             supported_surface_sample_counts(adapter, format, options.depth_format);
 
+        let copy_src_supported = capabilities.usages.contains(wgpu::TextureUsages::COPY_SRC);
+        let usage = if copy_src_supported {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
+
         let mut surface = Self {
             surface,
             device,
             queue,
             config: wgpu::SurfaceConfiguration {
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage,
                 format,
                 width: size.width.max(1),
                 height: size.height.max(1),
@@ -138,6 +160,11 @@ impl WgpuSurface {
             sample_count: DEFAULT_SAMPLE_COUNT,
             supported_sample_counts,
             size,
+            copy_src_supported,
+            frame_readback_enabled: false,
+            pending_frame_readback: None,
+            last_frame_readback: None,
+            last_submission_index: None,
         };
 
         surface.configure();
@@ -158,6 +185,64 @@ impl WgpuSurface {
 
     pub fn sample_count(&self) -> u32 {
         self.sample_count
+    }
+
+    pub fn last_submission_index(&self) -> Option<wgpu::SubmissionIndex> {
+        self.last_submission_index.clone()
+    }
+
+    pub fn surface_readback_supported(&self) -> bool {
+        self.copy_src_supported
+    }
+
+    pub fn frame_readback_enabled(&self) -> bool {
+        self.frame_readback_enabled
+    }
+
+    pub fn set_frame_readback_enabled(&mut self, enabled: bool) -> GraphicsResult<()> {
+        if enabled && !self.copy_src_supported {
+            return Err(GraphicsError::SurfaceConfigurationFailed(
+                "surface does not support COPY_SRC usage for frame readback".to_owned(),
+            ));
+        }
+        self.frame_readback_enabled = enabled;
+        if !enabled {
+            self.pending_frame_readback = None;
+            self.last_frame_readback = None;
+        }
+        Ok(())
+    }
+
+    pub fn last_frame_readback(&self) -> Option<&WgpuFrameReadback> {
+        self.last_frame_readback.as_ref()
+    }
+
+    pub fn has_pending_frame_readback(&self) -> bool {
+        self.pending_frame_readback.is_some()
+    }
+
+    pub fn resolve_pending_frame_readback(&mut self) -> GraphicsResult<bool> {
+        let Some(readback) = self.pending_frame_readback.take() else {
+            return Ok(false);
+        };
+        self.last_frame_readback = Some(read_surface_frame_buffer(&self.device, readback)?);
+        Ok(true)
+    }
+
+    pub fn try_resolve_pending_frame_readback(&mut self) -> GraphicsResult<bool> {
+        let Some(readback) = self.pending_frame_readback.take() else {
+            return Ok(false);
+        };
+        match try_read_surface_frame_buffer(&self.device, &readback)? {
+            Some(frame) => {
+                self.last_frame_readback = Some(frame);
+                Ok(true)
+            }
+            None => {
+                self.pending_frame_readback = Some(readback);
+                Ok(false)
+            }
+        }
     }
 
     pub fn set_present_mode(&mut self, present_mode: PresentMode) -> GraphicsResult<()> {
@@ -193,6 +278,14 @@ impl WgpuSurface {
 
     pub fn supported_sample_counts(&self) -> &[u32] {
         &self.supported_sample_counts
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        self.device.as_ref()
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.queue.as_ref()
     }
 
     pub fn set_sample_count(&mut self, sample_count: u32) -> GraphicsResult<()> {
@@ -285,8 +378,31 @@ impl WgpuSurface {
             sample_count: self.sample_count,
         });
 
-        self.queue.submit(Some(encoder.finish()));
+        let pending_readback = if self.frame_readback_enabled {
+            prepare_surface_frame_readback(
+                &self.device,
+                &mut encoder,
+                &frame.texture,
+                self.config.width,
+                self.config.height,
+                self.config.format,
+            )
+            .ok()
+        } else {
+            None
+        };
+
+        let submission = self.queue.submit(Some(encoder.finish()));
+        self.last_submission_index = Some(submission.clone());
         frame.present();
+        self.pending_frame_readback = pending_readback.map(|mut readback| {
+            readback.submission = Some(submission);
+            begin_surface_frame_buffer_map(&mut readback);
+            readback
+        });
+        if self.pending_frame_readback.is_some() {
+            self.last_frame_readback = None;
+        }
         Ok(())
     }
 
@@ -325,6 +441,8 @@ impl RenderSurface for WgpuSurface {
         } else {
             self.depth_target = None;
             self.msaa_color_target = None;
+            self.pending_frame_readback = None;
+            self.last_frame_readback = None;
         }
 
         Ok(())
@@ -392,6 +510,190 @@ impl WgpuDepthTarget {
             _texture: texture,
             view,
         }
+    }
+}
+
+struct PendingSurfaceFrameReadback {
+    submission: Option<wgpu::SubmissionIndex>,
+    map_receiver: Option<mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>>,
+    buffer: wgpu::Buffer,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    row_bytes: u32,
+    padded_row_bytes: u32,
+}
+
+fn prepare_surface_frame_readback(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+) -> GraphicsResult<PendingSurfaceFrameReadback> {
+    let bytes_per_pixel = surface_readback_bytes_per_pixel(format).ok_or_else(|| {
+        GraphicsError::InvalidResource(format!(
+            "surface format {format:?} is not supported for frame readback"
+        ))
+    })?;
+    let row_bytes = width.checked_mul(bytes_per_pixel).ok_or_else(|| {
+        GraphicsError::InvalidResource("surface frame readback row size overflows".to_owned())
+    })?;
+    let padded_row_bytes = align_to(row_bytes, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let readback_size = u64::from(padded_row_bytes)
+        .checked_mul(u64::from(height))
+        .ok_or_else(|| {
+            GraphicsError::InvalidResource(
+                "surface frame readback buffer size overflows".to_owned(),
+            )
+        })?;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Neo Surface Frame Readback"),
+        size: readback_size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_texture_to_buffer(
+        wgpu::ImageCopyTexture {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::ImageCopyBuffer {
+            buffer: &buffer,
+            layout: wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(padded_row_bytes),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    Ok(PendingSurfaceFrameReadback {
+        submission: None,
+        map_receiver: None,
+        buffer,
+        width,
+        height,
+        format,
+        row_bytes,
+        padded_row_bytes,
+    })
+}
+
+fn read_surface_frame_buffer(
+    device: &wgpu::Device,
+    mut readback: PendingSurfaceFrameReadback,
+) -> GraphicsResult<WgpuFrameReadback> {
+    if readback.map_receiver.is_none() {
+        begin_surface_frame_buffer_map(&mut readback);
+    }
+    if let Some(submission) = readback.submission.clone() {
+        let _ = device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    } else {
+        let _ = device.poll(wgpu::Maintain::Wait);
+    }
+    let _ = device.poll(wgpu::Maintain::Wait);
+    let receiver = readback.map_receiver.take().ok_or_else(|| {
+        GraphicsError::Backend("surface frame readback mapping was not started".to_owned())
+    })?;
+    match receiver.recv() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            return Err(GraphicsError::Backend(format!(
+                "surface frame readback mapping failed: {error}"
+            )));
+        }
+        Err(_) => {
+            return Err(GraphicsError::Backend(
+                "surface frame readback callback was canceled".to_owned(),
+            ));
+        }
+    }
+    copy_surface_frame_readback_bytes(&readback)
+}
+
+fn try_read_surface_frame_buffer(
+    device: &wgpu::Device,
+    readback: &PendingSurfaceFrameReadback,
+) -> GraphicsResult<Option<WgpuFrameReadback>> {
+    let Some(receiver) = readback.map_receiver.as_ref() else {
+        return Err(GraphicsError::Backend(
+            "surface frame readback mapping was not started".to_owned(),
+        ));
+    };
+    let _ = device.poll(wgpu::Maintain::Poll);
+    match receiver.try_recv() {
+        Ok(Ok(())) => copy_surface_frame_readback_bytes(readback).map(Some),
+        Ok(Err(error)) => Err(GraphicsError::Backend(format!(
+            "surface frame readback mapping failed: {error}"
+        ))),
+        Err(mpsc::TryRecvError::Empty) => Ok(None),
+        Err(mpsc::TryRecvError::Disconnected) => Err(GraphicsError::Backend(
+            "surface frame readback callback was canceled".to_owned(),
+        )),
+    }
+}
+
+fn begin_surface_frame_buffer_map(readback: &mut PendingSurfaceFrameReadback) {
+    let slice = readback.buffer.slice(..);
+    let (sender, receiver) = mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = sender.send(result);
+    });
+    readback.map_receiver = Some(receiver);
+}
+
+fn copy_surface_frame_readback_bytes(
+    readback: &PendingSurfaceFrameReadback,
+) -> GraphicsResult<WgpuFrameReadback> {
+    let slice = readback.buffer.slice(..);
+    let mapped = slice.get_mapped_range();
+    let mut bytes = Vec::with_capacity(readback.row_bytes as usize * readback.height as usize);
+    for row in 0..readback.height as usize {
+        let row_start = row * readback.padded_row_bytes as usize;
+        let row_end = row_start + readback.row_bytes as usize;
+        bytes.extend_from_slice(&mapped[row_start..row_end]);
+    }
+    drop(mapped);
+    readback.buffer.unmap();
+    Ok(WgpuFrameReadback {
+        width: readback.width,
+        height: readback.height,
+        format: readback.format,
+        bytes_per_row: readback.row_bytes,
+        rows_per_image: readback.height,
+        bytes,
+    })
+}
+
+fn surface_readback_bytes_per_pixel(format: wgpu::TextureFormat) -> Option<u32> {
+    match format {
+        wgpu::TextureFormat::Rgba8Unorm
+        | wgpu::TextureFormat::Rgba8UnormSrgb
+        | wgpu::TextureFormat::Bgra8Unorm
+        | wgpu::TextureFormat::Bgra8UnormSrgb => Some(4),
+        wgpu::TextureFormat::Rgba16Float => Some(8),
+        wgpu::TextureFormat::Rgba32Float => Some(16),
+        _ => None,
+    }
+}
+
+fn align_to(value: u32, alignment: u32) -> u32 {
+    if alignment == 0 {
+        return value;
+    }
+    let remainder = value % alignment;
+    if remainder == 0 {
+        value
+    } else {
+        value + alignment - remainder
     }
 }
 
@@ -557,5 +859,31 @@ mod tests {
             choose_surface_format(&formats, Some(wgpu::TextureFormat::Rgba16Float)),
             Err(GraphicsError::SurfaceConfigurationFailed(_))
         ));
+    }
+
+    #[test]
+    fn surface_readback_layout_supports_public_color_formats() {
+        assert_eq!(
+            surface_readback_bytes_per_pixel(wgpu::TextureFormat::Rgba8UnormSrgb),
+            Some(4)
+        );
+        assert_eq!(
+            surface_readback_bytes_per_pixel(wgpu::TextureFormat::Bgra8UnormSrgb),
+            Some(4)
+        );
+        assert_eq!(
+            surface_readback_bytes_per_pixel(wgpu::TextureFormat::Rgba16Float),
+            Some(8)
+        );
+        assert_eq!(
+            surface_readback_bytes_per_pixel(wgpu::TextureFormat::Rgba32Float),
+            Some(16)
+        );
+        assert_eq!(
+            surface_readback_bytes_per_pixel(wgpu::TextureFormat::Depth32Float),
+            None
+        );
+        assert_eq!(align_to(8, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT), 256);
+        assert_eq!(align_to(256, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT), 256);
     }
 }

@@ -1,6 +1,6 @@
-use std::cell::Cell;
+use std::{cell::Cell, cmp::Ordering, sync::mpsc};
 
-use engine_graphics::{Color, GraphicsError, GraphicsResult};
+use engine_graphics::{Color, GraphicsError, GraphicsResult, RenderSurface};
 use engine_render::{
     BlendMode, Camera, DirectionalShadow, Mat4, Material, PerspectiveCamera, PointLight,
     RenderDepthDesc, RenderLighting, SpotLight, Texture, TextureAddressMode, TextureFilterMode,
@@ -49,6 +49,91 @@ struct InstanceRaw {
 
 unsafe impl bytemuck::Zeroable for InstanceRaw {}
 unsafe impl bytemuck::Pod for InstanceRaw {}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct SampledPostProcessUniform {
+    texel_size_and_flags: [f32; 4],
+    color_grade_flags: [f32; 4],
+    effect_flags: [f32; 4],
+    screen_space_flags: [f32; 4],
+}
+
+unsafe impl bytemuck::Zeroable for SampledPostProcessUniform {}
+unsafe impl bytemuck::Pod for SampledPostProcessUniform {}
+
+impl SampledPostProcessUniform {
+    fn new(width: u32, height: u32, options: WgpuPostProcessOptions) -> Self {
+        Self {
+            texel_size_and_flags: [
+                1.0 / width.max(1) as f32,
+                1.0 / height.max(1) as f32,
+                if options.fxaa { 1.0 } else { 0.0 },
+                if options.bloom { 1.0 } else { 0.0 },
+            ],
+            color_grade_flags: [if options.color_grading { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            effect_flags: [
+                if options.taa { 1.0 } else { 0.0 },
+                if options.motion_blur { 1.0 } else { 0.0 },
+                if options.ssr { 1.0 } else { 0.0 },
+                if options.depth_of_field { 1.0 } else { 0.0 },
+            ],
+            screen_space_flags: [
+                if options.ssao { 1.0 } else { 0.0 },
+                if options.hdr { 1.0 } else { 0.0 },
+                0.0,
+                0.0,
+            ],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WgpuPostProcessOptions {
+    pub fxaa: bool,
+    pub bloom: bool,
+    pub color_grading: bool,
+    pub taa: bool,
+    pub motion_blur: bool,
+    pub ssr: bool,
+    pub depth_of_field: bool,
+    pub ssao: bool,
+    pub hdr: bool,
+}
+
+fn sampled_post_process_pass_label(options: WgpuPostProcessOptions) -> String {
+    let mut label = String::from("Neo");
+    if options.hdr {
+        label.push_str(" Hdr");
+    }
+    if options.bloom {
+        label.push_str(" Bloom");
+    }
+    if options.ssao {
+        label.push_str(" Ssao");
+    }
+    if options.taa {
+        label.push_str(" Taa");
+    }
+    if options.fxaa {
+        label.push_str(" Fxaa");
+    }
+    if options.motion_blur {
+        label.push_str(" Motion Blur");
+    }
+    if options.ssr {
+        label.push_str(" Ssr");
+    }
+    if options.depth_of_field {
+        label.push_str(" Depth Of Field");
+    }
+    label.push_str(" Tonemap");
+    if options.color_grading {
+        label.push_str(" Color Grading");
+    }
+    label.push_str(" Post Process Pass");
+    label
+}
 
 impl InstanceRaw {
     const VEC4_SIZE: wgpu::BufferAddress = std::mem::size_of::<[f32; 4]>() as wgpu::BufferAddress;
@@ -664,6 +749,107 @@ fn create_shadow_texture_array(
     })
 }
 
+const MATERIAL_UNIFORM_BINDING: u32 = 0;
+const MATERIAL_TEXTURE_BINDINGS: [u32; 15] = [1, 3, 4, 5, 6, 7, 8, 29, 9, 10, 11, 12, 13, 14, 15];
+const MATERIAL_SAMPLER_BINDINGS: [u32; MATERIAL_SAMPLER_COUNT] =
+    [2, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30];
+const MATERIAL_OCCUPIED_BINDINGS: [u32; 31] = [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+    26, 27, 28, 29, 30,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WgpuMaterialLayoutInfo {
+    pub uniform_binding: u32,
+    pub texture_bindings: &'static [u32],
+    pub sampler_bindings: &'static [u32],
+    pub occupied_bindings: &'static [u32],
+    pub binding_count: usize,
+    pub highest_binding: u32,
+}
+
+pub fn wgpu_material_layout_info() -> WgpuMaterialLayoutInfo {
+    WgpuMaterialLayoutInfo {
+        uniform_binding: MATERIAL_UNIFORM_BINDING,
+        texture_bindings: &MATERIAL_TEXTURE_BINDINGS,
+        sampler_bindings: &MATERIAL_SAMPLER_BINDINGS,
+        occupied_bindings: &MATERIAL_OCCUPIED_BINDINGS,
+        binding_count: MATERIAL_OCCUPIED_BINDINGS.len(),
+        highest_binding: 30,
+    }
+}
+
+fn material_bind_group_layout_entries() -> [wgpu::BindGroupLayoutEntry; 31] {
+    [
+        material_uniform_layout_entry(0),
+        material_texture_layout_entry(1),
+        material_sampler_layout_entry(2),
+        material_texture_layout_entry(3),
+        material_texture_layout_entry(4),
+        material_texture_layout_entry(5),
+        material_texture_layout_entry(6),
+        material_texture_layout_entry(7),
+        material_texture_layout_entry(8),
+        material_texture_layout_entry(9),
+        material_texture_layout_entry(10),
+        material_texture_layout_entry(11),
+        material_texture_layout_entry(12),
+        material_texture_layout_entry(13),
+        material_texture_layout_entry(14),
+        material_texture_layout_entry(15),
+        material_sampler_layout_entry(16),
+        material_sampler_layout_entry(17),
+        material_sampler_layout_entry(18),
+        material_sampler_layout_entry(19),
+        material_sampler_layout_entry(20),
+        material_sampler_layout_entry(21),
+        material_sampler_layout_entry(22),
+        material_sampler_layout_entry(23),
+        material_sampler_layout_entry(24),
+        material_sampler_layout_entry(25),
+        material_sampler_layout_entry(26),
+        material_sampler_layout_entry(27),
+        material_sampler_layout_entry(28),
+        material_texture_layout_entry(29),
+        material_sampler_layout_entry(30),
+    ]
+}
+
+fn material_uniform_layout_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Uniform,
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    }
+}
+
+fn material_texture_layout_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    }
+}
+
+fn material_sampler_layout_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    }
+}
+
 pub struct WgpuMaterial {
     material_buffer: wgpu::Buffer,
     material_bind_group: wgpu::BindGroup,
@@ -674,6 +860,10 @@ pub struct WgpuMaterial {
 }
 
 impl WgpuMaterial {
+    pub fn layout_info() -> WgpuMaterialLayoutInfo {
+        wgpu_material_layout_info()
+    }
+
     fn new(
         graphics: &WgpuGraphics,
         material_bind_group_layout: &wgpu::BindGroupLayout,
@@ -708,137 +898,137 @@ impl WgpuMaterial {
                 layout: material_bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
-                        binding: 0,
+                        binding: MATERIAL_UNIFORM_BINDING,
                         resource: material_buffer.as_entire_binding(),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 1,
+                        binding: MATERIAL_TEXTURE_BINDINGS[0],
                         resource: wgpu::BindingResource::TextureView(base_color_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 2,
+                        binding: MATERIAL_SAMPLER_BINDINGS[0],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[0]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 3,
+                        binding: MATERIAL_TEXTURE_BINDINGS[1],
                         resource: wgpu::BindingResource::TextureView(
                             metallic_roughness_texture.view(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 4,
+                        binding: MATERIAL_TEXTURE_BINDINGS[2],
                         resource: wgpu::BindingResource::TextureView(normal_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 5,
+                        binding: MATERIAL_TEXTURE_BINDINGS[3],
                         resource: wgpu::BindingResource::TextureView(emissive_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 6,
+                        binding: MATERIAL_TEXTURE_BINDINGS[4],
                         resource: wgpu::BindingResource::TextureView(occlusion_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 7,
+                        binding: MATERIAL_TEXTURE_BINDINGS[5],
                         resource: wgpu::BindingResource::TextureView(clearcoat_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 8,
+                        binding: MATERIAL_TEXTURE_BINDINGS[6],
                         resource: wgpu::BindingResource::TextureView(
                             clearcoat_roughness_texture.view(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 9,
+                        binding: MATERIAL_TEXTURE_BINDINGS[8],
                         resource: wgpu::BindingResource::TextureView(sheen_color_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 10,
+                        binding: MATERIAL_TEXTURE_BINDINGS[9],
                         resource: wgpu::BindingResource::TextureView(
                             sheen_roughness_texture.view(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 11,
+                        binding: MATERIAL_TEXTURE_BINDINGS[10],
                         resource: wgpu::BindingResource::TextureView(transmission_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 12,
+                        binding: MATERIAL_TEXTURE_BINDINGS[11],
                         resource: wgpu::BindingResource::TextureView(specular_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 13,
+                        binding: MATERIAL_TEXTURE_BINDINGS[12],
                         resource: wgpu::BindingResource::TextureView(specular_color_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 14,
+                        binding: MATERIAL_TEXTURE_BINDINGS[13],
                         resource: wgpu::BindingResource::TextureView(anisotropy_texture.view()),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 15,
+                        binding: MATERIAL_TEXTURE_BINDINGS[14],
                         resource: wgpu::BindingResource::TextureView(
                             optical_extension_texture.view(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 29,
+                        binding: MATERIAL_TEXTURE_BINDINGS[7],
                         resource: wgpu::BindingResource::TextureView(
                             clearcoat_normal_texture.view(),
                         ),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 16,
+                        binding: MATERIAL_SAMPLER_BINDINGS[1],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[1]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 17,
+                        binding: MATERIAL_SAMPLER_BINDINGS[2],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[2]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 18,
+                        binding: MATERIAL_SAMPLER_BINDINGS[3],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[3]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 19,
+                        binding: MATERIAL_SAMPLER_BINDINGS[4],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[4]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 20,
+                        binding: MATERIAL_SAMPLER_BINDINGS[5],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[5]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 21,
+                        binding: MATERIAL_SAMPLER_BINDINGS[6],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[6]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 22,
+                        binding: MATERIAL_SAMPLER_BINDINGS[7],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[7]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 23,
+                        binding: MATERIAL_SAMPLER_BINDINGS[8],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[8]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 24,
+                        binding: MATERIAL_SAMPLER_BINDINGS[9],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[9]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 25,
+                        binding: MATERIAL_SAMPLER_BINDINGS[10],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[10]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 26,
+                        binding: MATERIAL_SAMPLER_BINDINGS[11],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[11]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 27,
+                        binding: MATERIAL_SAMPLER_BINDINGS[12],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[12]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 28,
+                        binding: MATERIAL_SAMPLER_BINDINGS[13],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[13]),
                     },
                     wgpu::BindGroupEntry {
-                        binding: 30,
+                        binding: MATERIAL_SAMPLER_BINDINGS[14],
                         resource: wgpu::BindingResource::Sampler(&material_samplers[14]),
                     },
                 ],
@@ -1171,27 +1361,116 @@ impl<'a> MeshBatchDraw<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub const MAX_NATIVE_PASS_LABELS: usize = 128;
+pub const GBUFFER_COLOR_ATTACHMENT_COUNT: usize = 3;
+const GBUFFER_ALBEDO_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+const GBUFFER_NORMAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const GBUFFER_MATERIAL_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshRenderStats {
     pub batch_count: usize,
     pub draw_call_count: usize,
+    pub native_pass_label_count: usize,
+    pub native_pass_labels_dropped: usize,
+    pub native_pass_labels: [Option<String>; MAX_NATIVE_PASS_LABELS],
+    pub mesh_pass_draw_call_count: usize,
+    pub skybox_draw_call_count: usize,
+    pub gbuffer_draw_call_count: usize,
+    pub deferred_lighting_draw_call_count: usize,
+    pub depth_prepass_draw_call_count: usize,
+    pub shadow_draw_call_count: usize,
+    pub directional_shadow_draw_call_count: usize,
+    pub spot_shadow_draw_call_count: usize,
+    pub point_shadow_draw_call_count: usize,
     pub opaque_draw_call_count: usize,
     pub transparent_draw_call_count: usize,
+    pub post_process_draw_call_count: usize,
     pub instance_count: usize,
     pub instance_buffer_capacity: usize,
+    pub timestamp_writes: usize,
+    pub gpu_time_ns: Option<u64>,
+}
+
+impl Default for MeshRenderStats {
+    fn default() -> Self {
+        Self {
+            batch_count: 0,
+            draw_call_count: 0,
+            native_pass_label_count: 0,
+            native_pass_labels_dropped: 0,
+            native_pass_labels: std::array::from_fn(|_| None),
+            mesh_pass_draw_call_count: 0,
+            skybox_draw_call_count: 0,
+            gbuffer_draw_call_count: 0,
+            deferred_lighting_draw_call_count: 0,
+            depth_prepass_draw_call_count: 0,
+            shadow_draw_call_count: 0,
+            directional_shadow_draw_call_count: 0,
+            spot_shadow_draw_call_count: 0,
+            point_shadow_draw_call_count: 0,
+            opaque_draw_call_count: 0,
+            transparent_draw_call_count: 0,
+            post_process_draw_call_count: 0,
+            instance_count: 0,
+            instance_buffer_capacity: 0,
+            timestamp_writes: 0,
+            gpu_time_ns: None,
+        }
+    }
 }
 
 impl MeshRenderStats {
-    pub const fn instance_buffer_bytes(self) -> usize {
+    pub const fn native_pass_label_capacity() -> usize {
+        MAX_NATIVE_PASS_LABELS
+    }
+
+    pub fn record_native_pass_label(&mut self, label: impl Into<String>) {
+        if self.native_pass_label_count >= MAX_NATIVE_PASS_LABELS {
+            self.native_pass_labels_dropped = self.native_pass_labels_dropped.saturating_add(1);
+            return;
+        }
+        self.native_pass_labels[self.native_pass_label_count] = Some(label.into());
+        self.native_pass_label_count += 1;
+    }
+
+    pub fn native_pass_label_strings(&self) -> Vec<String> {
+        self.native_pass_labels
+            .iter()
+            .take(self.native_pass_label_count)
+            .filter_map(Clone::clone)
+            .collect()
+    }
+
+    pub const fn instance_buffer_bytes(&self) -> usize {
         self.instance_buffer_capacity * std::mem::size_of::<InstanceRaw>()
+    }
+
+    pub fn gpu_time_ms(&self) -> Option<f32> {
+        self.gpu_time_ns.map(|time_ns| time_ns as f32 / 1_000_000.0)
     }
 }
 
 pub struct MeshRenderer {
     skybox_color_pipeline: wgpu::RenderPipeline,
     skybox_depth_pipeline: wgpu::RenderPipeline,
+    post_process_color_pipeline: wgpu::RenderPipeline,
+    sampled_post_process_pipeline: wgpu::RenderPipeline,
+    sampled_post_process_bind_group_layout: wgpu::BindGroupLayout,
+    sampled_post_process_sampler: wgpu::Sampler,
+    sampled_post_process_uniform_buffer: wgpu::Buffer,
+    post_process_options: WgpuPostProcessOptions,
+    gbuffer_color_pipeline: wgpu::RenderPipeline,
+    gbuffer_depth_pipeline: wgpu::RenderPipeline,
+    double_sided_gbuffer_color_pipeline: wgpu::RenderPipeline,
+    double_sided_gbuffer_depth_pipeline: wgpu::RenderPipeline,
+    deferred_lighting_pipeline: wgpu::RenderPipeline,
+    deferred_lighting_bind_group_layout: wgpu::BindGroupLayout,
+    deferred_lighting_sampler: wgpu::Sampler,
     shadow_pipeline: wgpu::RenderPipeline,
     double_sided_shadow_pipeline: wgpu::RenderPipeline,
+    depth_prepass_pipeline: wgpu::RenderPipeline,
+    double_sided_depth_prepass_pipeline: wgpu::RenderPipeline,
     opaque_color_pipeline: wgpu::RenderPipeline,
     opaque_depth_pipeline: wgpu::RenderPipeline,
     opaque_depth_read_pipeline: wgpu::RenderPipeline,
@@ -1233,6 +1512,7 @@ pub struct MeshRenderer {
     instance_buffer: Option<wgpu::Buffer>,
     instance_buffer_capacity: usize,
     last_stats: MeshRenderStats,
+    gpu_profiling_enabled: bool,
     clear_color: Color,
     depth: RenderDepthDesc,
     lighting: RenderLighting,
@@ -1241,6 +1521,7 @@ pub struct MeshRenderer {
     shadow_camera: Camera,
     shadow_camera_aspect_ratio: f32,
     sample_count: u32,
+    surface_format: wgpu::TextureFormat,
 }
 
 impl MeshRenderer {
@@ -1272,261 +1553,28 @@ impl MeshRenderer {
             label: Some("Neo Skybox Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
         });
+        let post_process_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Neo Post Process Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("post_process.wgsl").into()),
+        });
+        let sampled_post_process_shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Neo Sampled Post Process Shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("post_process_sampled.wgsl").into()),
+            });
+        let gbuffer_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Neo GBuffer Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("gbuffer.wgsl").into()),
+        });
+        let deferred_lighting_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Neo Deferred Lighting Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("deferred_lighting.wgsl").into()),
+        });
+        let material_bind_group_layout_entries = material_bind_group_layout_entries();
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Neo Material Bind Group Layout"),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 7,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 8,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 9,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 10,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 11,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 12,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 13,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 14,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 15,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 29,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 16,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 17,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 18,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 19,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 20,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 21,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 22,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 23,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 24,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 25,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 26,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 27,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 28,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 30,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
+                entries: &material_bind_group_layout_entries,
             });
         let render_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1651,6 +1699,80 @@ impl MeshRenderer {
                             sample_type: wgpu::TextureSampleType::Depth,
                             view_dimension: wgpu::TextureViewDimension::D2Array,
                             multisampled: false,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+        let deferred_lighting_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Neo Deferred Lighting Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let sampled_post_process_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Neo Sampled Post Process Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
                         },
                         count: None,
                     },
@@ -1782,6 +1904,32 @@ impl MeshRenderer {
             compare: Some(wgpu::CompareFunction::LessEqual),
             ..wgpu::SamplerDescriptor::default()
         });
+        let deferred_lighting_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Neo Deferred Lighting Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..wgpu::SamplerDescriptor::default()
+        });
+        let sampled_post_process_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Neo Sampled Post Process Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..wgpu::SamplerDescriptor::default()
+        });
+        let sampled_post_process_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Neo Sampled Post Process Uniform Buffer"),
+            size: std::mem::size_of::<SampledPostProcessUniform>() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let shadow_resources = ShadowResources::new(
             device,
             &shadow_bind_group_layout,
@@ -1809,6 +1957,23 @@ impl MeshRenderer {
             bind_group_layouts: &[&render_bind_group_layout, &skybox_bind_group_layout],
             push_constant_ranges: &[],
         });
+        let post_process_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Neo Post Process Pipeline Layout"),
+            bind_group_layouts: &[],
+            push_constant_ranges: &[],
+        });
+        let deferred_lighting_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Neo Deferred Lighting Pipeline Layout"),
+                bind_group_layouts: &[&deferred_lighting_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let sampled_post_process_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Neo Sampled Post Process Pipeline Layout"),
+                bind_group_layouts: &[&sampled_post_process_bind_group_layout],
+                push_constant_ranges: &[],
+            });
         let skybox_color_pipeline = create_skybox_pipeline(
             device,
             &skybox_shader,
@@ -1825,9 +1990,79 @@ impl MeshRenderer {
             sample_count,
             Some(depth_format),
         );
+        let post_process_color_pipeline = create_post_process_pipeline(
+            device,
+            &post_process_shader,
+            &post_process_layout,
+            surface_format,
+            sample_count,
+            Some(depth_format),
+        );
+        let sampled_post_process_pipeline = create_sampled_post_process_pipeline(
+            device,
+            &sampled_post_process_shader,
+            &sampled_post_process_layout,
+            surface_format,
+            sample_count,
+            Some(depth_format),
+        );
+        let gbuffer_color_pipeline = create_mesh_gbuffer_pipeline(
+            device,
+            &gbuffer_shader,
+            &layout,
+            sample_count,
+            None,
+            false,
+        );
+        let gbuffer_depth_pipeline = create_mesh_gbuffer_pipeline(
+            device,
+            &gbuffer_shader,
+            &layout,
+            sample_count,
+            Some(depth_format),
+            false,
+        );
+        let double_sided_gbuffer_color_pipeline = create_mesh_gbuffer_pipeline(
+            device,
+            &gbuffer_shader,
+            &layout,
+            sample_count,
+            None,
+            true,
+        );
+        let double_sided_gbuffer_depth_pipeline = create_mesh_gbuffer_pipeline(
+            device,
+            &gbuffer_shader,
+            &layout,
+            sample_count,
+            Some(depth_format),
+            true,
+        );
+        let deferred_lighting_pipeline = create_deferred_lighting_pipeline(
+            device,
+            &deferred_lighting_shader,
+            &deferred_lighting_layout,
+            surface_format,
+        );
         let shadow_pipeline = create_shadow_pipeline(device, &shadow_shader, &shadow_layout, false);
         let double_sided_shadow_pipeline =
             create_shadow_pipeline(device, &shadow_shader, &shadow_layout, true);
+        let depth_prepass_pipeline = create_mesh_depth_prepass_pipeline(
+            device,
+            &shader,
+            &layout,
+            sample_count,
+            depth_format,
+            false,
+        );
+        let double_sided_depth_prepass_pipeline = create_mesh_depth_prepass_pipeline(
+            device,
+            &shader,
+            &layout,
+            sample_count,
+            depth_format,
+            true,
+        );
         let opaque_color_pipeline = create_mesh_pipeline(
             device,
             &shader,
@@ -2072,8 +2307,23 @@ impl MeshRenderer {
         Ok(Self {
             skybox_color_pipeline,
             skybox_depth_pipeline,
+            post_process_color_pipeline,
+            sampled_post_process_pipeline,
+            sampled_post_process_bind_group_layout,
+            sampled_post_process_sampler,
+            sampled_post_process_uniform_buffer,
+            post_process_options: WgpuPostProcessOptions::default(),
+            gbuffer_color_pipeline,
+            gbuffer_depth_pipeline,
+            double_sided_gbuffer_color_pipeline,
+            double_sided_gbuffer_depth_pipeline,
+            deferred_lighting_pipeline,
+            deferred_lighting_bind_group_layout,
+            deferred_lighting_sampler,
             shadow_pipeline,
             double_sided_shadow_pipeline,
+            depth_prepass_pipeline,
+            double_sided_depth_prepass_pipeline,
             opaque_color_pipeline,
             opaque_depth_pipeline,
             opaque_depth_read_pipeline,
@@ -2115,6 +2365,7 @@ impl MeshRenderer {
             instance_buffer: None,
             instance_buffer_capacity: 0,
             last_stats: MeshRenderStats::default(),
+            gpu_profiling_enabled: false,
             clear_color: Color::rgb(0.05, 0.09, 0.13),
             depth: RenderDepthDesc::default(),
             lighting: RenderLighting::default(),
@@ -2123,6 +2374,7 @@ impl MeshRenderer {
             shadow_camera: Camera::default(),
             shadow_camera_aspect_ratio: 1.0,
             sample_count,
+            surface_format,
         })
     }
 
@@ -2182,11 +2434,23 @@ impl MeshRenderer {
     }
 
     pub fn last_stats(&self) -> MeshRenderStats {
-        self.last_stats
+        self.last_stats.clone()
+    }
+
+    pub fn set_gpu_profiling_enabled(&mut self, enabled: bool) {
+        self.gpu_profiling_enabled = enabled;
+    }
+
+    pub fn set_post_process_options(&mut self, options: WgpuPostProcessOptions) {
+        self.post_process_options = options;
     }
 
     pub fn sample_count(&self) -> u32 {
         self.sample_count
+    }
+
+    pub fn material_layout_info(&self) -> WgpuMaterialLayoutInfo {
+        wgpu_material_layout_info()
     }
 
     pub fn create_instance(
@@ -2431,6 +2695,26 @@ impl MeshRenderer {
         environment_texture: Option<&WgpuEnvironmentTexture>,
         environment_probes: &[EnvironmentProbeBlend<'_>],
     ) -> GraphicsResult<()> {
+        self.render_batches_with_environment_probes_and_post_pass(
+            surface,
+            batches,
+            environment_texture,
+            environment_probes,
+            |_| {},
+        )
+    }
+
+    pub fn render_batches_with_environment_probes_and_post_pass<F>(
+        &mut self,
+        surface: &mut WgpuSurface,
+        batches: &[MeshBatchDraw<'_>],
+        environment_texture: Option<&WgpuEnvironmentTexture>,
+        environment_probes: &[EnvironmentProbeBlend<'_>],
+        mut post_pass: F,
+    ) -> GraphicsResult<()>
+    where
+        F: FnMut(&mut wgpu::RenderPass<'_>),
+    {
         if self.sample_count != surface.sample_count() {
             return Err(GraphicsError::InvalidResource(format!(
                 "mesh renderer sample count {} does not match surface sample count {}; create the renderer with MeshRenderer::new_with_sample_count",
@@ -2441,9 +2725,9 @@ impl MeshRenderer {
 
         let mut instances = Vec::new();
         let mut draws = Vec::with_capacity(batches.len());
-        let mut draw_call_count = 0;
-        let mut opaque_draw_call_count = 0;
-        let mut transparent_draw_call_count = 0;
+        let mut draw_call_count = 0_usize;
+        let mut opaque_draw_call_count = 0_usize;
+        let mut transparent_draw_call_count = 0_usize;
         for batch in batches {
             let instance_start = u32::try_from(instances.len()).map_err(|_| {
                 GraphicsError::InvalidResource(
@@ -2539,7 +2823,27 @@ impl MeshRenderer {
             .max()
             .unwrap_or(self.shadow_resources.point_size);
 
+        let mut frame_timer = None;
+        let mut skybox_draw_call_count = 0_usize;
+        let mut gbuffer_draw_call_count = 0_usize;
+        let mut deferred_lighting_draw_call_count = 0_usize;
+        let mut depth_prepass_draw_call_count = 0_usize;
+        let mut directional_shadow_draw_call_count = 0_usize;
+        let mut spot_shadow_draw_call_count = 0_usize;
+        let mut point_shadow_draw_call_count = 0_usize;
+        let mut post_process_draw_call_count = 0_usize;
+        let mut native_pass_label_stats = MeshRenderStats::default();
+        let surface_size = surface.size();
         let result = surface.render_frame("Neo Mesh Encoder", |frame| {
+            let timer = if self.gpu_profiling_enabled {
+                WgpuFrameTimestampReadback::new(frame.device)
+            } else {
+                None
+            };
+            if let Some(timer) = &timer {
+                timer.write_start(frame.encoder);
+            }
+
             if shadow_enabled || spot_shadow_enabled || point_shadow_enabled {
                 self.ensure_shadow_resources(
                     frame.device,
@@ -2662,6 +2966,8 @@ impl MeshRenderer {
                         else {
                             continue;
                         };
+                        native_pass_label_stats
+                            .record_native_pass_label("Neo Directional Shadow Pass");
                         let mut shadow_pass =
                             frame
                                 .encoder
@@ -2711,6 +3017,8 @@ impl MeshRenderer {
                             } else {
                                 shadow_pass.draw(0..batch.mesh.vertex_count(), instance_range);
                             }
+                            directional_shadow_draw_call_count =
+                                directional_shadow_draw_call_count.saturating_add(1);
                         }
                     }
                 }
@@ -2729,6 +3037,7 @@ impl MeshRenderer {
                         else {
                             continue;
                         };
+                        native_pass_label_stats.record_native_pass_label("Neo Spot Shadow Pass");
                         let mut shadow_pass =
                             frame
                                 .encoder
@@ -2778,6 +3087,8 @@ impl MeshRenderer {
                             } else {
                                 shadow_pass.draw(0..batch.mesh.vertex_count(), instance_range);
                             }
+                            spot_shadow_draw_call_count =
+                                spot_shadow_draw_call_count.saturating_add(1);
                         }
                     }
                 }
@@ -2798,6 +3109,8 @@ impl MeshRenderer {
                             else {
                                 continue;
                             };
+                            native_pass_label_stats
+                                .record_native_pass_label("Neo Point Shadow Pass");
                             let mut shadow_pass =
                                 frame
                                     .encoder
@@ -2849,39 +3162,426 @@ impl MeshRenderer {
                                 } else {
                                     shadow_pass.draw(0..batch.mesh.vertex_count(), instance_range);
                                 }
+                                point_shadow_draw_call_count =
+                                    point_shadow_draw_call_count.saturating_add(1);
                             }
                         }
                     }
                 }
             }
 
-            let depth_stencil_attachment = depth
-                .enabled
-                .then(|| {
-                    frame
-                        .depth_view
-                        .map(|view| wgpu::RenderPassDepthStencilAttachment {
-                            view,
+            let active_render_bind_group = environment_render_bind_group
+                .as_ref()
+                .unwrap_or(&self.render_bind_group);
+            let depth_view = depth.enabled.then_some(frame.depth_view).flatten();
+            let mut deferred_lighting_post_process_view = None;
+            let mut deferred_lighting_post_process_texture = None;
+            let mut depth_prepass_draws = 0_u32;
+            if let (Some(depth_view), Some(instance_buffer)) = (depth_view, &self.instance_buffer) {
+                native_pass_label_stats.record_native_pass_label("Neo Depth Prepass");
+                let mut depth_pass = frame
+                    .encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Neo Depth Prepass"),
+                        color_attachments: &[],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: depth_view,
                             depth_ops: Some(wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(depth.clear_depth.clamp(0.0, 1.0)),
                                 store: wgpu::StoreOp::Store,
                             }),
                             stencil_ops: None,
-                        })
-                })
-                .flatten();
+                        }),
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+                depth_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                depth_pass.set_bind_group(1, active_render_bind_group, &[]);
+                depth_pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
 
-            let has_depth_attachment = depth_stencil_attachment.is_some();
+                for (batch, instance_start, instance_count) in draws.iter().copied() {
+                    if instance_count == 0
+                        || !batch.material.depth_write()
+                        || !matches!(batch.material.blend_mode(), BlendMode::Opaque)
+                    {
+                        continue;
+                    }
+
+                    if batch.material.double_sided() {
+                        depth_pass.set_pipeline(&self.double_sided_depth_prepass_pipeline);
+                    } else {
+                        depth_pass.set_pipeline(&self.depth_prepass_pipeline);
+                    }
+                    depth_pass.set_bind_group(0, &batch.material.material_bind_group, &[]);
+                    depth_pass.set_vertex_buffer(0, batch.mesh.vertex_buffer().slice(..));
+                    let instance_range = instance_start..instance_start + instance_count;
+
+                    if let Some(index_buffer) = batch.mesh.index_buffer() {
+                        depth_pass
+                            .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        depth_pass.draw_indexed(0..batch.mesh.index_count(), 0, instance_range);
+                    } else {
+                        depth_pass.draw(0..batch.mesh.vertex_count(), instance_range);
+                    }
+                    depth_prepass_draws = depth_prepass_draws.saturating_add(1);
+                }
+            }
+            depth_prepass_draw_call_count = depth_prepass_draws as usize;
+
+            if let Some(instance_buffer) = &self.instance_buffer {
+                native_pass_label_stats.record_native_pass_label("Neo GBuffer Pass");
+                let gbuffer_size = wgpu::Extent3d {
+                    width: surface_size.width.max(1),
+                    height: surface_size.height.max(1),
+                    depth_or_array_layers: 1,
+                };
+                let create_gbuffer_texture =
+                    |label: &'static str,
+                     format: wgpu::TextureFormat,
+                     sample_count: u32,
+                     usage: wgpu::TextureUsages| {
+                        frame.device.create_texture(&wgpu::TextureDescriptor {
+                            label: Some(label),
+                            size: gbuffer_size,
+                            mip_level_count: 1,
+                            sample_count,
+                            dimension: wgpu::TextureDimension::D2,
+                            format,
+                            usage,
+                            view_formats: &[],
+                        })
+                    };
+                let gbuffer_texture_usage =
+                    wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+                let gbuffer_albedo_texture = create_gbuffer_texture(
+                    "Neo GBuffer Albedo Texture",
+                    GBUFFER_ALBEDO_FORMAT,
+                    1,
+                    gbuffer_texture_usage,
+                );
+                let gbuffer_normal_texture = create_gbuffer_texture(
+                    "Neo GBuffer Normal Texture",
+                    GBUFFER_NORMAL_FORMAT,
+                    1,
+                    gbuffer_texture_usage,
+                );
+                let gbuffer_material_texture = create_gbuffer_texture(
+                    "Neo GBuffer Material Texture",
+                    GBUFFER_MATERIAL_FORMAT,
+                    1,
+                    gbuffer_texture_usage,
+                );
+                let gbuffer_albedo_msaa_texture = (frame.sample_count > 1).then(|| {
+                    create_gbuffer_texture(
+                        "Neo GBuffer Albedo MSAA Texture",
+                        GBUFFER_ALBEDO_FORMAT,
+                        frame.sample_count,
+                        wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    )
+                });
+                let gbuffer_normal_msaa_texture = (frame.sample_count > 1).then(|| {
+                    create_gbuffer_texture(
+                        "Neo GBuffer Normal MSAA Texture",
+                        GBUFFER_NORMAL_FORMAT,
+                        frame.sample_count,
+                        wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    )
+                });
+                let gbuffer_material_msaa_texture = (frame.sample_count > 1).then(|| {
+                    create_gbuffer_texture(
+                        "Neo GBuffer Material MSAA Texture",
+                        GBUFFER_MATERIAL_FORMAT,
+                        frame.sample_count,
+                        wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    )
+                });
+                let gbuffer_albedo_view =
+                    gbuffer_albedo_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let gbuffer_normal_view =
+                    gbuffer_normal_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let gbuffer_material_view =
+                    gbuffer_material_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let gbuffer_albedo_msaa_view = gbuffer_albedo_msaa_texture
+                    .as_ref()
+                    .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                let gbuffer_normal_msaa_view = gbuffer_normal_msaa_texture
+                    .as_ref()
+                    .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                let gbuffer_material_msaa_view = gbuffer_material_msaa_texture
+                    .as_ref()
+                    .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
+                let gbuffer_albedo_attachment_view = gbuffer_albedo_msaa_view
+                    .as_ref()
+                    .unwrap_or(&gbuffer_albedo_view);
+                let gbuffer_normal_attachment_view = gbuffer_normal_msaa_view
+                    .as_ref()
+                    .unwrap_or(&gbuffer_normal_view);
+                let gbuffer_material_attachment_view = gbuffer_material_msaa_view
+                    .as_ref()
+                    .unwrap_or(&gbuffer_material_view);
+                let gbuffer_color_attachments: [_; GBUFFER_COLOR_ATTACHMENT_COUNT] = [
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: gbuffer_albedo_attachment_view,
+                        resolve_target: gbuffer_albedo_msaa_view
+                            .as_ref()
+                            .map(|_| &gbuffer_albedo_view),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: store_op_for_resolve(gbuffer_albedo_msaa_view.as_ref()),
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: gbuffer_normal_attachment_view,
+                        resolve_target: gbuffer_normal_msaa_view
+                            .as_ref()
+                            .map(|_| &gbuffer_normal_view),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.5,
+                                g: 0.5,
+                                b: 1.0,
+                                a: 1.0,
+                            }),
+                            store: store_op_for_resolve(gbuffer_normal_msaa_view.as_ref()),
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: gbuffer_material_attachment_view,
+                        resolve_target: gbuffer_material_msaa_view
+                            .as_ref()
+                            .map(|_| &gbuffer_material_view),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: store_op_for_resolve(gbuffer_material_msaa_view.as_ref()),
+                        },
+                    }),
+                ];
+                let gbuffer_depth_attachment =
+                    depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    });
+                let has_gbuffer_depth_attachment = gbuffer_depth_attachment.is_some();
+                let mut gbuffer_pass =
+                    frame
+                        .encoder
+                        .begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("Neo GBuffer Pass"),
+                            color_attachments: &gbuffer_color_attachments,
+                            depth_stencil_attachment: gbuffer_depth_attachment,
+                            occlusion_query_set: None,
+                            timestamp_writes: None,
+                        });
+                gbuffer_pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                gbuffer_pass.set_bind_group(1, active_render_bind_group, &[]);
+                gbuffer_pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
+
+                for (batch, instance_start, instance_count) in draws.iter().copied() {
+                    if instance_count == 0
+                        || !matches!(batch.material.blend_mode(), BlendMode::Opaque)
+                    {
+                        continue;
+                    }
+
+                    gbuffer_pass.set_pipeline(self.gbuffer_pipeline_for(
+                        has_gbuffer_depth_attachment,
+                        batch.material.double_sided(),
+                    ));
+                    gbuffer_pass.set_bind_group(0, &batch.material.material_bind_group, &[]);
+                    gbuffer_pass.set_vertex_buffer(0, batch.mesh.vertex_buffer().slice(..));
+                    let instance_range = instance_start..instance_start + instance_count;
+
+                    if let Some(index_buffer) = batch.mesh.index_buffer() {
+                        gbuffer_pass
+                            .set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        gbuffer_pass.draw_indexed(0..batch.mesh.index_count(), 0, instance_range);
+                    } else {
+                        gbuffer_pass.draw(0..batch.mesh.vertex_count(), instance_range);
+                    }
+                    gbuffer_draw_call_count = gbuffer_draw_call_count.saturating_add(1);
+                }
+                drop(gbuffer_pass);
+
+                native_pass_label_stats.record_native_pass_label("Neo Deferred Lighting Pass");
+                let deferred_lighting_bind_group =
+                    frame.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Neo Deferred Lighting Bind Group"),
+                        layout: &self.deferred_lighting_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(&gbuffer_albedo_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&gbuffer_normal_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(
+                                    &gbuffer_material_view,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &self.deferred_lighting_sampler,
+                                ),
+                            },
+                        ],
+                    });
+                let deferred_lighting_texture =
+                    frame.device.create_texture(&wgpu::TextureDescriptor {
+                        label: Some("Neo Deferred Lighting Texture"),
+                        size: gbuffer_size,
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.surface_format,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    });
+                let deferred_lighting_view =
+                    deferred_lighting_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let mut deferred_lighting_pass =
+                    frame
+                        .encoder
+                        .begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("Neo Deferred Lighting Pass"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &deferred_lighting_view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            occlusion_query_set: None,
+                            timestamp_writes: None,
+                        });
+                deferred_lighting_pass.set_pipeline(&self.deferred_lighting_pipeline);
+                deferred_lighting_pass.set_bind_group(0, &deferred_lighting_bind_group, &[]);
+                deferred_lighting_pass.draw(0..3, 0..1);
+                drop(deferred_lighting_pass);
+                deferred_lighting_post_process_view = Some(deferred_lighting_view);
+                deferred_lighting_post_process_texture = Some(deferred_lighting_texture);
+                deferred_lighting_draw_call_count =
+                    deferred_lighting_draw_call_count.saturating_add(1);
+            }
+
+            let mut mesh_pass_draw_order = (0..draws.len()).collect::<Vec<_>>();
+            mesh_pass_draw_order.sort_by(|left, right| {
+                compare_mesh_pass_draw_order(draws[*left].0, draws[*right].0, camera_position)
+            });
+
+            let has_depth_attachment = depth_view.is_some();
+            {
+                native_pass_label_stats.record_native_pass_label("Neo Forward Opaque Pass");
+                let depth_stencil_attachment =
+                    depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: if depth_prepass_draws > 0 {
+                                wgpu::LoadOp::Load
+                            } else {
+                                wgpu::LoadOp::Clear(depth.clear_depth.clamp(0.0, 1.0))
+                            },
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    });
+                let mut pass = frame
+                    .encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Neo Forward Opaque Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: frame.view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu_color(clear_color)),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment,
+                        occlusion_query_set: None,
+                        timestamp_writes: None,
+                    });
+
+                if let Some(instance_buffer) = &self.instance_buffer {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                }
+                pass.set_bind_group(1, active_render_bind_group, &[]);
+                pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
+
+                if skybox_background_intensity > 0.0 {
+                    if let Some(skybox_render_bind_group) = &skybox_render_bind_group {
+                        pass.set_pipeline(if has_depth_attachment {
+                            &self.skybox_depth_pipeline
+                        } else {
+                            &self.skybox_color_pipeline
+                        });
+                        pass.set_bind_group(0, skybox_render_bind_group, &[]);
+                        pass.set_bind_group(1, &self.skybox_bind_group, &[]);
+                        pass.draw(0..3, 0..1);
+                        skybox_draw_call_count = skybox_draw_call_count.saturating_add(1);
+                        pass.set_bind_group(1, active_render_bind_group, &[]);
+                        pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
+                    }
+                }
+
+                for index in mesh_pass_draw_order.iter().copied() {
+                    let (batch, instance_start, instance_count) = draws[index];
+                    if instance_count == 0
+                        || !matches!(batch.material.blend_mode(), BlendMode::Opaque)
+                    {
+                        continue;
+                    }
+
+                    pass.set_pipeline(self.pipeline_for(
+                        batch.material.blend_mode(),
+                        batch.material.depth_write(),
+                        has_depth_attachment,
+                        batch.material.double_sided(),
+                    ));
+                    pass.set_bind_group(0, &batch.material.material_bind_group, &[]);
+                    pass.set_vertex_buffer(0, batch.mesh.vertex_buffer().slice(..));
+                    let instance_range = instance_start..instance_start + instance_count;
+
+                    if let Some(index_buffer) = batch.mesh.index_buffer() {
+                        pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..batch.mesh.index_count(), 0, instance_range);
+                    } else {
+                        pass.draw(0..batch.mesh.vertex_count(), instance_range);
+                    }
+                }
+            }
+
+            let depth_stencil_attachment =
+                depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                });
+            native_pass_label_stats.record_native_pass_label("Neo Transparent Pass");
             let mut pass = frame
                 .encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Neo Mesh Pass"),
+                    label: Some("Neo Transparent Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: frame.view,
-                        resolve_target: frame.resolve_target,
+                        resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu_color(clear_color)),
-                            store: store_op_for_resolve(frame.resolve_target),
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
                     depth_stencil_attachment,
@@ -2892,29 +3592,14 @@ impl MeshRenderer {
             if let Some(instance_buffer) = &self.instance_buffer {
                 pass.set_vertex_buffer(1, instance_buffer.slice(..));
             }
-            let active_render_bind_group = environment_render_bind_group
-                .as_ref()
-                .unwrap_or(&self.render_bind_group);
             pass.set_bind_group(1, active_render_bind_group, &[]);
             pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
 
-            if skybox_background_intensity > 0.0 {
-                if let Some(skybox_render_bind_group) = &skybox_render_bind_group {
-                    pass.set_pipeline(if has_depth_attachment {
-                        &self.skybox_depth_pipeline
-                    } else {
-                        &self.skybox_color_pipeline
-                    });
-                    pass.set_bind_group(0, skybox_render_bind_group, &[]);
-                    pass.set_bind_group(1, &self.skybox_bind_group, &[]);
-                    pass.draw(0..3, 0..1);
-                    pass.set_bind_group(1, active_render_bind_group, &[]);
-                    pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
-                }
-            }
-
-            for (batch, instance_start, instance_count) in draws.iter().copied() {
-                if instance_count == 0 {
+            for index in mesh_pass_draw_order {
+                let (batch, instance_start, instance_count) = draws[index];
+                if instance_count == 0
+                    || !matches!(batch.material.blend_mode(), BlendMode::AlphaBlend)
+                {
                     continue;
                 }
 
@@ -2935,16 +3620,140 @@ impl MeshRenderer {
                     pass.draw(0..batch.mesh.vertex_count(), instance_range);
                 }
             }
+            drop(pass);
+
+            let sampled_post_process_bind_group =
+                deferred_lighting_post_process_view.as_ref().map(|view| {
+                    frame.queue.write_buffer(
+                        &self.sampled_post_process_uniform_buffer,
+                        0,
+                        bytemuck::bytes_of(&SampledPostProcessUniform::new(
+                            surface_size.width,
+                            surface_size.height,
+                            self.post_process_options,
+                        )),
+                    );
+                    frame.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Neo Sampled Post Process Bind Group"),
+                        layout: &self.sampled_post_process_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::TextureView(view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &self.sampled_post_process_sampler,
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: self
+                                    .sampled_post_process_uniform_buffer
+                                    .as_entire_binding(),
+                            },
+                        ],
+                    })
+                });
+            let post_process_pass_label = if sampled_post_process_bind_group.is_some() {
+                sampled_post_process_pass_label(self.post_process_options)
+            } else {
+                "Neo Post Process Pass".to_owned()
+            };
+            native_pass_label_stats.record_native_pass_label(&post_process_pass_label);
+            let post_process_depth_stencil_attachment =
+                frame
+                    .depth_view
+                    .map(|view| wgpu::RenderPassDepthStencilAttachment {
+                        view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    });
+            let mut pass = frame
+                .encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(post_process_pass_label.as_str()),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: frame.view,
+                        resolve_target: frame.resolve_target,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: store_op_for_resolve(frame.resolve_target),
+                        },
+                    })],
+                    depth_stencil_attachment: post_process_depth_stencil_attachment,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
+
+            if let Some(bind_group) = sampled_post_process_bind_group.as_ref() {
+                pass.set_pipeline(&self.sampled_post_process_pipeline);
+                pass.set_bind_group(0, bind_group, &[]);
+            } else {
+                if let Some(instance_buffer) = &self.instance_buffer {
+                    pass.set_vertex_buffer(1, instance_buffer.slice(..));
+                }
+                pass.set_bind_group(1, active_render_bind_group, &[]);
+                pass.set_bind_group(2, &self.shadow_resources.bind_group, &[]);
+                pass.set_pipeline(&self.post_process_color_pipeline);
+            }
+            pass.draw(0..3, 0..1);
+            post_process_draw_call_count = post_process_draw_call_count.saturating_add(1);
+            post_pass(&mut pass);
+            drop(pass);
+            drop(deferred_lighting_post_process_texture);
+
+            if let Some(timer) = &timer {
+                timer.write_end_and_resolve(frame.encoder);
+            }
+            frame_timer = timer;
         });
 
+        let gpu_time_ns = if result.is_ok() {
+            match frame_timer.as_ref() {
+                Some(timer) => timer.read_gpu_time_ns(surface.device(), surface.queue())?,
+                None => None,
+            }
+        } else {
+            None
+        };
+
         if result.is_ok() {
+            let shadow_draw_call_count = directional_shadow_draw_call_count
+                .saturating_add(spot_shadow_draw_call_count)
+                .saturating_add(point_shadow_draw_call_count);
             self.last_stats = MeshRenderStats {
                 batch_count,
-                draw_call_count,
+                draw_call_count: draw_call_count
+                    .saturating_add(skybox_draw_call_count)
+                    .saturating_add(gbuffer_draw_call_count)
+                    .saturating_add(deferred_lighting_draw_call_count)
+                    .saturating_add(depth_prepass_draw_call_count)
+                    .saturating_add(shadow_draw_call_count)
+                    .saturating_add(post_process_draw_call_count),
+                native_pass_label_count: native_pass_label_stats.native_pass_label_count,
+                native_pass_labels_dropped: native_pass_label_stats.native_pass_labels_dropped,
+                native_pass_labels: native_pass_label_stats.native_pass_labels,
+                mesh_pass_draw_call_count: draw_call_count,
+                skybox_draw_call_count,
+                gbuffer_draw_call_count,
+                deferred_lighting_draw_call_count,
+                depth_prepass_draw_call_count,
+                shadow_draw_call_count,
+                directional_shadow_draw_call_count,
+                spot_shadow_draw_call_count,
+                point_shadow_draw_call_count,
                 opaque_draw_call_count,
                 transparent_draw_call_count,
+                post_process_draw_call_count,
                 instance_count,
                 instance_buffer_capacity: self.instance_buffer_capacity,
+                timestamp_writes: if gpu_time_ns.is_some() { 2 } else { 0 },
+                gpu_time_ns,
             };
         }
 
@@ -2994,6 +3803,17 @@ impl MeshRenderer {
         );
     }
 
+    pub const STATIC_RENDER_PIPELINE_COUNT: usize = 33;
+    pub const STATIC_RENDER_PIPELINE_LAYOUT_COUNT: usize = 3;
+
+    pub fn render_pipeline_count(&self) -> usize {
+        Self::STATIC_RENDER_PIPELINE_COUNT
+    }
+
+    pub fn render_pipeline_layout_count(&self) -> usize {
+        Self::STATIC_RENDER_PIPELINE_LAYOUT_COUNT
+    }
+
     fn pipeline_for(
         &self,
         blend_mode: BlendMode,
@@ -3023,6 +3843,19 @@ impl MeshRenderer {
                 (BlendMode::AlphaBlend, true, false) => &self.alpha_blend_depth_pipeline,
                 (BlendMode::AlphaBlend, true, true) => &self.alpha_blend_depth_write_pipeline,
             }
+        }
+    }
+
+    fn gbuffer_pipeline_for(
+        &self,
+        depth_enabled: bool,
+        double_sided: bool,
+    ) -> &wgpu::RenderPipeline {
+        match (depth_enabled, double_sided) {
+            (true, true) => &self.double_sided_gbuffer_depth_pipeline,
+            (true, false) => &self.gbuffer_depth_pipeline,
+            (false, true) => &self.double_sided_gbuffer_color_pipeline,
+            (false, false) => &self.gbuffer_color_pipeline,
         }
     }
 
@@ -3056,6 +3889,57 @@ impl MeshRenderer {
             }
         }
     }
+}
+
+fn mesh_pass_phase_order(blend_mode: BlendMode) -> u8 {
+    match blend_mode {
+        BlendMode::Opaque => 0,
+        BlendMode::AlphaBlend => 1,
+    }
+}
+
+fn compare_mesh_pass_draw_order(
+    left: &MeshBatchDraw<'_>,
+    right: &MeshBatchDraw<'_>,
+    camera_position: [f32; 3],
+) -> Ordering {
+    let left_phase = mesh_pass_phase_order(left.material.blend_mode());
+    let right_phase = mesh_pass_phase_order(right.material.blend_mode());
+    left_phase.cmp(&right_phase).then_with(|| {
+        if matches!(left.material.blend_mode(), BlendMode::AlphaBlend)
+            && matches!(right.material.blend_mode(), BlendMode::AlphaBlend)
+        {
+            mesh_batch_distance_sq(right, camera_position)
+                .partial_cmp(&mesh_batch_distance_sq(left, camera_position))
+                .unwrap_or(Ordering::Equal)
+        } else {
+            Ordering::Equal
+        }
+    })
+}
+
+fn mesh_batch_distance_sq(batch: &MeshBatchDraw<'_>, camera_position: [f32; 3]) -> f32 {
+    mesh_instances_distance_sq(&batch.instances, camera_position)
+}
+
+fn mesh_instances_distance_sq(instances: &[&WgpuMeshInstance], camera_position: [f32; 3]) -> f32 {
+    instances
+        .iter()
+        .map(|instance| {
+            let translation = instance.model.to_cols_array()[3];
+            distance_sq(
+                [translation[0], translation[1], translation[2]],
+                camera_position,
+            )
+        })
+        .fold(0.0_f32, f32::max)
+}
+
+fn distance_sq(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    dx * dx + dy * dy + dz * dz
 }
 
 fn validate_sample_count(sample_count: u32) -> GraphicsResult<u32> {
@@ -3192,6 +4076,209 @@ fn create_mesh_pipeline(
     })
 }
 
+fn create_mesh_gbuffer_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+    depth_format: Option<wgpu::TextureFormat>,
+    double_sided: bool,
+) -> wgpu::RenderPipeline {
+    let vertex_buffers = [WgpuMesh::vertex_layout(), InstanceRaw::layout()];
+    let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: false,
+        depth_compare: wgpu::CompareFunction::LessEqual,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    });
+    let targets = [
+        Some(wgpu::ColorTargetState {
+            format: GBUFFER_ALBEDO_FORMAT,
+            blend: Some(wgpu::BlendState::REPLACE),
+            write_mask: wgpu::ColorWrites::ALL,
+        }),
+        Some(wgpu::ColorTargetState {
+            format: GBUFFER_NORMAL_FORMAT,
+            blend: Some(wgpu::BlendState::REPLACE),
+            write_mask: wgpu::ColorWrites::ALL,
+        }),
+        Some(wgpu::ColorTargetState {
+            format: GBUFFER_MATERIAL_FORMAT,
+            blend: Some(wgpu::BlendState::REPLACE),
+            write_mask: wgpu::ColorWrites::ALL,
+        }),
+    ];
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(match (depth_format.is_some(), double_sided) {
+            (true, true) => "Neo Double-Sided GBuffer Depth Pipeline",
+            (true, false) => "Neo GBuffer Depth Pipeline",
+            (false, true) => "Neo Double-Sided GBuffer Color Pipeline",
+            (false, false) => "Neo GBuffer Color Pipeline",
+        }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &vertex_buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            cull_mode: if double_sided {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: "fs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &targets,
+        }),
+        multiview: None,
+    })
+}
+
+fn create_deferred_lighting_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    surface_format: wgpu::TextureFormat,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Neo Deferred Lighting Pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: "fs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+    })
+}
+
+fn create_sampled_post_process_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    surface_format: wgpu::TextureFormat,
+    sample_count: u32,
+    depth_format: Option<wgpu::TextureFormat>,
+) -> wgpu::RenderPipeline {
+    let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: false,
+        depth_compare: wgpu::CompareFunction::Always,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("Neo Sampled Post Process Pipeline"),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: "fs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+    })
+}
+
+fn create_mesh_depth_prepass_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    sample_count: u32,
+    depth_format: wgpu::TextureFormat,
+    double_sided: bool,
+) -> wgpu::RenderPipeline {
+    let vertex_buffers = [WgpuMesh::vertex_layout(), InstanceRaw::layout()];
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if double_sided {
+            "Neo Double-Sided Mesh Depth Prepass Pipeline"
+        } else {
+            "Neo Mesh Depth Prepass Pipeline"
+        }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &vertex_buffers,
+        },
+        primitive: wgpu::PrimitiveState {
+            cull_mode: if double_sided {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: depth_format,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::LessEqual,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        fragment: None,
+        multiview: None,
+    })
+}
+
 fn create_skybox_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
@@ -3238,6 +4325,59 @@ fn create_skybox_pipeline(
             targets: &[Some(wgpu::ColorTargetState {
                 format: surface_format,
                 blend: Some(wgpu::BlendState::REPLACE),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+    })
+}
+
+fn create_post_process_pipeline(
+    device: &wgpu::Device,
+    shader: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    surface_format: wgpu::TextureFormat,
+    sample_count: u32,
+    depth_format: Option<wgpu::TextureFormat>,
+) -> wgpu::RenderPipeline {
+    let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: false,
+        depth_compare: wgpu::CompareFunction::Always,
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    });
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(if depth_format.is_some() {
+            "Neo Post Process Depth Pipeline"
+        } else {
+            "Neo Post Process Color Pipeline"
+        }),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: "vs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: None,
+            ..wgpu::PrimitiveState::default()
+        },
+        depth_stencil,
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..wgpu::MultisampleState::default()
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: "fs_main",
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -3677,6 +4817,115 @@ fn skybox_uniform(camera: Camera, aspect_ratio: f32, intensity: f32) -> SkyboxUn
     }
 }
 
+struct WgpuFrameTimestampReadback {
+    query_set: wgpu::QuerySet,
+    resolve_buffer: wgpu::Buffer,
+    readback_buffer: wgpu::Buffer,
+}
+
+impl WgpuFrameTimestampReadback {
+    const COUNT: u32 = 2;
+    const BYTE_SIZE: u64 = std::mem::size_of::<u64>() as u64 * Self::COUNT as u64;
+
+    fn new(device: &wgpu::Device) -> Option<Self> {
+        if !device
+            .features()
+            .contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS)
+        {
+            return None;
+        }
+
+        let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("Neo Mesh Frame Timestamp Query"),
+            ty: wgpu::QueryType::Timestamp,
+            count: Self::COUNT,
+        });
+        let resolve_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Neo Mesh Frame Timestamp Resolve"),
+            size: Self::BYTE_SIZE,
+            usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Neo Mesh Frame Timestamp Readback"),
+            size: Self::BYTE_SIZE,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        Some(Self {
+            query_set,
+            resolve_buffer,
+            readback_buffer,
+        })
+    }
+
+    fn write_start(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.write_timestamp(&self.query_set, 0);
+    }
+
+    fn write_end_and_resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.write_timestamp(&self.query_set, 1);
+        encoder.resolve_query_set(&self.query_set, 0..Self::COUNT, &self.resolve_buffer, 0);
+        encoder.copy_buffer_to_buffer(
+            &self.resolve_buffer,
+            0,
+            &self.readback_buffer,
+            0,
+            Self::BYTE_SIZE,
+        );
+    }
+
+    fn read_gpu_time_ns(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> GraphicsResult<Option<u64>> {
+        let slice = self.readback_buffer.slice(..);
+        let (sender, receiver) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        device.poll(wgpu::Maintain::Wait);
+        match receiver.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Err(GraphicsError::Backend(format!(
+                    "mesh renderer timestamp readback mapping failed: {error}"
+                )));
+            }
+            Err(_) => {
+                return Err(GraphicsError::Backend(
+                    "mesh renderer timestamp readback callback was canceled".to_owned(),
+                ));
+            }
+        }
+
+        let mapped = slice.get_mapped_range();
+        let start = u64::from_le_bytes(
+            mapped
+                .get(..std::mem::size_of::<u64>())
+                .expect("timestamp readback buffer contains start timestamp")
+                .try_into()
+                .expect("start timestamp readback slice is one u64"),
+        );
+        let end = u64::from_le_bytes(
+            mapped
+                .get(std::mem::size_of::<u64>()..std::mem::size_of::<u64>() * 2)
+                .expect("timestamp readback buffer contains end timestamp")
+                .try_into()
+                .expect("end timestamp readback slice is one u64"),
+        );
+        drop(mapped);
+        self.readback_buffer.unmap();
+
+        let ticks = end.saturating_sub(start);
+        Ok(Some(
+            (ticks as f64 * queue.get_timestamp_period() as f64) as u64,
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3758,11 +5007,228 @@ mod tests {
     }
 
     #[test]
+    fn mesh_render_stats_reports_gpu_time_ms() {
+        let stats = MeshRenderStats {
+            mesh_pass_draw_call_count: 3,
+            skybox_draw_call_count: 1,
+            gbuffer_draw_call_count: 2,
+            deferred_lighting_draw_call_count: 1,
+            depth_prepass_draw_call_count: 2,
+            shadow_draw_call_count: 3,
+            directional_shadow_draw_call_count: 1,
+            spot_shadow_draw_call_count: 1,
+            point_shadow_draw_call_count: 1,
+            draw_call_count: 12,
+            gpu_time_ns: Some(2_500_000),
+            timestamp_writes: 2,
+            ..MeshRenderStats::default()
+        };
+
+        assert_eq!(stats.gpu_time_ms(), Some(2.5));
+        assert_eq!(
+            stats.draw_call_count,
+            stats.mesh_pass_draw_call_count
+                + stats.skybox_draw_call_count
+                + stats.gbuffer_draw_call_count
+                + stats.deferred_lighting_draw_call_count
+                + stats.depth_prepass_draw_call_count
+                + stats.shadow_draw_call_count
+        );
+        assert_eq!(
+            stats.shadow_draw_call_count,
+            stats.directional_shadow_draw_call_count
+                + stats.spot_shadow_draw_call_count
+                + stats.point_shadow_draw_call_count
+        );
+    }
+
+    #[test]
+    fn mesh_render_stats_preserve_actual_native_pass_labels() {
+        let mut stats = MeshRenderStats::default();
+        stats.record_native_pass_label("Neo Depth Prepass");
+        stats.record_native_pass_label("Neo GBuffer Pass");
+        stats.record_native_pass_label("Neo Deferred Lighting Pass");
+        stats.record_native_pass_label("Neo Forward Opaque Pass");
+        stats.record_native_pass_label("Neo Transparent Pass");
+        stats.record_native_pass_label("Neo Tonemap Post Process Pass");
+
+        assert_eq!(stats.native_pass_label_count, 6);
+        assert_eq!(
+            stats.native_pass_label_strings(),
+            vec![
+                "Neo Depth Prepass".to_owned(),
+                "Neo GBuffer Pass".to_owned(),
+                "Neo Deferred Lighting Pass".to_owned(),
+                "Neo Forward Opaque Pass".to_owned(),
+                "Neo Transparent Pass".to_owned(),
+                "Neo Tonemap Post Process Pass".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn mesh_render_stats_native_pass_labels_are_bounded() {
+        let mut stats = MeshRenderStats::default();
+        for _ in 0..MAX_NATIVE_PASS_LABELS + 4 {
+            stats.record_native_pass_label("Neo Transparent Pass");
+        }
+
+        assert_eq!(stats.native_pass_label_count, MAX_NATIVE_PASS_LABELS);
+        assert_eq!(
+            stats.native_pass_label_strings().len(),
+            MAX_NATIVE_PASS_LABELS
+        );
+        assert_eq!(stats.native_pass_labels_dropped, 4);
+    }
+
+    #[test]
+    fn mesh_pass_phase_order_draws_opaque_before_transparent() {
+        let mut phases = vec![
+            BlendMode::AlphaBlend,
+            BlendMode::Opaque,
+            BlendMode::AlphaBlend,
+        ];
+        phases.sort_by_key(|phase| mesh_pass_phase_order(*phase));
+
+        assert_eq!(
+            phases,
+            vec![
+                BlendMode::Opaque,
+                BlendMode::AlphaBlend,
+                BlendMode::AlphaBlend
+            ]
+        );
+    }
+
+    #[test]
+    fn mesh_batch_distance_uses_farthest_instance_for_transparent_sorting() {
+        let near = WgpuMeshInstance {
+            model_view_projection: Mat4::IDENTITY,
+            normal_matrix: Mat4::IDENTITY,
+            model: Mat4::translation([0.0, 0.0, 2.0]),
+        };
+        let far = WgpuMeshInstance {
+            model_view_projection: Mat4::IDENTITY,
+            normal_matrix: Mat4::IDENTITY,
+            model: Mat4::translation([0.0, 0.0, 8.0]),
+        };
+        let camera_position = [0.0, 0.0, 0.0];
+        let instances = vec![&near, &far];
+
+        assert_eq!(
+            mesh_instances_distance_sq(&instances, camera_position),
+            64.0
+        );
+    }
+
+    #[test]
     fn mesh_vertex_layouts_fit_webgpu_attribute_limit() {
         let mesh_attribute_count = WgpuMesh::vertex_layout().attributes.len();
 
         assert!(mesh_attribute_count + InstanceRaw::layout().attributes.len() <= 16);
         assert!(mesh_attribute_count + InstanceRaw::shadow_layout().attributes.len() <= 16);
+    }
+
+    #[test]
+    fn mesh_renderer_reports_static_pipeline_inventory() {
+        assert_eq!(MeshRenderer::STATIC_RENDER_PIPELINE_COUNT, 33);
+        assert_eq!(MeshRenderer::STATIC_RENDER_PIPELINE_LAYOUT_COUNT, 3);
+    }
+
+    #[test]
+    fn gbuffer_shader_declares_mrt_outputs() {
+        let shader = include_str!("gbuffer.wgsl");
+
+        assert_eq!(GBUFFER_COLOR_ATTACHMENT_COUNT, 3);
+        assert!(shader.contains("@location(0) albedo"));
+        assert!(shader.contains("@location(1) normal"));
+        assert!(shader.contains("@location(2) material"));
+        assert!(shader.contains("textureSample(base_color_texture"));
+        assert!(shader.contains("textureSample(normal_texture"));
+        assert!(shader.contains("textureSample(metallic_roughness_texture"));
+    }
+
+    #[test]
+    fn deferred_lighting_shader_samples_gbuffer_mrt() {
+        let shader = include_str!("deferred_lighting.wgsl");
+
+        assert!(shader.contains("var gbuffer_albedo: texture_2d<f32>"));
+        assert!(shader.contains("var gbuffer_normal: texture_2d<f32>"));
+        assert!(shader.contains("var gbuffer_material: texture_2d<f32>"));
+        assert!(shader.contains("textureSampleLevel(gbuffer_albedo"));
+        assert!(shader.contains("textureSampleLevel(gbuffer_normal"));
+        assert!(shader.contains("textureSampleLevel(gbuffer_material"));
+    }
+
+    #[test]
+    fn sampled_post_process_shader_samples_deferred_lighting_target() {
+        let shader = include_str!("post_process_sampled.wgsl");
+
+        assert!(shader.contains("var source_texture: texture_2d<f32>"));
+        assert!(shader.contains("var source_sampler: sampler"));
+        assert!(shader.contains("var<uniform> post_process"));
+        assert!(shader.contains("textureSampleLevel(source_texture"));
+        assert!(shader.contains("apply_fxaa"));
+        assert!(shader.contains("apply_bloom"));
+        assert!(shader.contains("apply_color_grading"));
+        assert!(shader.contains("apply_taa_resolve"));
+        assert!(shader.contains("apply_motion_blur"));
+        assert!(shader.contains("apply_ssr"));
+        assert!(shader.contains("apply_depth_of_field"));
+        assert!(shader.contains("apply_ssao"));
+        assert!(shader.contains("apply_hdr_exposure"));
+        assert!(shader.contains("post_process.texel_size_and_flags.w > 0.5"));
+        assert!(shader.contains("post_process.color_grade_flags.x > 0.5"));
+        assert!(shader.contains("post_process.effect_flags.x > 0.5"));
+        assert!(shader.contains("post_process.screen_space_flags.x > 0.5"));
+        assert!(shader.contains("post_process.screen_space_flags.y > 0.5"));
+        assert!(shader.contains("pow(mapped"));
+    }
+
+    #[test]
+    fn sampled_post_process_uniform_packs_fxaa_and_bloom_flags() {
+        let uniform = SampledPostProcessUniform::new(
+            640,
+            480,
+            WgpuPostProcessOptions {
+                fxaa: true,
+                bloom: true,
+                color_grading: true,
+                taa: true,
+                motion_blur: true,
+                ssr: true,
+                depth_of_field: true,
+                ssao: true,
+                hdr: true,
+            },
+        );
+
+        assert_eq!(uniform.texel_size_and_flags[0], 1.0 / 640.0);
+        assert_eq!(uniform.texel_size_and_flags[1], 1.0 / 480.0);
+        assert_eq!(uniform.texel_size_and_flags[2], 1.0);
+        assert_eq!(uniform.texel_size_and_flags[3], 1.0);
+        assert_eq!(uniform.color_grade_flags[0], 1.0);
+        assert_eq!(uniform.effect_flags, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(uniform.screen_space_flags[0], 1.0);
+        assert_eq!(uniform.screen_space_flags[1], 1.0);
+    }
+
+    #[test]
+    fn sampled_post_process_label_reports_combined_effects() {
+        assert_eq!(
+            sampled_post_process_pass_label(WgpuPostProcessOptions {
+                fxaa: true,
+                bloom: true,
+                color_grading: true,
+                taa: true,
+                motion_blur: true,
+                ssr: true,
+                depth_of_field: true,
+                ssao: true,
+                hdr: true,
+            }),
+            "Neo Hdr Bloom Ssao Taa Fxaa Motion Blur Ssr Depth Of Field Tonemap Color Grading Post Process Pass"
+        );
     }
 
     #[test]
@@ -3789,6 +5255,79 @@ mod tests {
         let uniform = material_uniform(Material::WHITE.with_clearcoat_normal_scale(0.55));
 
         assert_eq!(uniform.anisotropy[2], 0.55);
+    }
+
+    #[test]
+    fn material_backend_layout_info_matches_mesh_shader_bindings() {
+        let info = wgpu_material_layout_info();
+
+        assert_eq!(info.uniform_binding, 0);
+        assert_eq!(
+            info.texture_bindings,
+            &[1, 3, 4, 5, 6, 7, 8, 29, 9, 10, 11, 12, 13, 14, 15]
+        );
+        assert_eq!(
+            info.sampler_bindings,
+            &[2, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 30]
+        );
+        assert_eq!(
+            info.sampler_bindings.len(),
+            material_sampler_slots(Material::WHITE).len()
+        );
+        assert_eq!(info.binding_count, 31);
+        assert_eq!(info.highest_binding, 30);
+        assert_eq!(WgpuMaterial::layout_info(), info);
+
+        let expected_bindings = (0..=30).collect::<Vec<_>>();
+        assert_eq!(info.occupied_bindings, expected_bindings.as_slice());
+
+        let entries = material_bind_group_layout_entries();
+        assert_eq!(entries.len(), info.binding_count);
+        for (entry, expected_binding) in entries.iter().zip(info.occupied_bindings) {
+            assert_eq!(entry.binding, *expected_binding);
+            assert_eq!(entry.visibility, wgpu::ShaderStages::FRAGMENT);
+            if entry.binding == info.uniform_binding {
+                match &entry.ty {
+                    wgpu::BindingType::Buffer {
+                        ty,
+                        has_dynamic_offset,
+                        ..
+                    } => {
+                        assert_eq!(*ty, wgpu::BufferBindingType::Uniform);
+                        assert!(!*has_dynamic_offset);
+                    }
+                    _ => panic!("material uniform binding has wrong layout type"),
+                }
+            } else if info.texture_bindings.contains(&entry.binding) {
+                match &entry.ty {
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable },
+                        view_dimension,
+                        multisampled,
+                    } => {
+                        assert!(*filterable);
+                        assert_eq!(*view_dimension, wgpu::TextureViewDimension::D2);
+                        assert!(!*multisampled);
+                    }
+                    _ => panic!("material texture binding has wrong layout type"),
+                }
+            } else if info.sampler_bindings.contains(&entry.binding) {
+                assert!(matches!(
+                    &entry.ty,
+                    wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering)
+                ));
+            } else {
+                panic!("unknown material binding {}", entry.binding);
+            }
+        }
+
+        let shader = include_str!("mesh.wgsl");
+        for binding in info.occupied_bindings {
+            assert!(
+                shader.contains(&format!("@binding({binding})")),
+                "mesh shader missing material binding {binding}"
+            );
+        }
     }
 
     #[test]

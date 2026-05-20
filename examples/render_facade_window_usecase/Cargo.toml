@@ -1,0 +1,10 @@
+[package]
+name = "render_facade_window_usecase"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine_graphics = { path = "../../Graphics/engine_graphics" }
+engine_platform = { path = "../../Platform/engine_platform" }
+engine_renderer = { path = "../../Render/engine_renderer" }
+platform_winit = { path = "../../Platform/platform_winit" }

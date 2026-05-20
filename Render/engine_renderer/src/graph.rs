@@ -1,14 +1,21 @@
-use std::{cell::RefCell, collections::HashMap, marker::PhantomData, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    rc::Rc,
+};
 
 use crate::{
     rhi::{
         RhiAccessState, RhiBuffer, RhiBufferDesc, RhiBufferUsage, RhiCommandEncoder,
-        RhiComputePassDesc, RhiComputePipeline, RhiDevice, RhiGraphicsPipeline,
-        RhiIndexedIndirectRenderPassDesc, RhiIndirectRenderPassDesc, RhiRenderPassDesc, RhiResource,
+        RhiComputePassDesc, RhiComputePipeline, RhiCustomResolveSupport, RhiDevice,
+        RhiGraphicsPipeline, RhiIndexedIndirectRenderPassDesc, RhiIndirectRenderPassDesc,
+        RhiRenderPassDesc, RhiResolveMode, RhiResolveShaderDesc, RhiResource,
         RhiResourceBarrierDesc, RhiTexture, RhiTextureDesc, RhiTextureUsage, RhiTimestampQueryDesc,
     },
     BufferDesc, BufferHandle, RenderLayerMask, RenderPath, RendererCaps, RendererError,
     RendererFeature, RendererFeatures, SceneHandle, TextureDesc, TextureFormat, TextureHandle,
+    TextureUsage,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -166,6 +173,112 @@ pub struct GraphTextureDesc {
     pub format: TextureFormat,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GraphTextureRendererDesc {
+    pub dimension: crate::TextureDimension,
+    pub width: u32,
+    pub height: u32,
+    pub depth_or_layers: u32,
+    pub mip_levels: u32,
+    pub samples: u32,
+    pub format: TextureFormat,
+    pub usage: TextureUsage,
+}
+
+impl GraphTextureRendererDesc {
+    fn from_graph_desc(desc: &GraphTextureDesc) -> Self {
+        Self {
+            dimension: crate::TextureDimension::D2,
+            width: desc.width,
+            height: desc.height,
+            depth_or_layers: 1,
+            mip_levels: 1,
+            samples: 1,
+            format: desc.format,
+            usage: TextureUsage::empty(),
+        }
+    }
+
+    fn from_texture_desc(desc: &TextureDesc<'_>) -> Self {
+        Self {
+            dimension: desc.dimension,
+            width: desc.width,
+            height: desc.height,
+            depth_or_layers: desc.depth_or_layers,
+            mip_levels: desc.mip_levels,
+            samples: desc.samples,
+            format: desc.format,
+            usage: desc.usage,
+        }
+    }
+
+    fn rhi_height(self) -> Result<u32, RendererError> {
+        if self.mip_levels > 1 {
+            let mut packed_height = 0_u32;
+            for mip_level in 0..self.mip_levels {
+                let height = graph_mip_extent(self.height, mip_level);
+                let depth_or_layers = graph_mip_depth_or_layers(self, mip_level);
+                let mip_height = height.checked_mul(depth_or_layers).ok_or_else(|| {
+                    RendererError::RenderGraphValidation(
+                        "graph-created mip-chain flattened RHI mip height overflows".to_owned(),
+                    )
+                })?;
+                packed_height = packed_height.checked_add(mip_height).ok_or_else(|| {
+                    RendererError::RenderGraphValidation(
+                        "graph-created mip-chain flattened RHI height overflows".to_owned(),
+                    )
+                })?;
+            }
+            return Ok(packed_height.max(1));
+        }
+        match self.dimension {
+            crate::TextureDimension::D1 => Ok(1),
+            crate::TextureDimension::D2 => Ok(self.height),
+            crate::TextureDimension::D2Array
+            | crate::TextureDimension::D3
+            | crate::TextureDimension::Cube
+            | crate::TextureDimension::CubeArray => self
+                .height
+                .checked_mul(self.depth_or_layers)
+                .ok_or_else(|| {
+                    RendererError::RenderGraphValidation(
+                        "graph-created layered/volume/cube texture flattened RHI height overflows"
+                            .to_owned(),
+                    )
+                }),
+        }
+    }
+}
+
+const fn graph_mip_extent(base: u32, mip_level: u32) -> u32 {
+    let shifted = base >> mip_level;
+    if shifted == 0 {
+        1
+    } else {
+        shifted
+    }
+}
+
+const fn graph_mip_depth_or_layers(desc: GraphTextureRendererDesc, mip_level: u32) -> u32 {
+    match desc.dimension {
+        crate::TextureDimension::D3 => graph_mip_extent(desc.depth_or_layers, mip_level),
+        _ => desc.depth_or_layers,
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphTextureDescSupport {
+    pub supported: bool,
+    pub unsupported_reason: Option<String>,
+    pub dimension: crate::TextureDimension,
+    pub width: u32,
+    pub height: u32,
+    pub depth_or_layers: u32,
+    pub mip_levels: u32,
+    pub samples: u32,
+    pub format: TextureFormat,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphBufferDesc {
     pub label: Option<String>,
@@ -184,6 +297,20 @@ struct ImportedBuffer {
     label: String,
     buffer: BufferHandle,
     usage: GraphBufferUsage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExportedTexture {
+    label: String,
+    region: Option<RhiTextureExportRegion>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ExportedBuffer {
+    label: String,
+    byte_offset: u64,
+    byte_len: Option<u64>,
+    byte_ranges: Vec<RhiBufferExportRange>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -209,11 +336,98 @@ impl RhiResourceImports {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RhiResourceExports {
+    pub textures: Vec<RhiTextureExport>,
+    pub buffers: Vec<RhiBufferExport>,
+}
+
+impl RhiResourceExports {
+    pub fn texture_export(&self, label: &str) -> Option<&RhiTextureExport> {
+        self.textures.iter().find(|export| export.label == label)
+    }
+
+    pub fn buffer_export(&self, label: &str) -> Option<&RhiBufferExport> {
+        self.buffers.iter().find(|export| export.label == label)
+    }
+
+    pub fn texture(&self, label: &str) -> Option<RhiTexture> {
+        self.texture_export(label).map(|export| export.texture)
+    }
+
+    pub fn buffer(&self, label: &str) -> Option<RhiBuffer> {
+        self.buffer_export(label).map(|export| export.buffer)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiTextureExport {
+    pub graph: GraphTexture,
+    pub label: String,
+    pub texture: RhiTexture,
+    pub desc: Option<RhiTextureDesc>,
+    pub region: Option<RhiTextureExportRegion>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RhiTextureExportRegion {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiBufferExport {
+    pub graph: GraphBuffer,
+    pub label: String,
+    pub buffer: RhiBuffer,
+    pub desc: Option<RhiBufferDesc>,
+    pub byte_offset: u64,
+    pub byte_len: Option<u64>,
+    pub byte_ranges: Vec<RhiBufferExportRange>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiBufferExportRange {
+    pub byte_offset: u64,
+    pub byte_len: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RhiGraphExecution {
+    pub stats: RenderGraphStats,
+    pub exports: RhiResourceExports,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RenderGraphStats {
     pub pass_count: u32,
     pub pass_labels: Vec<String>,
+    pub semantic_passes: u32,
+    pub rhi_executed_passes: u32,
+    pub rhi_executed_pass_labels: Vec<String>,
+    pub rhi_standard_passes: u32,
+    pub rhi_standard_pass_labels: Vec<String>,
+    pub backend_total_standard_passes: u32,
+    pub backend_native_standard_passes: u32,
+    pub backend_missing_standard_passes: u32,
+    pub backend_native_standard_pass_labels: Vec<String>,
+    pub backend_missing_standard_pass_labels: Vec<String>,
+    pub backend_real_standard_pipeline_complete: bool,
     pub transient_textures: u32,
     pub transient_buffers: u32,
+    pub imported_textures: u32,
+    pub imported_buffers: u32,
+    pub imported_texture_labels: Vec<String>,
+    pub imported_buffer_labels: Vec<String>,
+    pub exported_textures: u32,
+    pub exported_buffers: u32,
+    pub exported_texture_regions: u32,
+    pub backend_exported_texture_regions: u32,
+    pub exported_texture_labels: Vec<String>,
+    pub exported_texture_region_labels: Vec<String>,
+    pub backend_exported_texture_region_labels: Vec<String>,
+    pub exported_buffer_labels: Vec<String>,
     pub aliased_memory_bytes: u64,
     pub barriers: u32,
     pub executed_callbacks: u32,
@@ -239,10 +453,78 @@ pub struct RenderGraphStats {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RenderGraphResourceLabels {
+    pub textures: Vec<String>,
+    pub buffers: Vec<String>,
+}
+
+impl RenderGraphStats {
+    pub fn imported_resource_labels(&self) -> RenderGraphResourceLabels {
+        RenderGraphResourceLabels {
+            textures: self.imported_texture_labels.clone(),
+            buffers: self.imported_buffer_labels.clone(),
+        }
+    }
+
+    pub fn exported_resource_labels(&self) -> RenderGraphResourceLabels {
+        RenderGraphResourceLabels {
+            textures: self.exported_texture_labels.clone(),
+            buffers: self.exported_buffer_labels.clone(),
+        }
+    }
+
+    pub fn has_resource_imports(&self) -> bool {
+        self.imported_textures > 0 || self.imported_buffers > 0
+    }
+
+    pub fn has_resource_exports(&self) -> bool {
+        self.exported_textures > 0 || self.exported_buffers > 0
+    }
+
+    pub fn has_texture_region_exports(&self) -> bool {
+        self.exported_texture_regions != 0
+    }
+
+    pub fn texture_region_export_label_count(&self) -> usize {
+        self.exported_texture_region_labels.len()
+    }
+
+    pub fn sorted_texture_region_export_labels(&self) -> Vec<String> {
+        let mut labels = self.exported_texture_region_labels.clone();
+        labels.sort();
+        labels
+    }
+
+    pub fn has_complete_texture_region_export_label_coverage(&self) -> bool {
+        self.exported_texture_regions as usize == self.exported_texture_region_labels.len()
+    }
+
+    pub fn has_backend_texture_region_exports(&self) -> bool {
+        self.backend_exported_texture_regions != 0
+    }
+
+    pub fn backend_texture_region_export_label_count(&self) -> usize {
+        self.backend_exported_texture_region_labels.len()
+    }
+
+    pub fn sorted_backend_texture_region_export_labels(&self) -> Vec<String> {
+        let mut labels = self.backend_exported_texture_region_labels.clone();
+        labels.sort();
+        labels
+    }
+
+    pub fn has_complete_backend_texture_region_export_label_coverage(&self) -> bool {
+        self.backend_exported_texture_regions as usize
+            == self.backend_exported_texture_region_labels.len()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CompiledRenderGraph {
     pub passes: Vec<CompiledPass>,
     pub resource_lifetimes: Vec<ResourceLifetime>,
     pub resource_accesses: Vec<CompiledResourceAccess>,
+    pub resource_exports: Vec<CompiledResourceExport>,
     pub barriers: Vec<ResourceBarrier>,
     pub alias_allocations: Vec<AliasAllocation>,
     pub stats: RenderGraphStats,
@@ -277,6 +559,16 @@ pub struct CompiledResourceAccess {
     pub pass: PassId,
     pub resource: GraphResource,
     pub access: GraphAccess,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CompiledResourceExport {
+    pub resource: GraphResource,
+    pub label: String,
+    pub texture_region: Option<RhiTextureExportRegion>,
+    pub buffer_byte_offset: u64,
+    pub buffer_byte_len: Option<u64>,
+    pub buffer_byte_ranges: Vec<RhiBufferExportRange>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,9 +675,12 @@ pub struct RenderGraphBuilder<'a> {
     next_buffer: u32,
     passes: Vec<PassNode>,
     textures: HashMap<GraphTexture, GraphTextureDesc>,
+    texture_renderer_descs: HashMap<GraphTexture, GraphTextureRendererDesc>,
     buffers: HashMap<GraphBuffer, GraphBufferDesc>,
     imported_textures: HashMap<GraphTexture, ImportedTexture>,
     imported_buffers: HashMap<GraphBuffer, ImportedBuffer>,
+    exported_textures: HashMap<GraphTexture, ExportedTexture>,
+    exported_buffers: HashMap<GraphBuffer, ExportedBuffer>,
     _marker: PhantomData<&'a mut ()>,
 }
 
@@ -397,9 +692,12 @@ impl<'a> Default for RenderGraphBuilder<'a> {
             next_buffer: 0,
             passes: Vec::new(),
             textures: HashMap::new(),
+            texture_renderer_descs: HashMap::new(),
             buffers: HashMap::new(),
             imported_textures: HashMap::new(),
             imported_buffers: HashMap::new(),
+            exported_textures: HashMap::new(),
+            exported_buffers: HashMap::new(),
             _marker: PhantomData,
         }
     }
@@ -432,6 +730,15 @@ impl<'a> RenderGraphBuilder<'a> {
         id
     }
 
+    /// Creates a graph transient by projecting a renderer texture descriptor into the current
+    /// graph texture shape.
+    ///
+    /// This legacy helper keeps only width/height/format. New code should use
+    /// [`RenderGraphBuilder::try_create_texture_from_desc`] so unsupported mip/layer/sample
+    /// descriptors fail explicitly instead of being silently projected into a D2 graph texture.
+    #[deprecated(
+        note = "use try_create_texture_from_desc to avoid silently projecting mip/layer/sample metadata"
+    )]
     pub fn create_texture_from_desc(
         &mut self,
         label: impl Into<String>,
@@ -445,8 +752,58 @@ impl<'a> RenderGraphBuilder<'a> {
         })
     }
 
+    /// Creates a graph transient from a renderer texture descriptor with explicit shape
+    /// validation.
+    ///
+    /// The current native graph-created texture model supports D1, D2, flattened
+    /// D2Array/D3/Cube/CubeArray textures plus packed mip chains. Unsupported
+    /// descriptor shapes (including zero extent or zero mip levels) return
+    /// [`RendererError::RenderGraphValidation`].
+    pub fn try_create_texture_from_desc(
+        &mut self,
+        label: impl Into<String>,
+        desc: TextureDesc<'_>,
+    ) -> Result<GraphTexture, RendererError> {
+        validate_supported_graph_texture_desc(&desc)?;
+        let renderer_desc = GraphTextureRendererDesc::from_texture_desc(&desc);
+        let texture = self.create_texture(GraphTextureDesc {
+            label: Some(label.into()),
+            width: desc.width,
+            height: desc.height,
+            format: desc.format,
+        });
+        self.texture_renderer_descs.insert(texture, renderer_desc);
+        Ok(texture)
+    }
+
     pub fn texture_desc(&self, texture: GraphTexture) -> Option<&GraphTextureDesc> {
         self.textures.get(&texture)
+    }
+
+    pub fn texture_renderer_desc(&self, texture: GraphTexture) -> Option<GraphTextureRendererDesc> {
+        self.texture_renderer_descs
+            .get(&texture)
+            .copied()
+            .or_else(|| {
+                self.textures
+                    .get(&texture)
+                    .map(GraphTextureRendererDesc::from_graph_desc)
+            })
+    }
+
+    pub fn texture_desc_support(desc: &TextureDesc<'_>) -> GraphTextureDescSupport {
+        let unsupported_reason = graph_texture_desc_unsupported_reason(desc);
+        GraphTextureDescSupport {
+            supported: unsupported_reason.is_none(),
+            unsupported_reason,
+            dimension: desc.dimension,
+            width: desc.width,
+            height: desc.height,
+            depth_or_layers: desc.depth_or_layers,
+            mip_levels: desc.mip_levels,
+            samples: desc.samples,
+            format: desc.format,
+        }
     }
 
     pub fn import_buffer(
@@ -466,6 +823,275 @@ impl<'a> RenderGraphBuilder<'a> {
             },
         );
         id
+    }
+
+    pub fn imported_textures(
+        &self,
+    ) -> impl Iterator<Item = (&str, TextureHandle, GraphTextureUsage)> + '_ {
+        self.imported_textures
+            .values()
+            .map(|import| (import.label.as_str(), import.texture, import.usage))
+    }
+
+    pub fn imported_buffers(
+        &self,
+    ) -> impl Iterator<Item = (&str, BufferHandle, GraphBufferUsage)> + '_ {
+        self.imported_buffers
+            .values()
+            .map(|import| (import.label.as_str(), import.buffer, import.usage))
+    }
+
+    pub fn imported_texture_entries(
+        &self,
+    ) -> impl Iterator<Item = (GraphTexture, &str, TextureHandle, GraphTextureUsage)> + '_ {
+        self.imported_textures.iter().map(|(texture, import)| {
+            (
+                *texture,
+                import.label.as_str(),
+                import.texture,
+                import.usage,
+            )
+        })
+    }
+
+    pub fn imported_buffer_entries(
+        &self,
+    ) -> impl Iterator<Item = (GraphBuffer, &str, BufferHandle, GraphBufferUsage)> + '_ {
+        self.imported_buffers
+            .iter()
+            .map(|(buffer, import)| (*buffer, import.label.as_str(), import.buffer, import.usage))
+    }
+
+    pub fn exported_buffer_entries(
+        &self,
+    ) -> impl Iterator<Item = (GraphBuffer, &str, u64, Option<u64>, &[RhiBufferExportRange])> + '_
+    {
+        self.exported_buffers.iter().map(|(buffer, export)| {
+            (
+                *buffer,
+                export.label.as_str(),
+                export.byte_offset,
+                export.byte_len,
+                export.byte_ranges.as_slice(),
+            )
+        })
+    }
+
+    pub fn exported_texture_entries(
+        &self,
+    ) -> impl Iterator<Item = (GraphTexture, &str, Option<RhiTextureExportRegion>)> + '_ {
+        self.exported_textures
+            .iter()
+            .map(|(texture, export)| (*texture, export.label.as_str(), export.region))
+    }
+
+    pub fn imported_texture_handle(&self, texture: GraphTexture) -> Option<TextureHandle> {
+        self.imported_textures
+            .get(&texture)
+            .map(|import| import.texture)
+    }
+
+    pub fn imported_buffer_handle(&self, buffer: GraphBuffer) -> Option<BufferHandle> {
+        self.imported_buffers
+            .get(&buffer)
+            .map(|import| import.buffer)
+    }
+
+    pub fn export_texture(
+        &mut self,
+        label: impl Into<String>,
+        texture: GraphTexture,
+    ) -> GraphTexture {
+        self.exported_textures.insert(
+            texture,
+            ExportedTexture {
+                label: label.into(),
+                region: None,
+            },
+        );
+        texture
+    }
+
+    pub fn export_texture_region(
+        &mut self,
+        label: impl Into<String>,
+        texture: GraphTexture,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    ) -> GraphTexture {
+        self.exported_textures.insert(
+            texture,
+            ExportedTexture {
+                label: label.into(),
+                region: Some(RhiTextureExportRegion {
+                    x,
+                    y,
+                    width,
+                    height,
+                }),
+            },
+        );
+        texture
+    }
+
+    pub fn export_buffer(&mut self, label: impl Into<String>, buffer: GraphBuffer) -> GraphBuffer {
+        self.exported_buffers.insert(
+            buffer,
+            ExportedBuffer {
+                label: label.into(),
+                byte_offset: 0,
+                byte_len: None,
+                byte_ranges: Vec::new(),
+            },
+        );
+        buffer
+    }
+
+    pub fn export_buffer_range(
+        &mut self,
+        label: impl Into<String>,
+        buffer: GraphBuffer,
+        byte_offset: u64,
+        byte_len: u64,
+    ) -> GraphBuffer {
+        self.exported_buffers.insert(
+            buffer,
+            ExportedBuffer {
+                label: label.into(),
+                byte_offset,
+                byte_len: Some(byte_len),
+                byte_ranges: vec![RhiBufferExportRange {
+                    byte_offset,
+                    byte_len,
+                }],
+            },
+        );
+        buffer
+    }
+
+    pub fn export_buffer_ranges<I>(
+        &mut self,
+        label: impl Into<String>,
+        buffer: GraphBuffer,
+        ranges: I,
+    ) -> GraphBuffer
+    where
+        I: IntoIterator<Item = (u64, u64)>,
+    {
+        let byte_ranges = ranges
+            .into_iter()
+            .map(|(byte_offset, byte_len)| RhiBufferExportRange {
+                byte_offset,
+                byte_len,
+            })
+            .collect::<Vec<_>>();
+        let byte_ranges = normalize_buffer_export_ranges(byte_ranges);
+        let (byte_offset, byte_len) = if byte_ranges.is_empty() {
+            (0, Some(0))
+        } else {
+            exported_buffer_range_bounds(&byte_ranges)
+        };
+        self.exported_buffers.insert(
+            buffer,
+            ExportedBuffer {
+                label: label.into(),
+                byte_offset,
+                byte_len,
+                byte_ranges,
+            },
+        );
+        buffer
+    }
+
+    pub fn is_texture_exported(&self, texture: GraphTexture) -> bool {
+        self.exported_textures.contains_key(&texture)
+    }
+
+    pub fn is_buffer_exported(&self, buffer: GraphBuffer) -> bool {
+        self.exported_buffers.contains_key(&buffer)
+    }
+
+    fn imported_texture_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .imported_textures
+            .values()
+            .map(|import| import.label.clone())
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
+    fn imported_buffer_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .imported_buffers
+            .values()
+            .map(|import| import.label.clone())
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
+    fn exported_texture_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .exported_textures
+            .values()
+            .map(|export| export.label.clone())
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
+    fn exported_texture_region_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .exported_textures
+            .values()
+            .filter(|export| export.region.is_some())
+            .map(|export| export.label.clone())
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
+    fn exported_buffer_labels(&self) -> Vec<String> {
+        let mut labels = self
+            .exported_buffers
+            .values()
+            .map(|export| export.label.clone())
+            .collect::<Vec<_>>();
+        labels.sort();
+        labels
+    }
+
+    fn compiled_resource_exports(&self) -> Vec<CompiledResourceExport> {
+        let mut exports =
+            self.exported_textures
+                .iter()
+                .map(|(texture, export)| CompiledResourceExport {
+                    resource: GraphResource::Texture(*texture),
+                    label: export.label.clone(),
+                    texture_region: export.region,
+                    buffer_byte_offset: 0,
+                    buffer_byte_len: None,
+                    buffer_byte_ranges: Vec::new(),
+                })
+                .chain(self.exported_buffers.iter().map(|(buffer, export)| {
+                    CompiledResourceExport {
+                        resource: GraphResource::Buffer(*buffer),
+                        label: export.label.clone(),
+                        texture_region: None,
+                        buffer_byte_offset: export.byte_offset,
+                        buffer_byte_len: export.byte_len,
+                        buffer_byte_ranges: export.byte_ranges.clone(),
+                    }
+                }))
+                .collect::<Vec<_>>();
+        exports.sort_by_key(|export| match export.resource {
+            GraphResource::Texture(texture) => (0_u8, texture.0),
+            GraphResource::Buffer(buffer) => (1_u8, buffer.0),
+        });
+        exports
     }
 
     pub fn create_buffer(&mut self, desc: GraphBufferDesc) -> GraphBuffer {
@@ -508,8 +1134,23 @@ impl<'a> RenderGraphBuilder<'a> {
                     .iter()
                     .map(|pass| pass.record.label.clone())
                     .collect(),
+                semantic_passes: self.passes.len() as u32,
                 transient_textures: self.textures.len() as u32,
                 transient_buffers: self.buffers.len() as u32,
+                imported_textures: self.imported_textures.len() as u32,
+                imported_buffers: self.imported_buffers.len() as u32,
+                imported_texture_labels: self.imported_texture_labels(),
+                imported_buffer_labels: self.imported_buffer_labels(),
+                exported_textures: self.exported_textures.len() as u32,
+                exported_buffers: self.exported_buffers.len() as u32,
+                exported_texture_regions: self
+                    .exported_textures
+                    .values()
+                    .filter(|export| export.region.is_some())
+                    .count() as u32,
+                exported_texture_labels: self.exported_texture_labels(),
+                exported_texture_region_labels: self.exported_texture_region_labels(),
+                exported_buffer_labels: self.exported_buffer_labels(),
                 barriers: self
                     .passes
                     .iter()
@@ -622,6 +1263,135 @@ impl<'a> RenderGraphBuilder<'a> {
                 self.validate_declared_access(&pass.record.label, access)?;
             }
         }
+        for (texture, export) in &self.exported_textures {
+            if export.label.trim().is_empty() {
+                return Err(RendererError::RenderGraphValidation(
+                    "exported texture label must not be empty".to_owned(),
+                ));
+            }
+            if !self.textures.contains_key(texture) && !self.imported_textures.contains_key(texture)
+            {
+                return Err(RendererError::RenderGraphValidation(format!(
+                    "exported texture '{}' does not exist in this render graph",
+                    export.label
+                )));
+            }
+            if let Some(region) = export.region {
+                if region.width == 0 || region.height == 0 {
+                    return Err(RendererError::RenderGraphValidation(format!(
+                        "exported texture '{}' region must not be empty",
+                        export.label
+                    )));
+                }
+                if let Some(desc) = self.textures.get(texture) {
+                    let x_end = region.x.checked_add(region.width).ok_or_else(|| {
+                        RendererError::RenderGraphValidation(format!(
+                            "exported texture '{}' region x range overflows",
+                            export.label
+                        ))
+                    })?;
+                    let y_end = region.y.checked_add(region.height).ok_or_else(|| {
+                        RendererError::RenderGraphValidation(format!(
+                            "exported texture '{}' region y range overflows",
+                            export.label
+                        ))
+                    })?;
+                    if x_end > desc.width || y_end > desc.height {
+                        return Err(RendererError::RenderGraphValidation(format!(
+                            "exported texture '{}' region exceeds texture extent",
+                            export.label
+                        )));
+                    }
+                }
+            }
+        }
+        for (buffer, export) in &self.exported_buffers {
+            if export.label.trim().is_empty() {
+                return Err(RendererError::RenderGraphValidation(
+                    "exported buffer label must not be empty".to_owned(),
+                ));
+            }
+            if !self.buffers.contains_key(buffer) && !self.imported_buffers.contains_key(buffer) {
+                return Err(RendererError::RenderGraphValidation(format!(
+                    "exported buffer '{}' does not exist in this render graph",
+                    export.label
+                )));
+            }
+            if export.byte_len == Some(0) {
+                return Err(RendererError::RenderGraphValidation(format!(
+                    "exported buffer '{}' byte range must not be empty",
+                    export.label
+                )));
+            }
+            for range in &export.byte_ranges {
+                if range.byte_len == 0 {
+                    return Err(RendererError::RenderGraphValidation(format!(
+                        "exported buffer '{}' byte range must not be empty",
+                        export.label
+                    )));
+                }
+            }
+            if let Some(desc) = self.buffers.get(buffer) {
+                if export.byte_ranges.is_empty() {
+                    let byte_len = export.byte_len.unwrap_or(desc.size);
+                    let byte_end = export.byte_offset.checked_add(byte_len).ok_or_else(|| {
+                        RendererError::RenderGraphValidation(format!(
+                            "exported buffer '{}' byte range overflows",
+                            export.label
+                        ))
+                    })?;
+                    if byte_end > desc.size {
+                        return Err(RendererError::RenderGraphValidation(format!(
+                            "exported buffer '{}' byte range exceeds buffer size",
+                            export.label
+                        )));
+                    }
+                } else {
+                    for range in &export.byte_ranges {
+                        let byte_end =
+                            range
+                                .byte_offset
+                                .checked_add(range.byte_len)
+                                .ok_or_else(|| {
+                                    RendererError::RenderGraphValidation(format!(
+                                        "exported buffer '{}' byte range overflows",
+                                        export.label
+                                    ))
+                                })?;
+                        if byte_end > desc.size {
+                            return Err(RendererError::RenderGraphValidation(format!(
+                                "exported buffer '{}' byte range exceeds buffer size",
+                                export.label
+                            )));
+                        }
+                    }
+                }
+            }
+        }
+        let mut export_labels = HashSet::new();
+        for export in self
+            .exported_textures
+            .values()
+            .map(|export| export.label.as_str())
+            .chain(
+                self.exported_buffers
+                    .values()
+                    .map(|export| export.label.as_str()),
+            )
+        {
+            if !export_labels.insert(export) {
+                return Err(RendererError::RenderGraphValidation(format!(
+                    "exported resource label '{export}' is declared more than once"
+                )));
+            }
+        }
+        if self.passes.is_empty()
+            && (!self.exported_textures.is_empty() || !self.exported_buffers.is_empty())
+        {
+            return Err(RendererError::RenderGraphValidation(
+                "render graph exports require at least one pass".to_owned(),
+            ));
+        }
         Ok(())
     }
 
@@ -656,6 +1426,45 @@ impl<'a> RenderGraphBuilder<'a> {
                 });
             }
         }
+        if let Some(last_graph_pass) = self
+            .passes
+            .len()
+            .checked_sub(1)
+            .map(|index| PassId(index as u32))
+        {
+            for texture in self.exported_textures.keys() {
+                let resource = GraphResource::Texture(*texture);
+                lifetimes
+                    .entry(resource)
+                    .and_modify(|lifetime| {
+                        if lifetime.last_pass.0 < last_graph_pass.0 {
+                            lifetime.last_pass = last_graph_pass;
+                        }
+                    })
+                    .or_insert_with(|| ResourceLifetime {
+                        resource,
+                        first_pass: last_graph_pass,
+                        last_pass: last_graph_pass,
+                        bytes: self.resource_bytes(resource),
+                    });
+            }
+            for buffer in self.exported_buffers.keys() {
+                let resource = GraphResource::Buffer(*buffer);
+                lifetimes
+                    .entry(resource)
+                    .and_modify(|lifetime| {
+                        if lifetime.last_pass.0 < last_graph_pass.0 {
+                            lifetime.last_pass = last_graph_pass;
+                        }
+                    })
+                    .or_insert_with(|| ResourceLifetime {
+                        resource,
+                        first_pass: last_graph_pass,
+                        last_pass: last_graph_pass,
+                        bytes: self.resource_bytes(resource),
+                    });
+            }
+        }
         let mut resource_lifetimes = lifetimes.into_values().collect::<Vec<_>>();
         resource_lifetimes.sort_by_key(|lifetime| match lifetime.resource {
             GraphResource::Texture(texture) => (0_u8, texture.0),
@@ -688,8 +1497,23 @@ impl<'a> RenderGraphBuilder<'a> {
         let stats = RenderGraphStats {
             pass_count: self.passes.len() as u32,
             pass_labels: passes.iter().map(|pass| pass.label.clone()).collect(),
+            semantic_passes: self.passes.len() as u32,
             transient_textures: self.textures.len() as u32,
             transient_buffers: self.buffers.len() as u32,
+            imported_textures: self.imported_textures.len() as u32,
+            imported_buffers: self.imported_buffers.len() as u32,
+            imported_texture_labels: self.imported_texture_labels(),
+            imported_buffer_labels: self.imported_buffer_labels(),
+            exported_textures: self.exported_textures.len() as u32,
+            exported_buffers: self.exported_buffers.len() as u32,
+            exported_texture_regions: self
+                .exported_textures
+                .values()
+                .filter(|export| export.region.is_some())
+                .count() as u32,
+            exported_texture_labels: self.exported_texture_labels(),
+            exported_texture_region_labels: self.exported_texture_region_labels(),
+            exported_buffer_labels: self.exported_buffer_labels(),
             aliased_memory_bytes,
             barriers: barriers.len() as u32,
             graphics_queue_passes: passes
@@ -734,6 +1558,7 @@ impl<'a> RenderGraphBuilder<'a> {
             passes,
             resource_lifetimes,
             resource_accesses,
+            resource_exports: self.compiled_resource_exports(),
             barriers,
             alias_allocations,
             stats,
@@ -886,7 +1711,7 @@ impl<'a> RenderGraphBuilder<'a> {
                 result?;
             }
         }
-        let mut stats = compiled.stats;
+        let mut stats = compiled.stats.clone();
         stats.merge_execution(execution.borrow().clone());
         Ok(stats)
     }
@@ -898,12 +1723,26 @@ impl<'a> RenderGraphBuilder<'a> {
         view: Option<ViewInfo>,
         device: &dyn RhiDevice,
     ) -> Result<RenderGraphStats, RendererError> {
-        self.execute_on_rhi_with_imports(
+        self.execute_on_rhi_with_options(frame_index, caps, view, device, true, false)
+    }
+
+    pub fn execute_on_rhi_with_options(
+        &mut self,
+        frame_index: u64,
+        caps: &RendererCaps,
+        view: Option<ViewInfo>,
+        device: &dyn RhiDevice,
+        transient_resource_aliasing: bool,
+        debug_labels: bool,
+    ) -> Result<RenderGraphStats, RendererError> {
+        self.execute_on_rhi_with_imports_options(
             frame_index,
             caps,
             view,
             device,
             &RhiResourceImports::default(),
+            transient_resource_aliasing,
+            debug_labels,
         )
     }
 
@@ -915,24 +1754,127 @@ impl<'a> RenderGraphBuilder<'a> {
         device: &dyn RhiDevice,
         imports: &RhiResourceImports,
     ) -> Result<RenderGraphStats, RendererError> {
+        self.execute_on_rhi_with_imports_options(
+            frame_index,
+            caps,
+            view,
+            device,
+            imports,
+            true,
+            false,
+        )
+    }
+
+    pub fn execute_on_rhi_with_imports_options(
+        &mut self,
+        frame_index: u64,
+        caps: &RendererCaps,
+        view: Option<ViewInfo>,
+        device: &dyn RhiDevice,
+        imports: &RhiResourceImports,
+        transient_resource_aliasing: bool,
+        debug_labels: bool,
+    ) -> Result<RenderGraphStats, RendererError> {
+        Ok(self
+            .execute_on_rhi_with_imports_exports_options(
+                frame_index,
+                caps,
+                view,
+                device,
+                imports,
+                transient_resource_aliasing,
+                debug_labels,
+            )?
+            .stats)
+    }
+
+    pub fn execute_on_rhi_with_exports(
+        &mut self,
+        frame_index: u64,
+        caps: &RendererCaps,
+        view: Option<ViewInfo>,
+        device: &dyn RhiDevice,
+    ) -> Result<RhiGraphExecution, RendererError> {
+        self.execute_on_rhi_with_imports_exports_options(
+            frame_index,
+            caps,
+            view,
+            device,
+            &RhiResourceImports::default(),
+            true,
+            false,
+        )
+    }
+
+    pub fn execute_on_rhi_with_imports_exports(
+        &mut self,
+        frame_index: u64,
+        caps: &RendererCaps,
+        view: Option<ViewInfo>,
+        device: &dyn RhiDevice,
+        imports: &RhiResourceImports,
+    ) -> Result<RhiGraphExecution, RendererError> {
+        self.execute_on_rhi_with_imports_exports_options(
+            frame_index,
+            caps,
+            view,
+            device,
+            imports,
+            true,
+            false,
+        )
+    }
+
+    pub fn execute_on_rhi_with_imports_exports_options(
+        &mut self,
+        frame_index: u64,
+        caps: &RendererCaps,
+        view: Option<ViewInfo>,
+        device: &dyn RhiDevice,
+        imports: &RhiResourceImports,
+        transient_resource_aliasing: bool,
+        debug_labels: bool,
+    ) -> Result<RhiGraphExecution, RendererError> {
         self.validate()?;
-        let compiled = self.compile()?;
+        let compiled = self.compile_with_transient_aliasing(transient_resource_aliasing)?;
         validate_compiled_graph_caps(&compiled, caps)?;
         let mut rhi_textures: HashMap<GraphTexture, RhiTexture> = HashMap::new();
         let mut rhi_buffers: HashMap<GraphBuffer, RhiBuffer> = HashMap::new();
+        let exported_textures = compiled
+            .resource_exports
+            .iter()
+            .filter_map(|export| match export.resource {
+                GraphResource::Texture(texture) => Some(texture),
+                GraphResource::Buffer(_) => None,
+            })
+            .collect::<HashSet<_>>();
+        let exported_buffers = compiled
+            .resource_exports
+            .iter()
+            .filter_map(|export| match export.resource {
+                GraphResource::Texture(_) => None,
+                GraphResource::Buffer(buffer) => Some(buffer),
+            })
+            .collect::<HashSet<_>>();
         for lifetime in &compiled.resource_lifetimes {
             match lifetime.resource {
                 GraphResource::Texture(texture) => {
                     if let Some(desc) = self.textures.get(&texture) {
+                        let renderer_desc = self
+                            .texture_renderer_desc(texture)
+                            .unwrap_or_else(|| GraphTextureRendererDesc::from_graph_desc(desc));
                         let rhi_texture = device.create_texture(&RhiTextureDesc {
                             label: desc.label.clone(),
-                            width: desc.width,
-                            height: desc.height,
-                            format: desc.format,
-                            usage: map_rhi_texture_usage(graph_texture_usage_from_accesses(
-                                &compiled.resource_accesses,
+                            width: renderer_desc.width,
+                            height: renderer_desc.rhi_height()?,
+                            samples: renderer_desc.samples,
+                            format: renderer_desc.format,
+                            usage: rhi_texture_usage_for_graph_resource(
+                                &compiled,
                                 texture,
-                            )),
+                                exported_textures.contains(&texture),
+                                renderer_desc,
+                            ),
                         })?;
                         rhi_textures.insert(texture, rhi_texture);
                     }
@@ -942,10 +1884,11 @@ impl<'a> RenderGraphBuilder<'a> {
                         let rhi_buffer = device.create_buffer(&RhiBufferDesc {
                             label: desc.label.clone(),
                             size: desc.size,
-                            usage: map_rhi_buffer_usage(graph_buffer_usage_from_accesses(
-                                &compiled.resource_accesses,
+                            usage: rhi_buffer_usage_for_graph_resource(
+                                &compiled,
                                 buffer,
-                            )),
+                                exported_buffers.contains(&buffer),
+                            ),
                         })?;
                         rhi_buffers.insert(buffer, rhi_buffer);
                     } else if let Some(imported) = self.imported_buffers.get(&buffer) {
@@ -989,6 +1932,7 @@ impl<'a> RenderGraphBuilder<'a> {
 
         let execution = Rc::new(RefCell::new(PassExecutionStats::default()));
         let mut commands = Vec::new();
+        let submit_previous_commands_before_callback = device.caps().backend_name == "wgpu";
         let mut timestamp_pairs = Vec::new();
         for (compiled_pass, pass) in compiled.passes.iter().zip(&mut self.passes) {
             let mut encoder =
@@ -1007,6 +1951,14 @@ impl<'a> RenderGraphBuilder<'a> {
             {
                 let desc = map_rhi_barrier(barrier, &rhi_textures, &rhi_buffers)?;
                 encoder.encode_resource_barrier(&desc)?;
+            }
+            if pass.callback.is_some()
+                && submit_previous_commands_before_callback
+                && !commands.is_empty()
+            {
+                let pending_commands = std::mem::take(&mut commands);
+                let _ = device.submit(pending_commands)?;
+                device.poll(crate::rhi::PollMode::Poll);
             }
             if let Some(callback) = pass.callback.take() {
                 let mut ctx = PassContext::new_with_view_and_execution(
@@ -1028,7 +1980,14 @@ impl<'a> RenderGraphBuilder<'a> {
                         .collect(),
                 );
                 ctx.record_callback();
-                callback(&mut ctx)?;
+                if debug_labels {
+                    ctx.push_debug_group(&pass.record.label);
+                }
+                let result = callback(&mut ctx);
+                if debug_labels {
+                    ctx.pop_debug_group();
+                }
+                result?;
             }
             encoder.write_timestamp(timestamp_end)?;
             timestamp_pairs.push((timestamp_start, timestamp_end));
@@ -1039,8 +1998,18 @@ impl<'a> RenderGraphBuilder<'a> {
             device.poll(crate::rhi::PollMode::Poll);
         }
 
-        let mut stats = compiled.stats;
+        let mut stats = compiled.stats.clone();
         stats.merge_execution(execution.borrow().clone());
+        stats.rhi_executed_passes = stats.pass_count;
+        stats.semantic_passes = 0;
+        stats.rhi_executed_pass_labels = stats.pass_labels.clone();
+        stats.rhi_standard_pass_labels = stats
+            .rhi_executed_pass_labels
+            .iter()
+            .filter(|label| is_standard_3d_pass_label(label))
+            .cloned()
+            .collect();
+        stats.rhi_standard_passes = stats.rhi_standard_pass_labels.len() as u32;
         stats.timestamp_queries = (timestamp_pairs.len() * 2) as u32;
         stats.timestamp_writes = stats.timestamp_queries;
         let mut gpu_time_ns = 0_u64;
@@ -1052,7 +2021,17 @@ impl<'a> RenderGraphBuilder<'a> {
             }
         }
         stats.gpu_time_ns = (stats.timestamp_writes > 0).then_some(gpu_time_ns);
-        Ok(stats)
+        Ok(RhiGraphExecution {
+            exports: rhi_resource_exports(
+                &compiled,
+                &self.textures,
+                &self.texture_renderer_descs,
+                &self.buffers,
+                &rhi_textures,
+                &rhi_buffers,
+            )?,
+            stats,
+        })
     }
 }
 
@@ -1062,6 +2041,232 @@ fn non_empty_label(label: &str) -> Option<&str> {
     } else {
         Some(label)
     }
+}
+
+fn validate_supported_graph_texture_desc(desc: &TextureDesc<'_>) -> Result<(), RendererError> {
+    graph_texture_desc_unsupported_reason(desc).map_or(Ok(()), |reason| {
+        Err(RendererError::RenderGraphValidation(reason))
+    })
+}
+
+fn graph_texture_desc_unsupported_reason(desc: &TextureDesc<'_>) -> Option<String> {
+    if desc.width == 0 || desc.height == 0 || desc.depth_or_layers == 0 {
+        return Some("graph-created textures require non-zero dimensions".to_owned());
+    }
+    if desc.mip_levels == 0 {
+        return Some("graph-created textures require non-zero mip levels".to_owned());
+    }
+    match desc.dimension {
+        crate::TextureDimension::D1 => {
+            if desc.height != 1 || desc.depth_or_layers != 1 {
+                return Some("graph-created D1 textures require height 1 and one layer".to_owned());
+            }
+        }
+        crate::TextureDimension::D2 => {
+            if desc.depth_or_layers != 1 {
+                return Some(
+                    "graph-created D2 textures currently support only one layer".to_owned(),
+                );
+            }
+        }
+        crate::TextureDimension::D2Array => {
+            if desc.depth_or_layers == 0 {
+                return Some(
+                    "graph-created D2Array textures require at least one layer".to_owned(),
+                );
+            }
+        }
+        crate::TextureDimension::D3 => {
+            if desc.depth_or_layers == 0 {
+                return Some("graph-created D3 textures require non-zero depth".to_owned());
+            }
+        }
+        crate::TextureDimension::Cube => {
+            if desc.width != desc.height || desc.depth_or_layers != 6 {
+                return Some(
+                    "graph-created cube textures require square extent and exactly six layers"
+                        .to_owned(),
+                );
+            }
+        }
+        crate::TextureDimension::CubeArray => {
+            if desc.width != desc.height
+                || desc.depth_or_layers == 0
+                || desc.depth_or_layers % 6 != 0
+            {
+                return Some(
+                    "graph-created cube-array textures require square extent and a non-zero layer count divisible by six"
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    if desc.samples == 0 || !desc.samples.is_power_of_two() {
+        return Some(
+            "graph-created textures require a non-zero power-of-two sample count".to_owned(),
+        );
+    }
+    if desc.samples > 1
+        && (!matches!(desc.dimension, crate::TextureDimension::D2)
+            || desc.depth_or_layers != 1
+            || desc.mip_levels != 1)
+    {
+        return Some(
+            "graph-created MSAA textures currently support only single-layer D2 textures with one mip level".to_owned(),
+        );
+    }
+    None
+}
+
+fn exported_buffer_range_bounds(ranges: &[RhiBufferExportRange]) -> (u64, Option<u64>) {
+    let Some(first) = ranges.first() else {
+        return (0, None);
+    };
+    let mut start = first.byte_offset;
+    let mut end = first.byte_offset.saturating_add(first.byte_len);
+    for range in ranges.iter().skip(1) {
+        start = start.min(range.byte_offset);
+        end = end.max(range.byte_offset.saturating_add(range.byte_len));
+    }
+    (start, end.checked_sub(start))
+}
+
+fn normalize_buffer_export_ranges(
+    mut ranges: Vec<RhiBufferExportRange>,
+) -> Vec<RhiBufferExportRange> {
+    ranges.sort_by_key(|range| range.byte_offset);
+    let mut normalized: Vec<RhiBufferExportRange> = Vec::new();
+    for range in ranges {
+        if range.byte_len == 0 {
+            normalized.push(range);
+            continue;
+        }
+        let Some(last) = normalized.last_mut() else {
+            normalized.push(range);
+            continue;
+        };
+        if last.byte_len == 0 {
+            normalized.push(range);
+            continue;
+        }
+        let last_end = last.byte_offset.saturating_add(last.byte_len);
+        if range.byte_offset <= last_end {
+            let range_end = range.byte_offset.saturating_add(range.byte_len);
+            let merged_end = last_end.max(range_end);
+            last.byte_len = merged_end.saturating_sub(last.byte_offset);
+        } else {
+            normalized.push(range);
+        }
+    }
+    normalized
+}
+
+fn rhi_resource_exports(
+    compiled: &CompiledRenderGraph,
+    graph_textures: &HashMap<GraphTexture, GraphTextureDesc>,
+    graph_texture_renderer_descs: &HashMap<GraphTexture, GraphTextureRendererDesc>,
+    graph_buffers: &HashMap<GraphBuffer, GraphBufferDesc>,
+    rhi_textures: &HashMap<GraphTexture, RhiTexture>,
+    rhi_buffers: &HashMap<GraphBuffer, RhiBuffer>,
+) -> Result<RhiResourceExports, RendererError> {
+    let mut exports = RhiResourceExports::default();
+    for export in &compiled.resource_exports {
+        match export.resource {
+            GraphResource::Texture(texture) => {
+                let Some(rhi_texture) = rhi_textures.get(&texture) else {
+                    return Err(RendererError::RenderGraphValidation(format!(
+                        "exported texture '{}' was not materialized by RHI execution",
+                        export.label
+                    )));
+                };
+                let desc = graph_textures
+                    .get(&texture)
+                    .map(|desc| {
+                        let renderer_desc = graph_texture_renderer_descs
+                            .get(&texture)
+                            .copied()
+                            .unwrap_or_else(|| GraphTextureRendererDesc::from_graph_desc(desc));
+                        renderer_desc.rhi_height().map(|height| RhiTextureDesc {
+                            label: desc.label.clone(),
+                            width: renderer_desc.width,
+                            height,
+                            samples: renderer_desc.samples,
+                            format: renderer_desc.format,
+                            usage: rhi_texture_usage_for_graph_resource(
+                                compiled,
+                                texture,
+                                true,
+                                renderer_desc,
+                            ),
+                        })
+                    })
+                    .transpose()?;
+                exports.textures.push(RhiTextureExport {
+                    graph: texture,
+                    label: export.label.clone(),
+                    texture: *rhi_texture,
+                    desc,
+                    region: export.texture_region,
+                });
+            }
+            GraphResource::Buffer(buffer) => {
+                let Some(rhi_buffer) = rhi_buffers.get(&buffer) else {
+                    return Err(RendererError::RenderGraphValidation(format!(
+                        "exported buffer '{}' was not materialized by RHI execution",
+                        export.label
+                    )));
+                };
+                exports.buffers.push(RhiBufferExport {
+                    graph: buffer,
+                    label: export.label.clone(),
+                    buffer: *rhi_buffer,
+                    desc: graph_buffers.get(&buffer).map(|desc| RhiBufferDesc {
+                        label: desc.label.clone(),
+                        size: desc.size,
+                        usage: rhi_buffer_usage_for_graph_resource(compiled, buffer, true),
+                    }),
+                    byte_offset: export.buffer_byte_offset,
+                    byte_len: export.buffer_byte_len,
+                    byte_ranges: export.buffer_byte_ranges.clone(),
+                });
+            }
+        }
+    }
+    Ok(exports)
+}
+
+fn is_standard_3d_pass_label(label: &str) -> bool {
+    matches!(
+        label,
+        "gpu_culling"
+            | "meshlet_culling"
+            | "bindless_texture_table"
+            | "virtual_texture_feedback"
+            | "gpu_deformation"
+            | "shadow_csm"
+            | "shadow_point_spot"
+            | "depth_prepass"
+            | "gbuffer"
+            | "ssao"
+            | "light_cluster_build"
+            | "area_light_list_build"
+            | "ray_tracing_accel_build"
+            | "ray_tracing"
+            | "deferred_lighting"
+            | "forward_opaque"
+            | "transparent"
+            | "motion_vectors"
+            | "taa"
+            | "fxaa"
+            | "motion_blur"
+            | "ssr"
+            | "bloom"
+            | "depth_of_field"
+            | "hdr"
+            | "tonemap"
+            | "color_grading"
+            | "present"
+    )
 }
 
 fn validate_compiled_graph_caps(
@@ -1127,6 +2332,29 @@ fn map_rhi_texture_usage(usage: GraphTextureUsage) -> RhiTextureUsage {
     mapped
 }
 
+fn map_texture_desc_usage(usage: TextureUsage) -> RhiTextureUsage {
+    let mut mapped = RhiTextureUsage::empty();
+    if usage.contains(TextureUsage::SAMPLED) {
+        mapped = mapped | RhiTextureUsage::SAMPLED;
+    }
+    if usage.contains(TextureUsage::RENDER_TARGET)
+        || usage.contains(TextureUsage::DEPTH_STENCIL)
+        || usage.contains(TextureUsage::PRESENT)
+    {
+        mapped = mapped | RhiTextureUsage::RENDER_ATTACHMENT;
+    }
+    if usage.contains(TextureUsage::STORAGE) {
+        mapped = mapped | RhiTextureUsage::STORAGE;
+    }
+    if usage.contains(TextureUsage::COPY_SRC) {
+        mapped = mapped | RhiTextureUsage::COPY_SRC;
+    }
+    if usage.contains(TextureUsage::COPY_DST) {
+        mapped = mapped | RhiTextureUsage::COPY_DST;
+    }
+    mapped
+}
+
 fn map_rhi_buffer_usage(usage: GraphBufferUsage) -> RhiBufferUsage {
     let mut mapped = RhiBufferUsage::empty();
     if usage.contains(GraphBufferUsage::UNIFORM) {
@@ -1151,6 +2379,41 @@ fn map_rhi_buffer_usage(usage: GraphBufferUsage) -> RhiBufferUsage {
         mapped = mapped | RhiBufferUsage::COPY_DST;
     }
     mapped
+}
+
+fn rhi_texture_usage_for_graph_resource(
+    compiled: &CompiledRenderGraph,
+    texture: GraphTexture,
+    exported: bool,
+    renderer_desc: GraphTextureRendererDesc,
+) -> RhiTextureUsage {
+    let mut usage = map_rhi_texture_usage(graph_texture_usage_from_accesses(
+        &compiled.resource_accesses,
+        texture,
+    )) | map_texture_desc_usage(renderer_desc.usage);
+    if exported {
+        usage = if renderer_desc.samples > 1 {
+            usage | RhiTextureUsage::RENDER_ATTACHMENT
+        } else {
+            usage | RhiTextureUsage::COPY_SRC
+        };
+    }
+    usage
+}
+
+fn rhi_buffer_usage_for_graph_resource(
+    compiled: &CompiledRenderGraph,
+    buffer: GraphBuffer,
+    exported: bool,
+) -> RhiBufferUsage {
+    let mut usage = map_rhi_buffer_usage(graph_buffer_usage_from_accesses(
+        &compiled.resource_accesses,
+        buffer,
+    ));
+    if exported {
+        usage = usage | RhiBufferUsage::COPY_SRC;
+    }
+    usage
 }
 
 fn validate_imported_rhi_texture_usage(
@@ -1676,13 +2939,11 @@ impl<'a> PassContext<'a> {
         }
     }
 
-    pub(crate) fn set_declared_accesses(
-        &mut self,
-        accesses: Vec<(GraphResource, GraphAccess)>,
-    ) {
+    pub(crate) fn set_declared_accesses(&mut self, accesses: Vec<(GraphResource, GraphAccess)>) {
         self.declared_accesses = accesses;
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_rhi_graphics_pipelines(
         &mut self,
         pipelines: &'a HashMap<String, RhiGraphicsPipeline>,
@@ -1690,6 +2951,7 @@ impl<'a> PassContext<'a> {
         self.rhi_graphics_pipelines = Some(pipelines);
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_rhi_compute_pipelines(
         &mut self,
         pipelines: &'a HashMap<String, RhiComputePipeline>,
@@ -1748,6 +3010,90 @@ impl<'a> PassContext<'a> {
         })
     }
 
+    pub fn resolve_rhi_texture_rgba8(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+    ) -> Result<(), RendererError> {
+        self.resolve_rhi_texture_rgba8_with_mode(source, target, RhiResolveMode::Average)
+    }
+
+    pub fn rhi_custom_resolve_support(&self) -> Result<RhiCustomResolveSupport, RendererError> {
+        Ok(self.rhi_device()?.custom_resolve_support())
+    }
+
+    pub fn resolve_rhi_texture_rgba8_with_mode(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        mode: RhiResolveMode,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_rgba8_with_mode(source, target, mode)
+    }
+
+    pub fn resolve_rhi_texture_rgba8_with_shader(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_rgba8_with_shader(source, target, shader)
+    }
+
+    pub fn resolve_rhi_texture_rgba16f_with_shader(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_rgba16f_with_shader(source, target, shader)
+    }
+
+    pub fn resolve_rhi_texture_rgba32f_with_shader(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_rgba32f_with_shader(source, target, shader)
+    }
+
+    pub fn resolve_rhi_texture_8bit_color_with_shader(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_8bit_color_with_shader(source, target, shader)
+    }
+
+    pub fn resolve_rhi_texture_depth32f_with_shader(
+        &self,
+        source: GraphTexture,
+        target: GraphTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        let source = self.rhi_texture(source)?;
+        let target = self.rhi_texture(target)?;
+        self.rhi_device()?
+            .resolve_texture_depth32f_with_shader(source, target, shader)
+    }
+
     pub fn buffer(&self, buffer: GraphBuffer) -> Result<BufferRef<'_>, RendererError> {
         let resource = GraphResource::Buffer(buffer);
         if !self.declared_resources.contains(&resource) {
@@ -1796,10 +3142,7 @@ impl<'a> PassContext<'a> {
         Ok(GraphPipelineRef { label })
     }
 
-    pub fn rhi_graphics_pipeline(
-        &self,
-        name: &str,
-    ) -> Result<RhiGraphicsPipeline, RendererError> {
+    pub fn rhi_graphics_pipeline(&self, name: &str) -> Result<RhiGraphicsPipeline, RendererError> {
         let Some(pipelines) = self.rhi_graphics_pipelines else {
             return Err(RendererError::Validation(
                 "PassContext has no RHI graphics pipeline registry".to_owned(),
@@ -1813,10 +3156,7 @@ impl<'a> PassContext<'a> {
         })
     }
 
-    pub fn rhi_compute_pipeline(
-        &self,
-        name: &str,
-    ) -> Result<RhiComputePipeline, RendererError> {
+    pub fn rhi_compute_pipeline(&self, name: &str) -> Result<RhiComputePipeline, RendererError> {
         let Some(pipelines) = self.rhi_compute_pipelines else {
             return Err(RendererError::Validation(
                 "PassContext has no RHI compute pipeline registry".to_owned(),
@@ -1832,7 +3172,8 @@ impl<'a> PassContext<'a> {
 
     fn color_attachment_graph_texture(&self) -> Option<GraphTexture> {
         for (resource, access) in &self.declared_accesses {
-            if let (GraphResource::Texture(tex), GraphAccess::ColorAttachment(_)) = (resource, access)
+            if let (GraphResource::Texture(tex), GraphAccess::ColorAttachment(_)) =
+                (resource, access)
             {
                 return Some(*tex);
             }
@@ -1842,7 +3183,8 @@ impl<'a> PassContext<'a> {
 
     fn depth_attachment_graph_texture(&self) -> Option<GraphTexture> {
         for (resource, access) in &self.declared_accesses {
-            if let (GraphResource::Texture(tex), GraphAccess::DepthAttachment(_)) = (resource, access)
+            if let (GraphResource::Texture(tex), GraphAccess::DepthAttachment(_)) =
+                (resource, access)
             {
                 return Some(*tex);
             }
@@ -1870,9 +3212,10 @@ impl<'a> PassContext<'a> {
         RenderPassEncoder {
             label: desc.label,
             execution: Rc::clone(&self.execution),
-            rhi_encoder: self.rhi_encoder.as_deref_mut().map(|encoder| {
-                encoder as *mut (dyn RhiCommandEncoder + 'enc)
-            }),
+            rhi_encoder: self
+                .rhi_encoder
+                .as_deref_mut()
+                .map(|encoder| encoder as *mut (dyn RhiCommandEncoder + 'enc)),
             rhi_graphics_pipelines: self
                 .rhi_graphics_pipelines
                 .map(|pipelines| pipelines as *const _),
@@ -1883,7 +3226,10 @@ impl<'a> PassContext<'a> {
         }
     }
 
-    pub fn begin_compute_pass<'enc>(&'enc mut self, desc: ComputePassDesc) -> ComputePassEncoder<'enc>
+    pub fn begin_compute_pass<'enc>(
+        &'enc mut self,
+        desc: ComputePassDesc,
+    ) -> ComputePassEncoder<'enc>
     where
         'a: 'enc,
     {
@@ -1891,9 +3237,10 @@ impl<'a> PassContext<'a> {
         ComputePassEncoder {
             label: desc.label,
             execution: Rc::clone(&self.execution),
-            rhi_encoder: self.rhi_encoder.as_deref_mut().map(|encoder| {
-                encoder as *mut (dyn RhiCommandEncoder + 'enc)
-            }),
+            rhi_encoder: self
+                .rhi_encoder
+                .as_deref_mut()
+                .map(|encoder| encoder as *mut (dyn RhiCommandEncoder + 'enc)),
             rhi_compute_pipelines: self
                 .rhi_compute_pipelines
                 .map(|pipelines| pipelines as *const _),
@@ -2141,6 +3488,8 @@ mod tests {
 
         let stats = graph.stats();
         assert_eq!(stats.pass_count, 1);
+        assert_eq!(stats.semantic_passes, 1);
+        assert_eq!(stats.rhi_executed_passes, 0);
         assert_eq!(stats.pass_labels, vec!["tonemap".to_owned()]);
         assert_eq!(stats.transient_textures, 1);
         assert_eq!(stats.barriers, 2);
@@ -2152,21 +3501,23 @@ mod tests {
     #[test]
     fn builder_can_create_transients_from_renderer_resource_descs() {
         let mut graph = RenderGraphBuilder::default();
-        let color = graph.create_texture_from_desc(
-            "hdr_color",
-            TextureDesc {
-                label: Some("ignored_texture_label"),
-                dimension: TextureDimension::D2,
-                width: 1920,
-                height: 1080,
-                depth_or_layers: 1,
-                mip_levels: 1,
-                samples: 1,
-                format: TextureFormat::Rgba16Float,
-                usage: TextureUsage::RENDER_TARGET | TextureUsage::SAMPLED,
-                initial_data: None,
-            },
-        );
+        let color = graph
+            .try_create_texture_from_desc(
+                "hdr_color",
+                TextureDesc {
+                    label: Some("ignored_texture_label"),
+                    dimension: TextureDimension::D2,
+                    width: 1920,
+                    height: 1080,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 1,
+                    format: TextureFormat::Rgba16Float,
+                    usage: TextureUsage::RENDER_TARGET | TextureUsage::SAMPLED,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
         let constants = graph.create_buffer_from_desc(
             "view_constants",
             BufferDesc {
@@ -2189,6 +3540,240 @@ mod tests {
         assert_eq!(compiled.stats.transient_buffers, 1);
         assert_eq!(compiled.resource_lifetimes.len(), 2);
         assert_eq!(compiled.resource_accesses.len(), 3);
+    }
+
+    #[test]
+    fn builder_try_create_texture_from_desc_validates_native_graph_shape() {
+        let d2_desc = TextureDesc {
+            label: Some("ignored_texture_label"),
+            dimension: TextureDimension::D2,
+            width: 64,
+            height: 32,
+            depth_or_layers: 1,
+            mip_levels: 1,
+            samples: 1,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsage::RENDER_TARGET | TextureUsage::SAMPLED,
+            initial_data: None,
+        };
+        let mut graph = RenderGraphBuilder::default();
+        let d2_support = RenderGraphBuilder::texture_desc_support(&d2_desc);
+        assert!(d2_support.supported);
+        assert!(d2_support.unsupported_reason.is_none());
+        assert_eq!(d2_support.dimension, TextureDimension::D2);
+        assert_eq!(d2_support.width, 64);
+        assert_eq!(d2_support.height, 32);
+        assert_eq!(d2_support.depth_or_layers, 1);
+        assert_eq!(d2_support.mip_levels, 1);
+        assert_eq!(d2_support.samples, 1);
+        assert_eq!(d2_support.format, TextureFormat::Rgba8Unorm);
+        let texture = graph
+            .try_create_texture_from_desc("native_d2_graph_texture", d2_desc.clone())
+            .unwrap();
+        let desc = graph.texture_desc(texture).unwrap();
+        assert_eq!(desc.width, 64);
+        assert_eq!(desc.height, 32);
+        assert_eq!(desc.format, TextureFormat::Rgba8Unorm);
+        let renderer_desc = graph.texture_renderer_desc(texture).unwrap();
+        assert_eq!(renderer_desc.dimension, TextureDimension::D2);
+        assert_eq!(renderer_desc.width, 64);
+        assert_eq!(renderer_desc.height, 32);
+        assert_eq!(renderer_desc.depth_or_layers, 1);
+
+        let mut d1_desc = d2_desc.clone();
+        d1_desc.dimension = TextureDimension::D1;
+        d1_desc.height = 1;
+        let d1_support = RenderGraphBuilder::texture_desc_support(&d1_desc);
+        assert!(d1_support.supported);
+        assert!(d1_support.unsupported_reason.is_none());
+        assert_eq!(d1_support.dimension, TextureDimension::D1);
+        let d1_texture = graph
+            .try_create_texture_from_desc("native_d1_graph_texture", d1_desc)
+            .unwrap();
+        let d1_renderer_desc = graph.texture_renderer_desc(d1_texture).unwrap();
+        assert_eq!(d1_renderer_desc.dimension, TextureDimension::D1);
+        assert_eq!(d1_renderer_desc.width, 64);
+        assert_eq!(d1_renderer_desc.height, 1);
+        assert_eq!(d1_renderer_desc.depth_or_layers, 1);
+
+        let mut array_desc = d2_desc.clone();
+        array_desc.dimension = TextureDimension::D2Array;
+        array_desc.depth_or_layers = 2;
+        let array_support = RenderGraphBuilder::texture_desc_support(&array_desc);
+        assert!(array_support.supported);
+        assert!(array_support.unsupported_reason.is_none());
+        assert_eq!(array_support.depth_or_layers, 2);
+        let array_texture = graph
+            .try_create_texture_from_desc("native_d2_array_graph_texture", array_desc)
+            .unwrap();
+        let array_renderer_desc = graph.texture_renderer_desc(array_texture).unwrap();
+        assert_eq!(array_renderer_desc.dimension, TextureDimension::D2Array);
+        assert_eq!(array_renderer_desc.depth_or_layers, 2);
+
+        let mut d3_desc = d2_desc.clone();
+        d3_desc.dimension = TextureDimension::D3;
+        d3_desc.depth_or_layers = 2;
+        let d3_support = RenderGraphBuilder::texture_desc_support(&d3_desc);
+        assert!(d3_support.supported);
+        assert!(d3_support.unsupported_reason.is_none());
+        assert_eq!(d3_support.depth_or_layers, 2);
+        let d3_texture = graph
+            .try_create_texture_from_desc("native_d3_graph_texture", d3_desc)
+            .unwrap();
+        let d3_renderer_desc = graph.texture_renderer_desc(d3_texture).unwrap();
+        assert_eq!(d3_renderer_desc.dimension, TextureDimension::D3);
+        assert_eq!(d3_renderer_desc.depth_or_layers, 2);
+
+        let mut cube_desc = d2_desc.clone();
+        cube_desc.dimension = TextureDimension::Cube;
+        cube_desc.height = 64;
+        cube_desc.depth_or_layers = 6;
+        let cube_support = RenderGraphBuilder::texture_desc_support(&cube_desc);
+        assert!(cube_support.supported);
+        assert!(cube_support.unsupported_reason.is_none());
+        assert_eq!(cube_support.depth_or_layers, 6);
+        let cube_texture = graph
+            .try_create_texture_from_desc("native_cube_graph_texture", cube_desc)
+            .unwrap();
+        let cube_renderer_desc = graph.texture_renderer_desc(cube_texture).unwrap();
+        assert_eq!(cube_renderer_desc.dimension, TextureDimension::Cube);
+        assert_eq!(cube_renderer_desc.depth_or_layers, 6);
+
+        let mut cube_array_desc = d2_desc.clone();
+        cube_array_desc.dimension = TextureDimension::CubeArray;
+        cube_array_desc.height = 64;
+        cube_array_desc.depth_or_layers = 12;
+        let cube_array_support = RenderGraphBuilder::texture_desc_support(&cube_array_desc);
+        assert!(cube_array_support.supported);
+        assert!(cube_array_support.unsupported_reason.is_none());
+        assert_eq!(cube_array_support.depth_or_layers, 12);
+        let cube_array_texture = graph
+            .try_create_texture_from_desc("native_cube_array_graph_texture", cube_array_desc)
+            .unwrap();
+        let cube_array_renderer_desc = graph.texture_renderer_desc(cube_array_texture).unwrap();
+        assert_eq!(
+            cube_array_renderer_desc.dimension,
+            TextureDimension::CubeArray
+        );
+        assert_eq!(cube_array_renderer_desc.depth_or_layers, 12);
+
+        let mut mip_desc = d2_desc.clone();
+        mip_desc.mip_levels = 3;
+        let mip_support = RenderGraphBuilder::texture_desc_support(&mip_desc);
+        assert!(mip_support.supported);
+        assert!(mip_support.unsupported_reason.is_none());
+        assert_eq!(mip_support.mip_levels, 3);
+        let mip_texture = graph
+            .try_create_texture_from_desc("native_mipped_graph_texture", mip_desc)
+            .unwrap();
+        let mip_renderer_desc = graph.texture_renderer_desc(mip_texture).unwrap();
+        assert_eq!(mip_renderer_desc.dimension, TextureDimension::D2);
+        assert_eq!(mip_renderer_desc.mip_levels, 3);
+
+        let mut msaa_desc = d2_desc.clone();
+        msaa_desc.samples = 4;
+        let msaa_support = RenderGraphBuilder::texture_desc_support(&msaa_desc);
+        assert!(msaa_support.supported);
+        assert!(msaa_support.unsupported_reason.is_none());
+        assert_eq!(msaa_support.samples, 4);
+        let msaa_texture = graph
+            .try_create_texture_from_desc("native_msaa_graph_texture", msaa_desc.clone())
+            .unwrap();
+        let msaa_renderer_desc = graph.texture_renderer_desc(msaa_texture).unwrap();
+        assert_eq!(msaa_renderer_desc.dimension, TextureDimension::D2);
+        assert_eq!(msaa_renderer_desc.samples, 4);
+
+        let mut msaa_mip_desc = msaa_desc;
+        msaa_mip_desc.mip_levels = 2;
+        let msaa_mip_support = RenderGraphBuilder::texture_desc_support(&msaa_mip_desc);
+        assert!(!msaa_mip_support.supported);
+        assert_eq!(msaa_mip_support.samples, 4);
+        assert!(msaa_mip_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("MSAA")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc("unsupported_msaa_mip_graph_texture", msaa_mip_desc),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("MSAA")
+        ));
+
+        let mut zero_width_desc = d2_desc.clone();
+        zero_width_desc.width = 0;
+        let zero_width_support = RenderGraphBuilder::texture_desc_support(&zero_width_desc);
+        assert!(!zero_width_support.supported);
+        assert!(zero_width_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("non-zero dimensions")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc("unsupported_zero_width_graph_texture", zero_width_desc),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("non-zero dimensions")
+        ));
+
+        let mut zero_depth_desc = d2_desc.clone();
+        zero_depth_desc.depth_or_layers = 0;
+        let zero_depth_support = RenderGraphBuilder::texture_desc_support(&zero_depth_desc);
+        assert!(!zero_depth_support.supported);
+        assert!(zero_depth_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("non-zero dimensions")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc("unsupported_zero_depth_graph_texture", zero_depth_desc),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("non-zero dimensions")
+        ));
+
+        let mut zero_mip_desc = d2_desc.clone();
+        zero_mip_desc.mip_levels = 0;
+        let zero_mip_support = RenderGraphBuilder::texture_desc_support(&zero_mip_desc);
+        assert!(!zero_mip_support.supported);
+        assert!(zero_mip_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("non-zero mip levels")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc("unsupported_zero_mip_graph_texture", zero_mip_desc),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("non-zero mip levels")
+        ));
+
+        let mut zero_samples_desc = d2_desc.clone();
+        zero_samples_desc.samples = 0;
+        let zero_samples_support = RenderGraphBuilder::texture_desc_support(&zero_samples_desc);
+        assert!(!zero_samples_support.supported);
+        assert!(zero_samples_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("non-zero power-of-two sample count")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc(
+                "unsupported_zero_sample_graph_texture",
+                zero_samples_desc
+            ),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("non-zero power-of-two sample count")
+        ));
+
+        let mut non_power_of_two_samples_desc = d2_desc.clone();
+        non_power_of_two_samples_desc.samples = 3;
+        let non_power_of_two_samples_support =
+            RenderGraphBuilder::texture_desc_support(&non_power_of_two_samples_desc);
+        assert!(!non_power_of_two_samples_support.supported);
+        assert!(non_power_of_two_samples_support
+            .unsupported_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("non-zero power-of-two sample count")));
+        assert!(matches!(
+            graph.try_create_texture_from_desc(
+                "unsupported_non_power_of_two_sample_graph_texture",
+                non_power_of_two_samples_desc
+            ),
+            Err(RendererError::RenderGraphValidation(message))
+                if message.contains("non-zero power-of-two sample count")
+        ));
     }
 
     #[test]
@@ -2350,12 +3935,79 @@ mod tests {
             .read_buffer(imported_buffer, BufferReadUsage::Uniform)
             .write_buffer(imported_buffer, BufferWriteUsage::CopyDst)
             .execute(|_| Ok(()));
+        graph.export_texture("history_output", imported_texture);
+        graph.export_buffer("camera_output", imported_buffer);
+        graph.add_pass("after_export_marker").execute(|_| Ok(()));
 
         let compiled = graph.compile().unwrap();
         assert_eq!(compiled.stats.transient_textures, 0);
         assert_eq!(compiled.stats.transient_buffers, 0);
+        assert_eq!(compiled.stats.imported_textures, 1);
+        assert_eq!(compiled.stats.imported_buffers, 1);
+        assert_eq!(
+            compiled.stats.imported_texture_labels,
+            vec!["history".to_owned()]
+        );
+        assert_eq!(
+            compiled.stats.imported_buffer_labels,
+            vec!["camera".to_owned()]
+        );
+        assert!(compiled.stats.has_resource_imports());
+        assert_eq!(
+            compiled.stats.imported_resource_labels(),
+            RenderGraphResourceLabels {
+                textures: vec!["history".to_owned()],
+                buffers: vec!["camera".to_owned()],
+            }
+        );
+        assert_eq!(compiled.stats.exported_textures, 1);
+        assert_eq!(compiled.stats.exported_buffers, 1);
+        assert_eq!(compiled.stats.exported_texture_regions, 0);
+        assert!(compiled.stats.exported_texture_region_labels.is_empty());
+        assert!(!compiled.stats.has_texture_region_exports());
+        assert_eq!(
+            compiled.stats.exported_texture_labels,
+            vec!["history_output".to_owned()]
+        );
+        assert_eq!(
+            compiled.stats.exported_buffer_labels,
+            vec!["camera_output".to_owned()]
+        );
+        assert!(compiled.stats.has_resource_exports());
+        assert_eq!(
+            compiled.stats.exported_resource_labels(),
+            RenderGraphResourceLabels {
+                textures: vec!["history_output".to_owned()],
+                buffers: vec!["camera_output".to_owned()],
+            }
+        );
         assert_eq!(compiled.stats.barriers, 4);
         assert_eq!(compiled.resource_lifetimes.len(), 2);
+        assert_eq!(
+            compiled.resource_exports,
+            vec![
+                CompiledResourceExport {
+                    resource: GraphResource::Texture(imported_texture),
+                    label: "history_output".to_owned(),
+                    texture_region: None,
+                    buffer_byte_offset: 0,
+                    buffer_byte_len: None,
+                    buffer_byte_ranges: Vec::new(),
+                },
+                CompiledResourceExport {
+                    resource: GraphResource::Buffer(imported_buffer),
+                    label: "camera_output".to_owned(),
+                    texture_region: None,
+                    buffer_byte_offset: 0,
+                    buffer_byte_len: None,
+                    buffer_byte_ranges: Vec::new(),
+                },
+            ]
+        );
+        assert!(compiled
+            .resource_lifetimes
+            .iter()
+            .all(|lifetime| lifetime.last_pass == PassId(1)));
         assert_eq!(compiled.resource_accesses.len(), 4);
         assert_eq!(compiled.barriers.len(), 4);
 
@@ -2370,6 +4022,99 @@ mod tests {
             invalid.compile(),
             Err(RendererError::RenderGraphValidation(_))
         ));
+        let mut invalid_export = RenderGraphBuilder::default();
+        invalid_export.export_texture("missing_export", GraphTexture(999));
+        assert!(matches!(
+            invalid_export.compile(),
+            Err(RendererError::RenderGraphValidation(_))
+        ));
+        let mut empty_export = RenderGraphBuilder::default();
+        let exported = empty_export.create_buffer(GraphBufferDesc {
+            label: Some("empty_export".to_owned()),
+            size: 4,
+        });
+        empty_export.export_buffer("empty_export", exported);
+        assert!(matches!(
+            empty_export.compile(),
+            Err(RendererError::RenderGraphValidation(_))
+        ));
+        let mut empty_label_export = RenderGraphBuilder::default();
+        let empty_label_buffer = empty_label_export.create_buffer(GraphBufferDesc {
+            label: Some("empty_label_export".to_owned()),
+            size: 4,
+        });
+        empty_label_export
+            .add_pass("touch_empty_label_export")
+            .write_buffer(empty_label_buffer, BufferWriteUsage::Storage)
+            .execute(|_| Ok(()));
+        empty_label_export.export_buffer(" ", empty_label_buffer);
+        assert!(matches!(
+            empty_label_export.compile(),
+            Err(RendererError::RenderGraphValidation(_))
+        ));
+        let mut duplicate_export = RenderGraphBuilder::default();
+        let duplicate_texture = duplicate_export.create_texture(GraphTextureDesc {
+            label: Some("duplicate_export_texture".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        let duplicate_buffer = duplicate_export.create_buffer(GraphBufferDesc {
+            label: Some("duplicate_export_buffer".to_owned()),
+            size: 4,
+        });
+        duplicate_export
+            .add_pass("touch_duplicate_exports")
+            .write_texture(duplicate_texture, TextureWriteUsage::Storage)
+            .write_buffer(duplicate_buffer, BufferWriteUsage::Storage)
+            .execute(|_| Ok(()));
+        duplicate_export.export_texture("duplicate", duplicate_texture);
+        duplicate_export.export_buffer("duplicate", duplicate_buffer);
+        assert!(matches!(
+            duplicate_export.compile(),
+            Err(RendererError::RenderGraphValidation(_))
+        ));
+    }
+
+    #[test]
+    fn builder_tracks_texture_region_export_stats() {
+        let mut graph = RenderGraphBuilder::default();
+        let texture = graph.create_texture(GraphTextureDesc {
+            label: Some("region_source".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        graph
+            .add_pass("write_region_source")
+            .write_texture(texture, TextureWriteUsage::CopyDst)
+            .execute(|_| Ok(()));
+        graph.export_texture_region("region_output", texture, 1, 1, 2, 2);
+
+        let compiled = graph.compile().unwrap();
+
+        assert_eq!(compiled.stats.exported_textures, 1);
+        assert_eq!(compiled.stats.exported_texture_regions, 1);
+        assert!(compiled.stats.has_resource_exports());
+        assert!(compiled.stats.has_texture_region_exports());
+        assert_eq!(
+            compiled.stats.exported_texture_labels,
+            vec!["region_output".to_owned()]
+        );
+        assert_eq!(
+            compiled.stats.exported_texture_region_labels,
+            vec!["region_output".to_owned()]
+        );
+        assert_eq!(compiled.resource_exports.len(), 1);
+        assert_eq!(
+            compiled.resource_exports[0].texture_region,
+            Some(RhiTextureExportRegion {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            })
+        );
     }
 
     #[test]
@@ -2382,6 +4127,7 @@ mod tests {
                 label: Some("history".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::SAMPLED | RhiTextureUsage::COPY_DST,
             })
@@ -2415,10 +4161,19 @@ mod tests {
             .read_buffer(imported_buffer, BufferReadUsage::Uniform)
             .write_buffer(imported_buffer, BufferWriteUsage::CopyDst)
             .execute(|_| Ok(()));
+        graph.export_texture("history_output", imported_texture);
+        graph.export_buffer("camera_output", imported_buffer);
 
-        let stats = graph
-            .execute_on_rhi_with_imports(5, &RendererCaps::default(), None, &device, &imports)
+        let execution = graph
+            .execute_on_rhi_with_imports_exports(
+                5,
+                &RendererCaps::default(),
+                None,
+                &device,
+                &imports,
+            )
             .unwrap();
+        let stats = execution.stats;
         let rhi_stats = device.stats();
 
         assert_eq!(stats.pass_count, 1);
@@ -2427,6 +4182,28 @@ mod tests {
         assert_eq!(rhi_stats.encoded_barriers, 4);
         assert_eq!(rhi_stats.finished_command_buffers, 1);
         assert_eq!(rhi_stats.submitted_command_buffers, 1);
+        assert_eq!(
+            execution.exports.textures,
+            vec![RhiTextureExport {
+                graph: imported_texture,
+                label: "history_output".to_owned(),
+                texture: rhi_texture,
+                desc: None,
+                region: None,
+            }]
+        );
+        assert_eq!(
+            execution.exports.buffers,
+            vec![RhiBufferExport {
+                graph: imported_buffer,
+                label: "camera_output".to_owned(),
+                buffer: rhi_buffer,
+                desc: None,
+                byte_offset: 0,
+                byte_len: None,
+                byte_ranges: Vec::new(),
+            }]
+        );
 
         let mut missing_import = RenderGraphBuilder::default();
         let missing_texture = missing_import.import_texture(
@@ -2454,6 +4231,7 @@ mod tests {
                 label: Some("mismatched_history".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })
@@ -2508,6 +4286,356 @@ mod tests {
             ),
             Err(RendererError::RenderGraphValidation(_))
         ));
+    }
+
+    #[test]
+    fn graph_execute_on_rhi_exports_transient_resources() {
+        let device = HeadlessRhiDevice::new();
+        let mut graph = RenderGraphBuilder::default();
+        let texture = graph.create_texture(GraphTextureDesc {
+            label: Some("transient_export_texture".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        let buffer = graph.create_buffer(GraphBufferDesc {
+            label: Some("transient_export_buffer".to_owned()),
+            size: 16,
+        });
+        graph
+            .add_pass("write_transient_exports")
+            .write_texture(texture, TextureWriteUsage::Storage)
+            .write_buffer(buffer, BufferWriteUsage::Storage)
+            .execute(move |ctx| {
+                ctx.rhi_texture(texture)?;
+                ctx.rhi_buffer(buffer)?;
+                Ok(())
+            });
+        graph.export_texture("transient_texture_output", texture);
+        graph.export_buffer("transient_buffer_output", buffer);
+
+        let execution = graph
+            .execute_on_rhi_with_exports(6, &RendererCaps::default(), None, &device)
+            .unwrap();
+        let rhi_stats = device.stats();
+
+        assert_eq!(execution.stats.pass_count, 1);
+        assert_eq!(execution.stats.exported_textures, 1);
+        assert_eq!(execution.stats.exported_buffers, 1);
+        assert_eq!(rhi_stats.textures, 1);
+        assert_eq!(rhi_stats.buffers, 1);
+        assert_eq!(execution.exports.textures.len(), 1);
+        assert_eq!(execution.exports.textures[0].graph, texture);
+        assert_eq!(
+            execution.exports.textures[0].label,
+            "transient_texture_output"
+        );
+        assert_eq!(
+            execution.exports.texture("transient_texture_output"),
+            Some(execution.exports.textures[0].texture)
+        );
+        assert_eq!(
+            execution
+                .exports
+                .texture_export("transient_texture_output")
+                .map(|export| export.graph),
+            Some(texture)
+        );
+        assert_eq!(execution.exports.buffers.len(), 1);
+        assert_eq!(execution.exports.buffers[0].graph, buffer);
+        assert_eq!(
+            execution.exports.buffers[0].label,
+            "transient_buffer_output"
+        );
+        assert_eq!(
+            execution.exports.buffer("transient_buffer_output"),
+            Some(execution.exports.buffers[0].buffer)
+        );
+        assert_eq!(
+            execution
+                .exports
+                .buffer_export("transient_buffer_output")
+                .map(|export| export.graph),
+            Some(buffer)
+        );
+        assert_eq!(execution.exports.texture("missing"), None);
+        assert_eq!(execution.exports.buffer("missing"), None);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_execute_on_wgpu_exports_transient_resources() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let mut graph = RenderGraphBuilder::default();
+        let texture = graph.create_texture(GraphTextureDesc {
+            label: Some("wgpu_transient_export_texture".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        let buffer = graph.create_buffer(GraphBufferDesc {
+            label: Some("wgpu_transient_export_buffer".to_owned()),
+            size: 16,
+        });
+        graph
+            .add_pass("wgpu_export_pass")
+            .write_texture(texture, TextureWriteUsage::Storage)
+            .write_buffer(buffer, BufferWriteUsage::Storage)
+            .execute(move |ctx| {
+                ctx.rhi_texture(texture)?;
+                ctx.rhi_buffer(buffer)?;
+                Ok(())
+            });
+        graph.export_texture("wgpu_texture_output", texture);
+        graph.export_buffer("wgpu_buffer_output", buffer);
+
+        let execution = graph
+            .execute_on_rhi_with_exports(7, &RendererCaps::default(), None, &device)
+            .unwrap();
+
+        assert_eq!(execution.stats.exported_textures, 1);
+        assert_eq!(execution.stats.exported_buffers, 1);
+        assert_eq!(
+            execution
+                .exports
+                .texture_export("wgpu_texture_output")
+                .map(|export| export.graph),
+            Some(texture)
+        );
+        assert_eq!(
+            execution
+                .exports
+                .buffer_export("wgpu_buffer_output")
+                .map(|export| export.graph),
+            Some(buffer)
+        );
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_execute_on_wgpu_exports_texture_region_with_readback() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let mut graph = RenderGraphBuilder::default();
+        let texture = graph.create_texture(GraphTextureDesc {
+            label: Some("wgpu_region_export_texture".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        let mut bytes = Vec::with_capacity(4 * 4 * 4);
+        for pixel in 0_u8..16 {
+            bytes.extend_from_slice(&[
+                pixel,
+                pixel.saturating_add(64),
+                pixel.saturating_add(128),
+                255,
+            ]);
+        }
+        let expected_region = [
+            5_u8, 69, 133, 255, 6, 70, 134, 255, 9, 73, 137, 255, 10, 74, 138, 255,
+        ]
+        .to_vec();
+
+        graph
+            .add_pass("wgpu_write_region_export_source")
+            .write_texture(texture, TextureWriteUsage::CopyDst)
+            .execute(move |ctx| {
+                let rhi_texture = ctx.rhi_texture(texture)?;
+                ctx.rhi_device()?.write_texture_rgba8(
+                    rhi_texture,
+                    crate::rhi::RhiTextureRegion {
+                        x: 0,
+                        y: 0,
+                        width: 4,
+                        height: 4,
+                    },
+                    &bytes,
+                )?;
+                Ok(())
+            });
+        graph.export_texture_region("wgpu_region_output", texture, 1, 1, 2, 2);
+
+        let execution = graph
+            .execute_on_rhi_with_exports(8, &RendererCaps::default(), None, &device)
+            .unwrap();
+        let export = execution
+            .exports
+            .texture_export("wgpu_region_output")
+            .expect("region export is reported");
+        let readback = device
+            .read_texture_rgba8(
+                export.texture,
+                crate::rhi::RhiTextureRegion {
+                    x: 1,
+                    y: 1,
+                    width: 2,
+                    height: 2,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(execution.stats.exported_textures, 1);
+        assert_eq!(export.graph, texture);
+        assert_eq!(
+            export.region,
+            Some(RhiTextureExportRegion {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            })
+        );
+        assert_eq!(readback, expected_region);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_execute_on_wgpu_exports_float_and_depth_regions_with_readback() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let mut graph = RenderGraphBuilder::default();
+        let rgba16f = graph.create_texture(GraphTextureDesc {
+            label: Some("wgpu_region_export_rgba16f".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba16Float,
+        });
+        let rgba32f = graph.create_texture(GraphTextureDesc {
+            label: Some("wgpu_region_export_rgba32f".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Rgba32Float,
+        });
+        let depth32f = graph.create_texture(GraphTextureDesc {
+            label: Some("wgpu_region_export_depth32f".to_owned()),
+            width: 4,
+            height: 4,
+            format: TextureFormat::Depth32Float,
+        });
+        let mut rgba16f_bytes = Vec::with_capacity(4 * 4 * 4);
+        let mut rgba32f_values = Vec::with_capacity(4 * 4 * 4);
+        let mut depth_values = Vec::with_capacity(4 * 4);
+        for pixel in 0_u16..16 {
+            rgba16f_bytes.extend_from_slice(&[
+                pixel,
+                pixel.saturating_add(100),
+                pixel.saturating_add(200),
+                0x3c00,
+            ]);
+        }
+        for pixel in 0_u32..16 {
+            let base = pixel as f32;
+            rgba32f_values.extend_from_slice(&[base, base + 0.25, base + 0.5, 1.0]);
+            depth_values.push(base / 16.0);
+        }
+        let expected_rgba16f = vec![
+            5, 105, 205, 0x3c00, 6, 106, 206, 0x3c00, 9, 109, 209, 0x3c00, 10, 110, 210, 0x3c00,
+        ];
+        let expected_rgba32f = vec![
+            5.0, 5.25, 5.5, 1.0, 6.0, 6.25, 6.5, 1.0, 9.0, 9.25, 9.5, 1.0, 10.0, 10.25, 10.5, 1.0,
+        ];
+        let expected_depth32f = vec![5.0 / 16.0, 6.0 / 16.0, 9.0 / 16.0, 10.0 / 16.0];
+
+        graph
+            .add_pass("wgpu_write_float_and_depth_region_export_sources")
+            .write_texture(rgba16f, TextureWriteUsage::CopyDst)
+            .write_texture(rgba32f, TextureWriteUsage::CopyDst)
+            .write_texture(depth32f, TextureWriteUsage::CopyDst)
+            .execute(move |ctx| {
+                let region = crate::rhi::RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 4,
+                };
+                ctx.rhi_device()?.write_texture_rgba16f(
+                    ctx.rhi_texture(rgba16f)?,
+                    region,
+                    &rgba16f_bytes,
+                )?;
+                ctx.rhi_device()?.write_texture_rgba32f(
+                    ctx.rhi_texture(rgba32f)?,
+                    region,
+                    &rgba32f_values,
+                )?;
+                ctx.rhi_device()?.write_texture_depth32f(
+                    ctx.rhi_texture(depth32f)?,
+                    region,
+                    &depth_values,
+                )?;
+                Ok(())
+            });
+        graph.export_texture_region("wgpu_rgba16f_region_output", rgba16f, 1, 1, 2, 2);
+        graph.export_texture_region("wgpu_rgba32f_region_output", rgba32f, 1, 1, 2, 2);
+        graph.export_texture_region("wgpu_depth32f_region_output", depth32f, 1, 1, 2, 2);
+
+        let execution = graph
+            .execute_on_rhi_with_exports(9, &RendererCaps::default(), None, &device)
+            .unwrap();
+        let region = crate::rhi::RhiTextureRegion {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let export_region = Some(RhiTextureExportRegion {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        });
+        let rgba16f_export = execution
+            .exports
+            .texture_export("wgpu_rgba16f_region_output")
+            .expect("RGBA16F region export is reported");
+        let rgba32f_export = execution
+            .exports
+            .texture_export("wgpu_rgba32f_region_output")
+            .expect("RGBA32F region export is reported");
+        let depth32f_export = execution
+            .exports
+            .texture_export("wgpu_depth32f_region_output")
+            .expect("Depth32F region export is reported");
+
+        assert_eq!(execution.stats.exported_textures, 3);
+        assert_eq!(rgba16f_export.region, export_region);
+        assert_eq!(rgba32f_export.region, export_region);
+        assert_eq!(depth32f_export.region, export_region);
+        assert_eq!(
+            device
+                .read_texture_rgba16f(rgba16f_export.texture, region)
+                .unwrap(),
+            expected_rgba16f
+        );
+        assert_eq!(
+            device
+                .read_texture_rgba32f(rgba32f_export.texture, region)
+                .unwrap(),
+            expected_rgba32f
+        );
+        assert_eq!(
+            device
+                .read_texture_depth32f(depth32f_export.texture, region)
+                .unwrap(),
+            expected_depth32f
+        );
     }
 
     #[test]
@@ -2740,6 +4868,8 @@ mod tests {
         let stats = graph.execute(7, &RendererCaps::default()).unwrap();
 
         assert_eq!(stats.pass_count, 3);
+        assert_eq!(stats.semantic_passes, 3);
+        assert_eq!(stats.rhi_executed_passes, 0);
         assert_eq!(stats.graphics_queue_passes, 2);
         assert_eq!(stats.compute_queue_passes, 1);
         assert_eq!(stats.async_compute_queue_passes, 0);
@@ -2793,6 +4923,8 @@ mod tests {
         let mut graph = async_compute_graph();
         let stats = graph.execute(0, &caps).unwrap();
         assert_eq!(stats.async_compute_queue_passes, 1);
+        assert_eq!(stats.semantic_passes, 2);
+        assert_eq!(stats.rhi_executed_passes, 0);
         assert_eq!(stats.compute_passes, 1);
         assert_eq!(stats.compute_dispatches, 1);
     }
@@ -2818,6 +4950,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let compute_pipeline = device
@@ -2919,6 +5052,8 @@ mod tests {
         let rhi_stats = device.stats();
 
         assert_eq!(stats.pass_count, 2);
+        assert_eq!(stats.semantic_passes, 0);
+        assert_eq!(stats.rhi_executed_passes, 2);
         assert_eq!(stats.executed_callbacks, 2);
         assert_eq!(stats.render_passes, 2);
         assert_eq!(stats.compute_passes, 1);
@@ -2948,6 +5083,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_bind_imported_storage_buffer_in_compute_pass() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3036,6 +5172,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_to_imported_color_attachment() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3048,6 +5185,7 @@ mod tests {
                 label: Some("graph_render_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3087,6 +5225,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -3145,6 +5284,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_write_readable_picking_id_target() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3157,6 +5297,7 @@ mod tests {
                 label: Some("graph_picking_id_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3209,6 +5350,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -3272,6 +5414,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_with_imported_depth_attachment() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3285,6 +5428,7 @@ mod tests {
                 label: Some("graph_depth_color".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3295,6 +5439,7 @@ mod tests {
                 label: Some("graph_depth_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3338,6 +5483,7 @@ mod tests {
                     write_enabled: true,
                     compare: crate::rhi::RhiCompareFunction::LessEqual,
                 }),
+                sample_count: 1,
             })
             .unwrap();
 
@@ -3418,6 +5564,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_run_depth_only_pass() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3430,6 +5577,7 @@ mod tests {
                 label: Some("graph_depth_only_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3468,6 +5616,7 @@ mod tests {
                     write_enabled: true,
                     compare: crate::rhi::RhiCompareFunction::LessEqual,
                 }),
+                sample_count: 1,
             })
             .unwrap();
 
@@ -3527,6 +5676,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_write_imported_storage_texture_in_compute_pass() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3539,6 +5689,7 @@ mod tests {
                 label: Some("graph_compute_texture".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::STORAGE | crate::rhi::RhiTextureUsage::COPY_SRC,
             })
@@ -3627,9 +5778,587 @@ mod tests {
         assert_eq!(stats.executed_callbacks, 1);
     }
 
+    #[test]
+    fn graph_pass_context_resolves_msaa_texture_with_first_sample_mode() {
+        let device = crate::rhi::HeadlessRhiDevice::new();
+        let mut graph = RenderGraphBuilder::default();
+        let source = graph
+            .try_create_texture_from_desc(
+                "graph_first_sample_resolve_source",
+                TextureDesc {
+                    label: Some("graph_first_sample_resolve_source"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 4,
+                    format: TextureFormat::Rgba8Unorm,
+                    usage: crate::TextureUsage::RENDER_TARGET | crate::TextureUsage::SAMPLED,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        let target = graph
+            .try_create_texture_from_desc(
+                "graph_first_sample_resolve_target",
+                TextureDesc {
+                    label: Some("graph_first_sample_resolve_target"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 1,
+                    height: 1,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 1,
+                    format: TextureFormat::Rgba8Unorm,
+                    usage: TextureUsage::RENDER_TARGET | TextureUsage::STORAGE,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        let bytes = vec![91_u8, 92, 93, 255];
+        let write_bytes = bytes.clone();
+        graph
+            .add_pass("graph_first_sample_resolve_write_source")
+            .write_texture(source, TextureWriteUsage::CopyDst)
+            .execute(move |ctx| {
+                ctx.rhi_device()?.write_texture_rgba8(
+                    ctx.rhi_texture(source)?,
+                    crate::rhi::RhiTextureRegion {
+                        x: 0,
+                        y: 0,
+                        width: 1,
+                        height: 1,
+                    },
+                    &write_bytes,
+                )
+            });
+        graph
+            .add_pass("graph_first_sample_resolve")
+            .read_texture(source, TextureReadUsage::Sampled)
+            .write_texture(target, TextureWriteUsage::Storage)
+            .execute(move |ctx| {
+                ctx.resolve_rhi_texture_rgba8_with_mode(source, target, RhiResolveMode::FirstSample)
+            });
+        graph.export_texture("graph_first_sample_resolved", target);
+
+        let execution = graph
+            .execute_on_rhi_with_imports_exports_options(
+                41,
+                &RendererCaps::default(),
+                None,
+                &device,
+                &RhiResourceImports::default(),
+                false,
+                true,
+            )
+            .unwrap();
+        let texture = execution
+            .exports
+            .texture("graph_first_sample_resolved")
+            .unwrap();
+
+        assert_eq!(
+            device
+                .read_texture_rgba8(
+                    texture,
+                    crate::rhi::RhiTextureRegion {
+                        x: 0,
+                        y: 0,
+                        width: 1,
+                        height: 1,
+                    },
+                )
+                .unwrap(),
+            bytes
+        );
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_pass_context_resolves_msaa_texture_with_custom_wgsl_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let draw_shader = device
+            .create_shader_module(&crate::rhi::RhiShaderModuleDesc {
+                label: Some("graph_custom_resolve_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&crate::rhi::RhiGraphicsPipelineDesc {
+                label: Some("graph_custom_resolve_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: crate::rhi::RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut graph = RenderGraphBuilder::default();
+        let source = graph
+            .try_create_texture_from_desc(
+                "graph_custom_resolve_source",
+                TextureDesc {
+                    label: Some("graph_custom_resolve_source"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 2,
+                    height: 2,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 4,
+                    format: TextureFormat::Rgba8Unorm,
+                    usage: crate::TextureUsage::RENDER_TARGET | crate::TextureUsage::SAMPLED,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        let target = graph.create_texture(GraphTextureDesc {
+            label: Some("graph_custom_resolve_target".to_owned()),
+            width: 2,
+            height: 2,
+            format: TextureFormat::Rgba8Unorm,
+        });
+        graph
+            .add_pass("graph_custom_resolve_draw_source")
+            .color_attachment(source, ColorAttachmentOps::clear_store())
+            .execute(move |ctx| {
+                ctx.encode_rhi_render_pass(&crate::rhi::RhiRenderPassDesc {
+                    label: Some("graph_custom_resolve_draw_source".to_owned()),
+                    pipeline: draw_pipeline,
+                    color_target: Some(ctx.rhi_texture(source)?),
+                    depth_target: None,
+                    vertex_buffers: Vec::new(),
+                    index_buffer: None,
+                    bind_groups: Vec::new(),
+                    vertex_count: 3,
+                    index_count: None,
+                    instance_count: 1,
+                })
+            });
+        graph
+            .add_pass("graph_custom_resolve_shader")
+            .read_texture(source, TextureReadUsage::Sampled)
+            .write_texture(target, TextureWriteUsage::Storage)
+            .execute(move |ctx| {
+                ctx.resolve_rhi_texture_rgba8_with_shader(
+                    source,
+                    target,
+                    &RhiResolveShaderDesc {
+                        label: Some("graph_custom_resolve_shader".to_owned()),
+                        entry_point: "main".to_owned(),
+                        source: r#"
+                            @group(0) @binding(0)
+                            var source_tex: texture_multisampled_2d<f32>;
+
+                            @group(0) @binding(1)
+                            var target_tex: texture_storage_2d<rgba8unorm, write>;
+
+                            @compute @workgroup_size(8, 8)
+                            fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                                let dims = textureDimensions(target_tex);
+                                if (id.x >= dims.x || id.y >= dims.y) {
+                                    return;
+                                }
+                                let value = textureLoad(source_tex, vec2<i32>(i32(id.x), i32(id.y)), 0);
+                                textureStore(
+                                    target_tex,
+                                    vec2<i32>(i32(id.x), i32(id.y)),
+                                    vec4<f32>(0.0, value.r, 1.0, value.a)
+                                );
+                            }
+                        "#
+                        .to_owned(),
+                    },
+                )
+            });
+        graph.export_texture("graph_custom_resolve_output", target);
+
+        let execution = graph
+            .execute_on_rhi_with_imports_exports_options(
+                42,
+                &RendererCaps::default(),
+                None,
+                &device,
+                &RhiResourceImports::default(),
+                false,
+                true,
+            )
+            .unwrap();
+        let texture = execution
+            .exports
+            .texture("graph_custom_resolve_output")
+            .unwrap();
+        let resolved = device
+            .read_texture_rgba8(
+                texture,
+                crate::rhi::RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resolved, vec![0, 255, 255, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_pass_context_resolves_srgb_msaa_texture_with_custom_fragment_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let features = graphics_wgpu::wgpu::TextureFormat::Rgba8UnormSrgb
+            .guaranteed_format_features(graphics.device().features());
+        if !features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let draw_shader = device
+            .create_shader_module(&crate::rhi::RhiShaderModuleDesc {
+                label: Some("graph_srgb_custom_resolve_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&crate::rhi::RhiGraphicsPipelineDesc {
+                label: Some("graph_srgb_custom_resolve_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8UnormSrgb),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: crate::rhi::RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut graph = RenderGraphBuilder::default();
+        let source = graph
+            .try_create_texture_from_desc(
+                "graph_srgb_custom_resolve_source",
+                TextureDesc {
+                    label: Some("graph_srgb_custom_resolve_source"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 2,
+                    height: 2,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 4,
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    usage: TextureUsage::RENDER_TARGET | TextureUsage::SAMPLED,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        let target = graph
+            .try_create_texture_from_desc(
+                "graph_srgb_custom_resolve_target",
+                TextureDesc {
+                    label: Some("graph_srgb_custom_resolve_target"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 2,
+                    height: 2,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 1,
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    usage: TextureUsage::RENDER_TARGET,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        graph
+            .add_pass("graph_srgb_custom_resolve_draw_source")
+            .color_attachment(source, ColorAttachmentOps::clear_store())
+            .execute(move |ctx| {
+                ctx.encode_rhi_render_pass(&crate::rhi::RhiRenderPassDesc {
+                    label: Some("graph_srgb_custom_resolve_draw_source".to_owned()),
+                    pipeline: draw_pipeline,
+                    color_target: Some(ctx.rhi_texture(source)?),
+                    depth_target: None,
+                    vertex_buffers: Vec::new(),
+                    index_buffer: None,
+                    bind_groups: Vec::new(),
+                    vertex_count: 3,
+                    index_count: None,
+                    instance_count: 1,
+                })
+            });
+        graph
+            .add_pass("graph_srgb_custom_resolve_shader")
+            .read_texture(source, TextureReadUsage::Sampled)
+            .color_attachment(target, ColorAttachmentOps::clear_store())
+            .execute(move |ctx| {
+                ctx.resolve_rhi_texture_8bit_color_with_shader(
+                    source,
+                    target,
+                    &RhiResolveShaderDesc {
+                        label: Some("graph_srgb_custom_resolve_shader".to_owned()),
+                        entry_point: "main".to_owned(),
+                        source: r#"
+                            @group(0) @binding(0)
+                            var source_tex: texture_multisampled_2d<f32>;
+
+                            @fragment
+                            fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+                                let value = textureLoad(
+                                    source_tex,
+                                    vec2<i32>(i32(position.x), i32(position.y)),
+                                    0
+                                );
+                                return vec4<f32>(value.r, value.g, 1.0, value.a);
+                            }
+                        "#
+                        .to_owned(),
+                    },
+                )
+            });
+        graph.export_texture("graph_srgb_custom_resolve_output", target);
+
+        let execution = graph
+            .execute_on_rhi_with_imports_exports_options(
+                44,
+                &RendererCaps::default(),
+                None,
+                &device,
+                &RhiResourceImports::default(),
+                false,
+                true,
+            )
+            .unwrap();
+        let texture = execution
+            .exports
+            .texture("graph_srgb_custom_resolve_output")
+            .unwrap();
+        let resolved = device
+            .read_texture_rgba8(
+                texture,
+                crate::rhi::RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resolved, vec![0, 255, 255, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn graph_pass_context_resolves_depth32f_msaa_texture_with_custom_wgsl_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) =
+            graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
+        else {
+            return;
+        };
+        let depth_features = graphics_wgpu::wgpu::TextureFormat::Depth32Float
+            .guaranteed_format_features(graphics.device().features());
+        if !depth_features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = crate::rhi::WgpuRhiDevice::new(&graphics);
+        let draw_shader = device
+            .create_shader_module(&crate::rhi::RhiShaderModuleDesc {
+                label: Some("graph_depth_custom_resolve_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.5, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @builtin(frag_depth) f32 {
+                        return 0.5;
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&crate::rhi::RhiGraphicsPipelineDesc {
+                label: Some("graph_depth_custom_resolve_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: None,
+                depth_format: Some(crate::DepthFormat::D32Float),
+                vertex_buffers: Vec::new(),
+                primitive: crate::rhi::RhiPrimitiveState::default(),
+                depth: Some(crate::rhi::RhiDepthState {
+                    format: crate::DepthFormat::D32Float,
+                    write_enabled: true,
+                    compare: crate::rhi::RhiCompareFunction::Always,
+                }),
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut graph = RenderGraphBuilder::default();
+        let source = graph
+            .try_create_texture_from_desc(
+                "graph_depth_custom_resolve_source",
+                TextureDesc {
+                    label: Some("graph_depth_custom_resolve_source"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 2,
+                    height: 2,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 4,
+                    format: TextureFormat::Depth32Float,
+                    usage: TextureUsage::DEPTH_STENCIL | TextureUsage::SAMPLED,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        let target = graph
+            .try_create_texture_from_desc(
+                "graph_depth_custom_resolve_target",
+                TextureDesc {
+                    label: Some("graph_depth_custom_resolve_target"),
+                    dimension: crate::TextureDimension::D2,
+                    width: 2,
+                    height: 2,
+                    depth_or_layers: 1,
+                    mip_levels: 1,
+                    samples: 1,
+                    format: TextureFormat::Depth32Float,
+                    usage: TextureUsage::DEPTH_STENCIL,
+                    initial_data: None,
+                },
+            )
+            .unwrap();
+        graph
+            .add_pass("graph_depth_custom_resolve_draw_source")
+            .depth_attachment(source, DepthAttachmentOps::load_store())
+            .execute(move |ctx| {
+                ctx.encode_rhi_render_pass(&crate::rhi::RhiRenderPassDesc {
+                    label: Some("graph_depth_custom_resolve_draw_source".to_owned()),
+                    pipeline: draw_pipeline,
+                    color_target: None,
+                    depth_target: Some(ctx.rhi_texture(source)?),
+                    vertex_buffers: Vec::new(),
+                    index_buffer: None,
+                    bind_groups: Vec::new(),
+                    vertex_count: 3,
+                    index_count: None,
+                    instance_count: 1,
+                })
+            });
+        graph
+            .add_pass("graph_depth_custom_resolve_shader")
+            .read_texture(source, TextureReadUsage::Sampled)
+            .depth_attachment(target, DepthAttachmentOps::load_store())
+            .execute(move |ctx| {
+                ctx.resolve_rhi_texture_depth32f_with_shader(
+                    source,
+                    target,
+                    &RhiResolveShaderDesc {
+                        label: Some("graph_depth_custom_resolve_shader".to_owned()),
+                        entry_point: "main".to_owned(),
+                        source: r#"
+                            @group(0) @binding(0)
+                            var source_tex: texture_depth_multisampled_2d;
+
+                            @fragment
+                            fn main(@builtin(position) position: vec4<f32>) -> @builtin(frag_depth) f32 {
+                                let depth = textureLoad(
+                                    source_tex,
+                                    vec2<i32>(i32(position.x), i32(position.y)),
+                                    0
+                                );
+                                return depth + 0.125;
+                            }
+                        "#
+                        .to_owned(),
+                    },
+                )
+            });
+        graph.export_texture("graph_depth_custom_resolve_output", target);
+
+        let execution = graph
+            .execute_on_rhi_with_imports_exports_options(
+                43,
+                &RendererCaps::default(),
+                None,
+                &device,
+                &RhiResourceImports::default(),
+                false,
+                true,
+            )
+            .unwrap();
+        let texture = execution
+            .exports
+            .texture("graph_depth_custom_resolve_output")
+            .unwrap();
+        let resolved = device
+            .read_texture_depth32f(
+                texture,
+                crate::rhi::RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+
+        assert!((resolved[0] - 0.625).abs() < 0.001);
+    }
+
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_write_imported_rgba32f_storage_texture_in_compute_pass() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3642,6 +6371,7 @@ mod tests {
                 label: Some("graph_compute_rgba32f_texture".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba32Float,
                 usage: crate::rhi::RhiTextureUsage::STORAGE | crate::rhi::RhiTextureUsage::COPY_SRC,
             })
@@ -3733,6 +6463,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_write_transient_rgba32f_storage_texture_in_compute_pass() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3838,6 +6569,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_sample_texture_after_storage_write() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -3850,6 +6582,7 @@ mod tests {
                 label: Some("graph_storage_then_sample_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -3914,6 +6647,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let sampler = device
@@ -4035,6 +6769,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_vertex_buffer_after_storage_write() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -4047,6 +6782,7 @@ mod tests {
                 label: Some("graph_storage_then_vertex_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -4113,6 +6849,7 @@ mod tests {
                 }],
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -4211,6 +6948,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_index_buffer_after_storage_write() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -4224,6 +6962,7 @@ mod tests {
                 label: Some("graph_storage_then_index_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -4307,6 +7046,7 @@ mod tests {
                 }],
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -4418,6 +7158,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_indirect_after_storage_write() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -4432,6 +7173,7 @@ mod tests {
                 label: Some("graph_storage_then_indirect_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -4535,6 +7277,7 @@ mod tests {
                 }],
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -4664,6 +7407,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn graph_execute_on_wgpu_can_draw_indexed_indirect_after_storage_write() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) =
             graphics_wgpu::WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default())
         else {
@@ -4678,6 +7422,7 @@ mod tests {
                 label: Some("graph_storage_then_indexed_indirect_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: crate::rhi::RhiTextureUsage::RENDER_ATTACHMENT
                     | crate::rhi::RhiTextureUsage::COPY_SRC,
@@ -4788,6 +7533,7 @@ mod tests {
                 }],
                 primitive: crate::rhi::RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 

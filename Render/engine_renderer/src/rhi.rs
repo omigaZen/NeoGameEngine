@@ -6,7 +6,9 @@ use std::{
 #[cfg(feature = "backend-wgpu")]
 use std::sync::mpsc;
 
-use crate::{DepthFormat, RendererError, TextureFormat, VertexFormat, VertexStepMode};
+use crate::{
+    DepthFormat, RendererError, RendererFeature, TextureFormat, VertexFormat, VertexStepMode,
+};
 
 #[cfg(feature = "backend-wgpu")]
 use graphics_wgpu::{wgpu, WgpuGraphics};
@@ -23,6 +25,13 @@ pub struct RhiCaps {
 pub enum PollMode {
     Poll,
     Wait,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RhiResolveMode {
+    Average,
+    FirstSample,
+    Sample(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -73,8 +82,102 @@ pub struct RhiTextureDesc {
     pub label: Option<String>,
     pub width: u32,
     pub height: u32,
+    pub samples: u32,
     pub format: TextureFormat,
     pub usage: RhiTextureUsage,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiResolveShaderDesc {
+    pub label: Option<String>,
+    pub source: String,
+    pub entry_point: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RhiCustomResolvePath {
+    Rgba8StorageCompute,
+    Rgba16FloatStorageCompute,
+    Rgba32FloatStorageCompute,
+    EightBitColorFragment,
+    Depth32FloatFragment,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiCustomResolvePathSupport {
+    pub path: RhiCustomResolvePath,
+    pub supported: bool,
+    pub unsupported_reason: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RhiCustomResolveSupport {
+    pub paths: Vec<RhiCustomResolvePathSupport>,
+}
+
+impl RhiCustomResolveSupport {
+    pub fn headless() -> Self {
+        let reason = "headless RHI does not execute user-supplied WGSL resolve shaders";
+        Self {
+            paths: vec![
+                unsupported_custom_resolve_path(RhiCustomResolvePath::Rgba8StorageCompute, reason),
+                unsupported_custom_resolve_path(
+                    RhiCustomResolvePath::Rgba16FloatStorageCompute,
+                    reason,
+                ),
+                unsupported_custom_resolve_path(
+                    RhiCustomResolvePath::Rgba32FloatStorageCompute,
+                    reason,
+                ),
+                unsupported_custom_resolve_path(
+                    RhiCustomResolvePath::EightBitColorFragment,
+                    reason,
+                ),
+                unsupported_custom_resolve_path(RhiCustomResolvePath::Depth32FloatFragment, reason),
+            ],
+        }
+    }
+
+    pub fn backend_wgpu() -> Self {
+        Self {
+            paths: vec![
+                supported_custom_resolve_path(RhiCustomResolvePath::Rgba8StorageCompute),
+                supported_custom_resolve_path(RhiCustomResolvePath::Rgba16FloatStorageCompute),
+                supported_custom_resolve_path(RhiCustomResolvePath::Rgba32FloatStorageCompute),
+                supported_custom_resolve_path(RhiCustomResolvePath::EightBitColorFragment),
+                supported_custom_resolve_path(RhiCustomResolvePath::Depth32FloatFragment),
+            ],
+        }
+    }
+
+    pub fn support_for(&self, path: RhiCustomResolvePath) -> Option<&RhiCustomResolvePathSupport> {
+        self.paths.iter().find(|support| support.path == path)
+    }
+
+    pub fn supports(&self, path: RhiCustomResolvePath) -> bool {
+        self.support_for(path)
+            .map(|support| support.supported)
+            .unwrap_or(false)
+    }
+}
+
+fn supported_custom_resolve_path(path: RhiCustomResolvePath) -> RhiCustomResolvePathSupport {
+    RhiCustomResolvePathSupport {
+        path,
+        supported: true,
+        unsupported_reason: None,
+    }
+}
+
+fn unsupported_custom_resolve_path(
+    path: RhiCustomResolvePath,
+    reason: &str,
+) -> RhiCustomResolvePathSupport {
+    RhiCustomResolvePathSupport {
+        path,
+        supported: false,
+        unsupported_reason: Some(reason.to_owned()),
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -162,6 +265,7 @@ pub struct RhiGraphicsPipelineDesc {
     pub vertex_buffers: Vec<RhiVertexBufferLayout>,
     pub primitive: RhiPrimitiveState,
     pub depth: Option<RhiDepthState>,
+    pub sample_count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -459,6 +563,46 @@ pub trait RhiDevice: Send + Sync {
     fn read_buffer(&self, buffer: RhiBuffer, offset: u64, size: u64) -> Result<Vec<u8>, RhiError>;
     fn create_texture(&self, desc: &RhiTextureDesc) -> Result<RhiTexture, RhiError>;
     fn texture_usage(&self, texture: RhiTexture) -> Result<RhiTextureUsage, RhiError>;
+    fn texture_samples(&self, texture: RhiTexture) -> Result<u32, RhiError>;
+    fn custom_resolve_support(&self) -> RhiCustomResolveSupport;
+    fn resolve_texture_rgba8(&self, source: RhiTexture, target: RhiTexture)
+        -> Result<(), RhiError>;
+    fn resolve_texture_rgba8_with_mode(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        mode: RhiResolveMode,
+    ) -> Result<(), RhiError>;
+    fn resolve_texture_rgba8_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RhiError>;
+    fn resolve_texture_rgba16f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RhiError>;
+    fn resolve_texture_rgba32f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RhiError>;
+    fn resolve_texture_8bit_color_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RhiError>;
+    fn resolve_texture_depth32f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RhiError>;
     fn write_texture_rgba8(
         &self,
         texture: RhiTexture,
@@ -472,6 +616,12 @@ pub trait RhiDevice: Send + Sync {
         data: &[u16],
     ) -> Result<(), RhiError>;
     fn write_texture_rgba32f(
+        &self,
+        texture: RhiTexture,
+        region: RhiTextureRegion,
+        data: &[f32],
+    ) -> Result<(), RhiError>;
+    fn write_texture_depth32f(
         &self,
         texture: RhiTexture,
         region: RhiTextureRegion,
@@ -853,6 +1003,11 @@ impl RhiDevice for HeadlessRhiDevice {
                 "RHI textures must have non-zero dimensions".to_owned(),
             ));
         }
+        if desc.samples == 0 || !desc.samples.is_power_of_two() {
+            return Err(RendererError::Validation(
+                "RHI texture samples must be a non-zero power of two".to_owned(),
+            ));
+        }
         if desc.usage.is_empty() {
             return Err(RendererError::Validation(
                 "RHI texture usage must not be empty".to_owned(),
@@ -874,8 +1029,130 @@ impl RhiDevice for HeadlessRhiDevice {
             .expect("headless RHI mutex poisoned")
             .textures
             .get(&texture)
-            .map(|state| state.usage)
+            .map(|state| {
+                debug_assert!(state.samples != 0);
+                state.usage
+            })
             .ok_or_else(|| RendererError::Validation(format!("unknown RHI texture: {}", texture.0)))
+    }
+
+    fn texture_samples(&self, texture: RhiTexture) -> Result<u32, RendererError> {
+        self.state
+            .lock()
+            .expect("headless RHI mutex poisoned")
+            .textures
+            .get(&texture)
+            .map(|state| state.samples)
+            .ok_or_else(|| RendererError::Validation(format!("unknown RHI texture: {}", texture.0)))
+    }
+
+    fn custom_resolve_support(&self) -> RhiCustomResolveSupport {
+        RhiCustomResolveSupport::headless()
+    }
+
+    fn resolve_texture_rgba8(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+    ) -> Result<(), RendererError> {
+        let mut state = self.state.lock().expect("headless RHI mutex poisoned");
+        let Some(source_state) = state.textures.get(&source).cloned() else {
+            return Err(RendererError::Validation(format!(
+                "unknown RHI resolve source texture: {}",
+                source.0
+            )));
+        };
+        let Some(target_state) = state.textures.get_mut(&target) else {
+            return Err(RendererError::Validation(format!(
+                "unknown RHI resolve target texture: {}",
+                target.0
+            )));
+        };
+        validate_headless_rgba8_resolve_textures(source, &source_state, target, target_state)?;
+        target_state.rgba8.copy_from_slice(&source_state.rgba8);
+        Ok(())
+    }
+
+    fn resolve_texture_rgba8_with_mode(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        mode: RhiResolveMode,
+    ) -> Result<(), RendererError> {
+        match mode {
+            RhiResolveMode::Average | RhiResolveMode::FirstSample => {
+                self.resolve_texture_rgba8(source, target)
+            }
+            RhiResolveMode::Sample(sample_index) => {
+                let source_samples = self.texture_samples(source)?;
+                if sample_index >= source_samples {
+                    return Err(RendererError::Validation(format!(
+                        "RHI custom resolve sample index {sample_index} exceeds source sample count {source_samples}"
+                    )));
+                }
+                self.resolve_texture_rgba8(source, target)
+            }
+        }
+    }
+
+    fn resolve_texture_rgba8_with_shader(
+        &self,
+        _source: RhiTexture,
+        _target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        Err(RendererError::UnsupportedFeature(
+            RendererFeature::BackendWgpu,
+        ))
+    }
+
+    fn resolve_texture_rgba16f_with_shader(
+        &self,
+        _source: RhiTexture,
+        _target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        Err(RendererError::UnsupportedFeature(
+            RendererFeature::BackendWgpu,
+        ))
+    }
+
+    fn resolve_texture_rgba32f_with_shader(
+        &self,
+        _source: RhiTexture,
+        _target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        Err(RendererError::UnsupportedFeature(
+            RendererFeature::BackendWgpu,
+        ))
+    }
+
+    fn resolve_texture_8bit_color_with_shader(
+        &self,
+        _source: RhiTexture,
+        _target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        Err(RendererError::UnsupportedFeature(
+            RendererFeature::BackendWgpu,
+        ))
+    }
+
+    fn resolve_texture_depth32f_with_shader(
+        &self,
+        _source: RhiTexture,
+        _target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        Err(RendererError::UnsupportedFeature(
+            RendererFeature::BackendWgpu,
+        ))
     }
 
     fn write_texture_rgba8(
@@ -896,9 +1173,9 @@ impl RhiDevice for HeadlessRhiDevice {
                 "RHI texture write requires COPY_DST usage".to_owned(),
             ));
         }
-        if texture_state.format != TextureFormat::Rgba8Unorm {
+        if !is_rhi_8bit_color_texture_format(texture_state.format) {
             return Err(RendererError::Validation(
-                "RHI RGBA8 texture write requires Rgba8Unorm format".to_owned(),
+                "RHI RGBA8 texture write requires an 8-bit color format".to_owned(),
             ));
         }
         validate_texture_region(texture_state.width, texture_state.height, region)?;
@@ -998,6 +1275,51 @@ impl RhiDevice for HeadlessRhiDevice {
         Ok(())
     }
 
+    fn write_texture_depth32f(
+        &self,
+        texture: RhiTexture,
+        region: RhiTextureRegion,
+        data: &[f32],
+    ) -> Result<(), RendererError> {
+        let mut state = self.state.lock().expect("headless RHI mutex poisoned");
+        let Some(texture_state) = state.textures.get_mut(&texture) else {
+            return Err(RendererError::Validation(format!(
+                "unknown RHI texture: {}",
+                texture.0
+            )));
+        };
+        if !texture_state.usage.contains(RhiTextureUsage::COPY_DST) {
+            return Err(RendererError::Validation(
+                "RHI texture write requires COPY_DST usage".to_owned(),
+            ));
+        }
+        if texture_state.format != TextureFormat::Depth32Float {
+            return Err(RendererError::Validation(
+                "RHI depth32f texture write requires Depth32Float format".to_owned(),
+            ));
+        }
+        validate_texture_region(texture_state.width, texture_state.height, region)?;
+        let expected = depth32f_region_len(region)?;
+        if data.len() != expected {
+            return Err(RendererError::Validation(format!(
+                "RHI depth32f texture write expected {expected} values but received {}",
+                data.len()
+            )));
+        }
+        if data.iter().any(|value| !value.is_finite()) {
+            return Err(RendererError::Validation(
+                "RHI depth32f texture writes require finite values".to_owned(),
+            ));
+        }
+        copy_depth32f_region_to_texture(
+            &mut texture_state.depth32f,
+            texture_state.width,
+            region,
+            data,
+        );
+        Ok(())
+    }
+
     fn read_texture_rgba8(
         &self,
         texture: RhiTexture,
@@ -1015,9 +1337,9 @@ impl RhiDevice for HeadlessRhiDevice {
                 "RHI texture read requires COPY_SRC usage".to_owned(),
             ));
         }
-        if texture_state.format != TextureFormat::Rgba8Unorm {
+        if !is_rhi_8bit_color_texture_format(texture_state.format) {
             return Err(RendererError::Validation(
-                "RHI RGBA8 texture read requires Rgba8Unorm format".to_owned(),
+                "RHI RGBA8 texture read requires an 8-bit color format".to_owned(),
             ));
         }
         validate_texture_region(texture_state.width, texture_state.height, region)?;
@@ -1424,9 +1746,16 @@ impl RhiDevice for WgpuRhiDevice {
             ));
         }
         let handle = RhiBuffer(self.allocate());
+        let backend_size = desc
+            .size
+            .checked_add(wgpu::COPY_BUFFER_ALIGNMENT - 1)
+            .map(|value| value - (value % wgpu::COPY_BUFFER_ALIGNMENT))
+            .ok_or_else(|| {
+                RendererError::Validation("RHI buffer backend size overflows".to_owned())
+            })?;
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: desc.label.as_deref(),
-            size: desc.size,
+            size: backend_size,
             usage: map_wgpu_buffer_usage(desc.usage),
             mapped_at_creation: false,
         });
@@ -1438,6 +1767,7 @@ impl RhiDevice for WgpuRhiDevice {
                 handle,
                 WgpuBufferState {
                     buffer: Arc::new(buffer),
+                    size: desc.size,
                     usage: desc.usage,
                 },
             );
@@ -1460,7 +1790,7 @@ impl RhiDevice for WgpuRhiDevice {
         offset: u64,
         data: &[u8],
     ) -> Result<(), RendererError> {
-        let wgpu_buffer = {
+        let (wgpu_buffer, logical_size) = {
             let state = self.state.lock().expect("wgpu RHI mutex poisoned");
             let buffer_state = state.buffers.get(&buffer).ok_or_else(|| {
                 RendererError::Validation(format!("unknown RHI buffer: {}", buffer.0))
@@ -1470,10 +1800,83 @@ impl RhiDevice for WgpuRhiDevice {
                     "RHI buffer write requires COPY_DST usage".to_owned(),
                 ));
             }
-            Arc::clone(&buffer_state.buffer)
+            (Arc::clone(&buffer_state.buffer), buffer_state.size)
         };
-        validate_buffer_range(wgpu_buffer.size(), offset, data.len() as u64, "write")?;
-        self.queue.write_buffer(&wgpu_buffer, offset, data);
+        validate_buffer_range(logical_size, offset, data.len() as u64, "write")?;
+        if data.is_empty() {
+            return Ok(());
+        }
+        let alignment = wgpu::COPY_BUFFER_ALIGNMENT;
+        if offset % alignment == 0 && data.len() as u64 % alignment == 0 {
+            self.queue.write_buffer(&wgpu_buffer, offset, data);
+            return Ok(());
+        }
+        let write_end = offset.checked_add(data.len() as u64).ok_or_else(|| {
+            RendererError::Validation("RHI buffer write range overflows".to_owned())
+        })?;
+        let aligned_start = offset - (offset % alignment);
+        let aligned_end = write_end
+            .checked_add(alignment - 1)
+            .map(|value| value - (value % alignment))
+            .ok_or_else(|| {
+                RendererError::Validation("RHI buffer aligned write range overflows".to_owned())
+            })?;
+        let buffer_size = wgpu_buffer.size();
+        if aligned_end > buffer_size {
+            return Err(RendererError::Validation(
+                "unaligned backend-wgpu RHI buffer writes at the end of a non-aligned buffer are unsupported"
+                    .to_owned(),
+            ));
+        }
+        let aligned_size = aligned_end - aligned_start;
+        let readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RHI buffer write read-modify-readback"),
+            size: aligned_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI buffer write read-modify-readback"),
+            });
+        encoder.copy_buffer_to_buffer(
+            &wgpu_buffer,
+            aligned_start,
+            &readback_buffer,
+            0,
+            aligned_size,
+        );
+        self.queue.submit([encoder.finish()]);
+        self.device.poll(wgpu::Maintain::Wait);
+        let slice = readback_buffer.slice(..);
+        let (sender, receiver) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = sender.send(result);
+        });
+        self.device.poll(wgpu::Maintain::Wait);
+        match receiver.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                return Err(RendererError::Backend(format!(
+                    "RHI buffer write read-modify mapping failed: {err}"
+                )));
+            }
+            Err(_) => {
+                return Err(RendererError::Backend(
+                    "RHI buffer write read-modify callback was canceled".to_owned(),
+                ));
+            }
+        }
+        let mapped = slice.get_mapped_range();
+        let mut aligned_bytes = mapped.to_vec();
+        drop(mapped);
+        readback_buffer.unmap();
+        let relative_start = (offset - aligned_start) as usize;
+        let relative_end = relative_start + data.len();
+        aligned_bytes[relative_start..relative_end].copy_from_slice(data);
+        self.queue
+            .write_buffer(&wgpu_buffer, aligned_start, &aligned_bytes);
         Ok(())
     }
 
@@ -1486,7 +1889,7 @@ impl RhiDevice for WgpuRhiDevice {
         if size == 0 {
             return Ok(Vec::new());
         }
-        let wgpu_buffer = {
+        let (wgpu_buffer, logical_size) = {
             let state = self.state.lock().expect("wgpu RHI mutex poisoned");
             let buffer_state = state.buffers.get(&buffer).ok_or_else(|| {
                 RendererError::Validation(format!("unknown RHI buffer: {}", buffer.0))
@@ -1496,12 +1899,31 @@ impl RhiDevice for WgpuRhiDevice {
                     "RHI buffer read requires COPY_SRC usage".to_owned(),
                 ));
             }
-            Arc::clone(&buffer_state.buffer)
+            (Arc::clone(&buffer_state.buffer), buffer_state.size)
         };
-        validate_buffer_range(wgpu_buffer.size(), offset, size, "read")?;
+        validate_buffer_range(logical_size, offset, size, "read")?;
+        let alignment = wgpu::COPY_BUFFER_ALIGNMENT;
+        let read_end = offset.checked_add(size).ok_or_else(|| {
+            RendererError::Validation("RHI buffer read range overflows".to_owned())
+        })?;
+        let aligned_start = offset - (offset % alignment);
+        let aligned_end = read_end
+            .checked_add(alignment - 1)
+            .map(|value| value - (value % alignment))
+            .ok_or_else(|| {
+                RendererError::Validation("RHI buffer aligned read range overflows".to_owned())
+            })?;
+        let buffer_size = wgpu_buffer.size();
+        if aligned_end > buffer_size {
+            return Err(RendererError::Validation(
+                "unaligned backend-wgpu RHI buffer reads at the end of a non-aligned buffer are unsupported"
+                    .to_owned(),
+            ));
+        }
+        let aligned_size = aligned_end - aligned_start;
         let readback_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("RHI buffer readback"),
-            size,
+            size: aligned_size,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1510,7 +1932,13 @@ impl RhiDevice for WgpuRhiDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("RHI buffer readback"),
             });
-        encoder.copy_buffer_to_buffer(&wgpu_buffer, offset, &readback_buffer, 0, size);
+        encoder.copy_buffer_to_buffer(
+            &wgpu_buffer,
+            aligned_start,
+            &readback_buffer,
+            0,
+            aligned_size,
+        );
         self.queue.submit([encoder.finish()]);
         self.device.poll(wgpu::Maintain::Wait);
 
@@ -1533,7 +1961,11 @@ impl RhiDevice for WgpuRhiDevice {
                 ));
             }
         }
-        let bytes = slice.get_mapped_range().to_vec();
+        let mapped = slice.get_mapped_range();
+        let relative_start = (offset - aligned_start) as usize;
+        let relative_end = relative_start + size as usize;
+        let bytes = mapped[relative_start..relative_end].to_vec();
+        drop(mapped);
         readback_buffer.unmap();
         Ok(bytes)
     }
@@ -1545,13 +1977,51 @@ impl RhiDevice for WgpuRhiDevice {
                 "RHI textures must have non-zero dimensions".to_owned(),
             ));
         }
+        if desc.samples == 0 || !desc.samples.is_power_of_two() {
+            return Err(RendererError::Validation(
+                "RHI texture samples must be a non-zero power of two".to_owned(),
+            ));
+        }
         if desc.usage.is_empty() {
             return Err(RendererError::Validation(
                 "RHI texture usage must not be empty".to_owned(),
             ));
         }
+        if desc.samples > 1
+            && (desc.usage.contains(RhiTextureUsage::COPY_SRC)
+                || desc.usage.contains(RhiTextureUsage::COPY_DST)
+                || desc.usage.contains(RhiTextureUsage::STORAGE))
+        {
+            return Err(RendererError::Validation(
+                "RHI multisampled textures do not support COPY_SRC, COPY_DST, or STORAGE usage"
+                    .to_owned(),
+            ));
+        }
+        if desc.samples > 1 && !desc.usage.contains(RhiTextureUsage::RENDER_ATTACHMENT) {
+            return Err(RendererError::Validation(
+                "backend-wgpu RHI multisampled textures require RENDER_ATTACHMENT usage".to_owned(),
+            ));
+        }
         validate_texture_usage_format(desc.usage, desc.format)?;
         let handle = RhiTexture(self.allocate());
+        let texture_format = map_rhi_texture_format(desc.format);
+        if desc.samples > 1
+            && !texture_format
+                .guaranteed_format_features(self.device.features())
+                .flags
+                .sample_count_supported(desc.samples)
+        {
+            return Err(RendererError::Validation(format!(
+                "backend-wgpu RHI texture format {:?} does not support {}x multisampling",
+                desc.format, desc.samples
+            )));
+        }
+        let mut usage = map_wgpu_texture_usage(desc.usage);
+        if desc.format == TextureFormat::Depth32Float
+            && desc.usage.contains(RhiTextureUsage::COPY_DST)
+        {
+            usage |= wgpu::TextureUsages::RENDER_ATTACHMENT;
+        }
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: desc.label.as_deref(),
             size: wgpu::Extent3d {
@@ -1560,10 +2030,10 @@ impl RhiDevice for WgpuRhiDevice {
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: desc.samples,
             dimension: wgpu::TextureDimension::D2,
-            format: map_rhi_texture_format(desc.format),
-            usage: map_wgpu_texture_usage(desc.usage),
+            format: texture_format,
+            usage,
             view_formats: &[],
         });
         self.state
@@ -1574,8 +2044,11 @@ impl RhiDevice for WgpuRhiDevice {
                 handle,
                 WgpuTextureState {
                     texture: Arc::new(texture),
+                    width: desc.width,
+                    height: desc.height,
                     format: desc.format,
                     usage: desc.usage,
+                    samples: desc.samples,
                 },
             );
         Ok(handle)
@@ -1589,6 +2062,866 @@ impl RhiDevice for WgpuRhiDevice {
             .get(&texture)
             .map(|state| state.usage)
             .ok_or_else(|| RendererError::Validation(format!("unknown RHI texture: {}", texture.0)))
+    }
+
+    fn texture_samples(&self, texture: RhiTexture) -> Result<u32, RendererError> {
+        self.state
+            .lock()
+            .expect("wgpu RHI mutex poisoned")
+            .textures
+            .get(&texture)
+            .map(|state| state.samples)
+            .ok_or_else(|| RendererError::Validation(format!("unknown RHI texture: {}", texture.0)))
+    }
+
+    fn custom_resolve_support(&self) -> RhiCustomResolveSupport {
+        RhiCustomResolveSupport::backend_wgpu()
+    }
+
+    fn resolve_texture_rgba8(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+    ) -> Result<(), RendererError> {
+        let (source_texture, target_texture) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_rgba8_resolve_textures(source, source_state, target, target_state)?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI explicit RGBA8 MSAA resolve"),
+            });
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("RHI explicit RGBA8 MSAA resolve"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &source_view,
+                    resolve_target: Some(&target_view),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+        }
+        self.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    fn resolve_texture_rgba8_with_mode(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        mode: RhiResolveMode,
+    ) -> Result<(), RendererError> {
+        match mode {
+            RhiResolveMode::Average => self.resolve_texture_rgba8(source, target),
+            RhiResolveMode::FirstSample | RhiResolveMode::Sample(_) => {
+                let sample_index = match mode {
+                    RhiResolveMode::FirstSample => 0,
+                    RhiResolveMode::Sample(sample_index) => sample_index,
+                    RhiResolveMode::Average => unreachable!("average mode is handled above"),
+                };
+                let (source_texture, target_texture, width, height) = {
+                    let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+                    let Some(source_state) = state.textures.get(&source) else {
+                        return Err(RendererError::Validation(format!(
+                            "unknown RHI resolve source texture: {}",
+                            source.0
+                        )));
+                    };
+                    let Some(target_state) = state.textures.get(&target) else {
+                        return Err(RendererError::Validation(format!(
+                            "unknown RHI resolve target texture: {}",
+                            target.0
+                        )));
+                    };
+                    validate_wgpu_rgba8_custom_resolve_textures(
+                        source,
+                        source_state,
+                        target,
+                        target_state,
+                    )?;
+                    if sample_index >= source_state.samples {
+                        return Err(RendererError::Validation(format!(
+                            "RHI custom resolve sample index {sample_index} exceeds source sample count {}",
+                            source_state.samples
+                        )));
+                    }
+                    (
+                        Arc::clone(&source_state.texture),
+                        Arc::clone(&target_state.texture),
+                        source_state.width,
+                        source_state.height,
+                    )
+                };
+                let source_view =
+                    source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let target_view =
+                    target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let shader_source = format!(
+                    r#"
+                        const SAMPLE_INDEX: i32 = {sample_index};
+
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @group(0) @binding(1)
+                        var target_tex: texture_storage_2d<rgba8unorm, write>;
+
+                        @compute @workgroup_size(8, 8)
+                        fn main(@builtin(global_invocation_id) id: vec3<u32>) {{
+                            let dims = textureDimensions(target_tex);
+                            if (id.x >= dims.x || id.y >= dims.y) {{
+                                return;
+                            }}
+                            let value = textureLoad(source_tex, vec2<i32>(i32(id.x), i32(id.y)), SAMPLE_INDEX);
+                            textureStore(target_tex, vec2<i32>(i32(id.x), i32(id.y)), value);
+                        }}
+                    "#
+                );
+                let shader = self
+                    .device
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("RHI first-sample RGBA8 MSAA resolve shader"),
+                        source: wgpu::ShaderSource::Wgsl(shader_source.into()),
+                    });
+                let bind_group_layout =
+                    self.device
+                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: Some("RHI first-sample RGBA8 MSAA resolve layout"),
+                            entries: &[
+                                wgpu::BindGroupLayoutEntry {
+                                    binding: 0,
+                                    visibility: wgpu::ShaderStages::COMPUTE,
+                                    ty: wgpu::BindingType::Texture {
+                                        sample_type: wgpu::TextureSampleType::Float {
+                                            filterable: false,
+                                        },
+                                        view_dimension: wgpu::TextureViewDimension::D2,
+                                        multisampled: true,
+                                    },
+                                    count: None,
+                                },
+                                wgpu::BindGroupLayoutEntry {
+                                    binding: 1,
+                                    visibility: wgpu::ShaderStages::COMPUTE,
+                                    ty: wgpu::BindingType::StorageTexture {
+                                        access: wgpu::StorageTextureAccess::WriteOnly,
+                                        format: wgpu::TextureFormat::Rgba8Unorm,
+                                        view_dimension: wgpu::TextureViewDimension::D2,
+                                    },
+                                    count: None,
+                                },
+                            ],
+                        });
+                let pipeline_layout =
+                    self.device
+                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                            label: Some("RHI first-sample RGBA8 MSAA resolve pipeline layout"),
+                            bind_group_layouts: &[&bind_group_layout],
+                            push_constant_ranges: &[],
+                        });
+                let pipeline =
+                    self.device
+                        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                            label: Some("RHI first-sample RGBA8 MSAA resolve pipeline"),
+                            layout: Some(&pipeline_layout),
+                            module: &shader,
+                            entry_point: "main",
+                            compilation_options: wgpu::PipelineCompilationOptions::default(),
+                        });
+                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("RHI first-sample RGBA8 MSAA resolve bind group"),
+                    layout: &bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&source_view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&target_view),
+                        },
+                    ],
+                });
+                let mut encoder =
+                    self.device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("RHI first-sample RGBA8 MSAA resolve"),
+                        });
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("RHI first-sample RGBA8 MSAA resolve"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, &bind_group, &[]);
+                    pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+                }
+                self.queue.submit([encoder.finish()]);
+                Ok(())
+            }
+        }
+    }
+
+    fn resolve_texture_rgba8_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        let (source_texture, target_texture, width, height) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_rgba8_custom_resolve_textures(
+                source,
+                source_state,
+                target,
+                target_state,
+            )?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+                source_state.width,
+                source_state.height,
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shader_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: shader.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(shader.source.clone().into()),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI custom RGBA8 MSAA resolve layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: true,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: wgpu::StorageTextureAccess::WriteOnly,
+                                format: wgpu::TextureFormat::Rgba8Unorm,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI custom RGBA8 MSAA resolve pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: shader.label.as_deref(),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: &shader.entry_point,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI custom RGBA8 MSAA resolve bind group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&target_view),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI custom RGBA8 MSAA resolve"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RHI custom RGBA8 MSAA resolve"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+        self.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    fn resolve_texture_rgba16f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        let (source_texture, target_texture, width, height) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_rgba16f_custom_resolve_textures(
+                source,
+                source_state,
+                target,
+                target_state,
+            )?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+                source_state.width,
+                source_state.height,
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shader_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: shader.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(shader.source.clone().into()),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI custom RGBA16F MSAA resolve layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: true,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: wgpu::StorageTextureAccess::WriteOnly,
+                                format: wgpu::TextureFormat::Rgba16Float,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI custom RGBA16F MSAA resolve pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: shader.label.as_deref(),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: &shader.entry_point,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI custom RGBA16F MSAA resolve bind group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&target_view),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI custom RGBA16F MSAA resolve"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RHI custom RGBA16F MSAA resolve"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+        self.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    fn resolve_texture_rgba32f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        let (source_texture, target_texture, width, height) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_rgba32f_custom_resolve_textures(
+                source,
+                source_state,
+                target,
+                target_state,
+            )?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+                source_state.width,
+                source_state.height,
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shader_module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: shader.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(shader.source.clone().into()),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI custom RGBA32F MSAA resolve layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: true,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::StorageTexture {
+                                access: wgpu::StorageTextureAccess::WriteOnly,
+                                format: wgpu::TextureFormat::Rgba32Float,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI custom RGBA32F MSAA resolve pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: shader.label.as_deref(),
+                layout: Some(&pipeline_layout),
+                module: &shader_module,
+                entry_point: &shader.entry_point,
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI custom RGBA32F MSAA resolve bind group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&target_view),
+                },
+            ],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI custom RGBA32F MSAA resolve"),
+            });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("RHI custom RGBA32F MSAA resolve"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.dispatch_workgroups(width.div_ceil(8), height.div_ceil(8), 1);
+        }
+        self.queue.submit([encoder.finish()]);
+        Ok(())
+    }
+
+    fn resolve_texture_8bit_color_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        let (source_texture, target_texture, target_format) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_8bit_color_fragment_resolve_textures(
+                source,
+                source_state,
+                target,
+                target_state,
+            )?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+                map_color_texture_format(target_state.format)?,
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let vertex_shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("RHI custom 8-bit color MSAA resolve fullscreen vertex"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+                        @vertex
+                        fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                            let x = f32((vertex_index << 1u) & 2u);
+                            let y = f32(vertex_index & 2u);
+                            return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                        }
+                    "#
+                    .into(),
+                ),
+            });
+        let fragment_shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: shader.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(shader.source.clone().into()),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI custom 8-bit color MSAA resolve layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: true,
+                        },
+                        count: None,
+                    }],
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI custom 8-bit color MSAA resolve pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let color_targets = [Some(wgpu::ColorTargetState {
+            format: target_format,
+            blend: Some(wgpu::BlendState::REPLACE),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: shader.label.as_deref(),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &vertex_shader,
+                    entry_point: "vs",
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &fragment_shader,
+                    entry_point: &shader.entry_point,
+                    targets: &color_targets,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview: None,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI custom 8-bit color MSAA resolve bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&source_view),
+            }],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI custom 8-bit color MSAA resolve"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("RHI custom 8-bit color MSAA resolve"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.device.poll(wgpu::Maintain::Wait);
+        Ok(())
+    }
+
+    fn resolve_texture_depth32f_with_shader(
+        &self,
+        source: RhiTexture,
+        target: RhiTexture,
+        shader: &RhiResolveShaderDesc,
+    ) -> Result<(), RendererError> {
+        validate_resolve_shader_desc(shader)?;
+        let (source_texture, target_texture) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let Some(source_state) = state.textures.get(&source) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve source texture: {}",
+                    source.0
+                )));
+            };
+            let Some(target_state) = state.textures.get(&target) else {
+                return Err(RendererError::Validation(format!(
+                    "unknown RHI resolve target texture: {}",
+                    target.0
+                )));
+            };
+            validate_wgpu_depth32f_custom_resolve_textures(
+                source,
+                source_state,
+                target,
+                target_state,
+            )?;
+            (
+                Arc::clone(&source_state.texture),
+                Arc::clone(&target_state.texture),
+            )
+        };
+        let source_view = source_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let vertex_shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("RHI custom Depth32F MSAA resolve fullscreen vertex"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+                        @vertex
+                        fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                            let x = f32((vertex_index << 1u) & 2u);
+                            let y = f32(vertex_index & 2u);
+                            return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                        }
+                    "#
+                    .into(),
+                ),
+            });
+        let fragment_shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: shader.label.as_deref(),
+                source: wgpu::ShaderSource::Wgsl(shader.source.clone().into()),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI custom Depth32F MSAA resolve layout"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: true,
+                        },
+                        count: None,
+                    }],
+                });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI custom Depth32F MSAA resolve pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: shader.label.as_deref(),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &vertex_shader,
+                    entry_point: "vs",
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &fragment_shader,
+                    entry_point: &shader.entry_point,
+                    targets: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview: None,
+            });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI custom Depth32F MSAA resolve bind group"),
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&source_view),
+            }],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI custom Depth32F MSAA resolve"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("RHI custom Depth32F MSAA resolve"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &target_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.device.poll(wgpu::Maintain::Wait);
+        Ok(())
     }
 
     fn write_texture_rgba8(
@@ -1607,9 +2940,9 @@ impl RhiDevice for WgpuRhiDevice {
                     "RHI texture write requires COPY_DST usage".to_owned(),
                 ));
             }
-            if texture_state.format != TextureFormat::Rgba8Unorm {
+            if !is_rhi_8bit_color_texture_format(texture_state.format) {
                 return Err(RendererError::Validation(
-                    "RHI RGBA8 texture writes require Rgba8Unorm format".to_owned(),
+                    "RHI RGBA8 texture writes require an 8-bit color format".to_owned(),
                 ));
             }
             Arc::clone(&texture_state.texture)
@@ -1778,30 +3111,302 @@ impl RhiDevice for WgpuRhiDevice {
         Ok(())
     }
 
-    fn read_texture_rgba8(
+    fn write_texture_depth32f(
         &self,
         texture: RhiTexture,
         region: RhiTextureRegion,
-    ) -> Result<Vec<u8>, RendererError> {
+        data: &[f32],
+    ) -> Result<(), RendererError> {
         let wgpu_texture = {
             let state = self.state.lock().expect("wgpu RHI mutex poisoned");
             let texture_state = state.textures.get(&texture).ok_or_else(|| {
                 RendererError::Validation(format!("unknown RHI texture: {}", texture.0))
             })?;
-            if !texture_state.usage.contains(RhiTextureUsage::COPY_SRC) {
+            if !texture_state.usage.contains(RhiTextureUsage::COPY_DST) {
                 return Err(RendererError::Validation(
-                    "RHI texture read requires COPY_SRC usage".to_owned(),
+                    "RHI texture write requires COPY_DST usage".to_owned(),
                 ));
             }
-            if texture_state.format != TextureFormat::Rgba8Unorm {
+            if texture_state.format != TextureFormat::Depth32Float {
                 return Err(RendererError::Validation(
-                    "RHI RGBA8 texture reads require Rgba8Unorm format".to_owned(),
+                    "RHI depth32f texture writes require Depth32Float format".to_owned(),
                 ));
             }
             Arc::clone(&texture_state.texture)
         };
         let size = wgpu_texture.size();
         validate_texture_region(size.width, size.height, region)?;
+        let expected = depth32f_region_len(region)?;
+        if data.len() != expected {
+            return Err(RendererError::Validation(format!(
+                "RHI depth32f texture write expected {expected} values but received {}",
+                data.len()
+            )));
+        }
+        if data.iter().any(|value| !value.is_finite()) {
+            return Err(RendererError::Validation(
+                "RHI depth32f texture writes require finite values".to_owned(),
+            ));
+        }
+        let byte_len = data
+            .len()
+            .checked_mul(std::mem::size_of::<f32>())
+            .ok_or_else(|| {
+                RendererError::Validation("RHI depth32f write size overflows".to_owned())
+            })?;
+        let data_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RHI depth32f write values"),
+            size: byte_len as u64,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: true,
+        });
+        {
+            let mut mapped = data_buffer.slice(..).get_mapped_range_mut();
+            for (index, value) in data.iter().enumerate() {
+                let byte_start = index * std::mem::size_of::<f32>();
+                mapped[byte_start..byte_start + 4].copy_from_slice(&value.to_le_bytes());
+            }
+        }
+        data_buffer.unmap();
+        let mut params = [0_u8; 16];
+        params[0..4].copy_from_slice(&region.x.to_le_bytes());
+        params[4..8].copy_from_slice(&region.y.to_le_bytes());
+        params[8..12].copy_from_slice(&region.width.to_le_bytes());
+        params[12..16].copy_from_slice(&region.height.to_le_bytes());
+        let params_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RHI depth32f write params"),
+            size: params.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: true,
+        });
+        params_buffer
+            .slice(..)
+            .get_mapped_range_mut()
+            .copy_from_slice(&params);
+        params_buffer.unmap();
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("RHI depth32f write shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+struct Params {
+    origin_x: u32,
+    origin_y: u32,
+    width: u32,
+    height: u32,
+};
+
+@group(0) @binding(0)
+var<storage, read> depth_values: array<f32>;
+
+@group(0) @binding(1)
+var<uniform> params: Params;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0)
+    );
+    return vec4<f32>(positions[vertex_index], 0.0, 1.0);
+}
+
+@fragment
+fn fs_main(@builtin(position) position: vec4<f32>) -> @builtin(frag_depth) f32 {
+    let x = u32(position.x) - params.origin_x;
+    let y = u32(position.y) - params.origin_y;
+    let index = y * params.width + x;
+    return depth_values[index];
+}
+"#
+                    .into(),
+                ),
+            });
+        let bind_group_layout =
+            self.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RHI depth32f write bind group layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("RHI depth32f write bind group"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: data_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let pipeline_layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("RHI depth32f write pipeline layout"),
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let pipeline = self
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("RHI depth32f write pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Always,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview: None,
+            });
+        let view = wgpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("RHI depth32f write encoder"),
+            });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("RHI depth32f write pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            pass.set_scissor_rect(region.x, region.y, region.width, region.height);
+            pass.draw(0..3, 0..1);
+        }
+        self.queue.submit([encoder.finish()]);
+        self.device.poll(wgpu::Maintain::Wait);
+        Ok(())
+    }
+
+    fn read_texture_rgba8(
+        &self,
+        texture: RhiTexture,
+        region: RhiTextureRegion,
+    ) -> Result<Vec<u8>, RendererError> {
+        let (wgpu_texture, samples) = {
+            let state = self.state.lock().expect("wgpu RHI mutex poisoned");
+            let texture_state = state.textures.get(&texture).ok_or_else(|| {
+                RendererError::Validation(format!("unknown RHI texture: {}", texture.0))
+            })?;
+            if texture_state.samples == 1
+                && !texture_state.usage.contains(RhiTextureUsage::COPY_SRC)
+            {
+                return Err(RendererError::Validation(
+                    "RHI texture read requires COPY_SRC usage".to_owned(),
+                ));
+            }
+            if texture_state.samples > 1
+                && !texture_state
+                    .usage
+                    .contains(RhiTextureUsage::RENDER_ATTACHMENT)
+            {
+                return Err(RendererError::Validation(
+                    "RHI multisampled texture read requires RENDER_ATTACHMENT usage for resolve"
+                        .to_owned(),
+                ));
+            }
+            if !is_rhi_8bit_color_texture_format(texture_state.format) {
+                return Err(RendererError::Validation(
+                    "RHI RGBA8 texture reads require an 8-bit color format".to_owned(),
+                ));
+            }
+            (Arc::clone(&texture_state.texture), texture_state.samples)
+        };
+        let size = wgpu_texture.size();
+        validate_texture_region(size.width, size.height, region)?;
+        let read_source = if samples > 1 {
+            let resolve = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("RHI multisampled texture resolve"),
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu_texture.format(),
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let source_view = wgpu_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let resolve_view = resolve.create_view(&wgpu::TextureViewDescriptor::default());
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("RHI multisampled texture resolve"),
+                });
+            {
+                let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("RHI multisampled texture resolve"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &source_view,
+                        resolve_target: Some(&resolve_view),
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Discard,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+            self.queue.submit([encoder.finish()]);
+            self.device.poll(wgpu::Maintain::Wait);
+            Arc::new(resolve)
+        } else {
+            Arc::clone(&wgpu_texture)
+        };
         let row_bytes = region.width * RGBA8_BYTES_PER_PIXEL;
         let padded_row_bytes = align_to(row_bytes, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
         let readback_size = padded_row_bytes as u64 * region.height as u64;
@@ -1818,7 +3423,7 @@ impl RhiDevice for WgpuRhiDevice {
             });
         encoder.copy_texture_to_buffer(
             wgpu::ImageCopyTexture {
-                texture: &wgpu_texture,
+                texture: &read_source,
                 mip_level: 0,
                 origin: wgpu::Origin3d {
                     x: region.x,
@@ -2425,7 +4030,10 @@ impl RhiDevice for WgpuRhiDevice {
                         conservative: false,
                     },
                     depth_stencil,
-                    multisample: wgpu::MultisampleState::default(),
+                    multisample: wgpu::MultisampleState {
+                        count: desc.sample_count,
+                        ..wgpu::MultisampleState::default()
+                    },
                     fragment,
                     multiview: None,
                 })
@@ -2818,24 +4426,31 @@ fn validate_graphics_pipeline_desc(desc: &RhiGraphicsPipelineDesc) -> Result<(),
             "RHI graphics pipeline vertex entry point must not be empty".to_owned(),
         ));
     }
+    if desc.sample_count == 0 || !desc.sample_count.is_power_of_two() {
+        return Err(RendererError::PipelineCompile(
+            "RHI graphics pipeline sample_count must be a non-zero power of two".to_owned(),
+        ));
+    }
     match (
         desc.fragment_shader,
         desc.fragment_entry.as_deref(),
         desc.color_format,
+        desc.depth_format,
     ) {
-        (Some(_), Some(entry), Some(_)) if !entry.trim().is_empty() => {}
-        (Some(_), _, _) => {
+        (Some(_), Some(entry), Some(_), _) if !entry.trim().is_empty() => {}
+        (Some(_), Some(entry), None, Some(_)) if !entry.trim().is_empty() => {}
+        (Some(_), _, _, _) => {
             return Err(RendererError::PipelineCompile(
-                "RHI graphics pipeline fragment shader requires a non-empty entry point and color format"
+                "RHI graphics pipeline fragment shader requires a non-empty entry point and a color or depth format"
                     .to_owned(),
             ));
         }
-        (None, Some(_), _) => {
+        (None, Some(_), _, _) => {
             return Err(RendererError::PipelineCompile(
                 "RHI graphics pipeline fragment entry requires a fragment shader".to_owned(),
             ));
         }
-        (None, None, _) => {}
+        (None, None, _, _) => {}
     }
     if desc.color_format.is_some() && desc.fragment_shader.is_none() {
         return Err(RendererError::PipelineCompile(
@@ -2863,6 +4478,21 @@ fn validate_graphics_pipeline_desc(desc: &RhiGraphicsPipelineDesc) -> Result<(),
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_resolve_shader_desc(desc: &RhiResolveShaderDesc) -> Result<(), RendererError> {
+    validate_rhi_label(desc.label.as_deref())?;
+    if desc.source.trim().is_empty() {
+        return Err(RendererError::ShaderCompile(
+            "RHI resolve shader source must not be empty".to_owned(),
+        ));
+    }
+    if desc.entry_point.trim().is_empty() {
+        return Err(RendererError::ShaderCompile(
+            "RHI resolve shader entry point must not be empty".to_owned(),
+        ));
     }
     Ok(())
 }
@@ -3332,12 +4962,21 @@ fn validate_headless_render_targets_for_pipeline(
         .depth_target
         .map(|target| headless_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| headless_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| headless_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 fn validate_headless_indirect_render_targets_for_pipeline(
@@ -3353,12 +4992,21 @@ fn validate_headless_indirect_render_targets_for_pipeline(
         .depth_target
         .map(|target| headless_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| headless_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| headless_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 fn validate_headless_indexed_indirect_render_targets_for_pipeline(
@@ -3374,12 +5022,21 @@ fn validate_headless_indexed_indirect_render_targets_for_pipeline(
         .depth_target
         .map(|target| headless_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| headless_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| headless_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 fn headless_texture_format(
@@ -3394,6 +5051,42 @@ fn headless_texture_format(
         .ok_or_else(|| {
             RendererError::Validation(format!("unknown RHI {role} texture: {}", texture.0))
         })
+}
+
+fn headless_texture_samples(
+    state: &HeadlessRhiState,
+    texture: RhiTexture,
+    role: &str,
+) -> Result<u32, RendererError> {
+    state
+        .textures
+        .get(&texture)
+        .map(|texture_state| texture_state.samples)
+        .ok_or_else(|| {
+            RendererError::Validation(format!("unknown RHI {role} texture: {}", texture.0))
+        })
+}
+
+fn validate_headless_rgba8_resolve_textures(
+    source: RhiTexture,
+    source_state: &HeadlessTextureState,
+    target: RhiTexture,
+    target_state: &HeadlessTextureState,
+) -> Result<(), RendererError> {
+    validate_rgba8_resolve_shape_and_usage(
+        source,
+        source_state.width,
+        source_state.height,
+        source_state.samples,
+        source_state.format,
+        source_state.usage,
+        target,
+        target_state.width,
+        target_state.height,
+        target_state.samples,
+        target_state.format,
+        target_state.usage,
+    )
 }
 
 fn validate_headless_resource_barrier(
@@ -3714,12 +5407,21 @@ fn validate_wgpu_render_targets_for_pipeline(
         .depth_target
         .map(|target| wgpu_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| wgpu_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| wgpu_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 #[cfg(feature = "backend-wgpu")]
@@ -3736,12 +5438,21 @@ fn validate_wgpu_indirect_render_targets_for_pipeline(
         .depth_target
         .map(|target| wgpu_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| wgpu_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| wgpu_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 #[cfg(feature = "backend-wgpu")]
@@ -3758,12 +5469,21 @@ fn validate_wgpu_indexed_indirect_render_targets_for_pipeline(
         .depth_target
         .map(|target| wgpu_texture_format(state, target, "depth target"))
         .transpose()?;
+    let color_samples = desc
+        .color_target
+        .map(|target| wgpu_texture_samples(state, target, "color target"))
+        .transpose()?;
+    let depth_samples = desc
+        .depth_target
+        .map(|target| wgpu_texture_samples(state, target, "depth target"))
+        .transpose()?;
     validate_pipeline_target_formats(
         pipeline.color_format,
         pipeline.depth_format,
         color_format,
         depth_format,
-    )
+    )?;
+    validate_pipeline_target_samples(pipeline.sample_count, color_samples, depth_samples)
 }
 
 #[cfg(feature = "backend-wgpu")]
@@ -3779,6 +5499,275 @@ fn wgpu_texture_format(
         .ok_or_else(|| {
             RendererError::Validation(format!("unknown RHI {role} texture: {}", texture.0))
         })
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn wgpu_texture_samples(
+    state: &WgpuRhiState,
+    texture: RhiTexture,
+    role: &str,
+) -> Result<u32, RendererError> {
+    state
+        .textures
+        .get(&texture)
+        .map(|texture_state| texture_state.samples)
+        .ok_or_else(|| {
+            RendererError::Validation(format!("unknown RHI {role} texture: {}", texture.0))
+        })
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_rgba8_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    validate_rgba8_resolve_shape_and_usage(
+        source,
+        source_state.width,
+        source_state.height,
+        source_state.samples,
+        source_state.format,
+        source_state.usage,
+        target,
+        target_state.width,
+        target_state.height,
+        target_state.samples,
+        target_state.format,
+        target_state.usage,
+    )
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_rgba8_custom_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    if source_state.samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_state.samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_state.width != target_state.width || source_state.height != target_state.height {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if source_state.format != TextureFormat::Rgba8Unorm
+        || target_state.format != TextureFormat::Rgba8Unorm
+    {
+        return Err(RendererError::Validation(
+            "RHI custom RGBA8 resolve requires Rgba8Unorm source and target".to_owned(),
+        ));
+    }
+    if !source_state.usage.contains(RhiTextureUsage::SAMPLED) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source requires SAMPLED usage".to_owned(),
+        ));
+    }
+    if !target_state.usage.contains(RhiTextureUsage::STORAGE) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve target requires STORAGE usage".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_rgba16f_custom_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    if source_state.samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_state.samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_state.width != target_state.width || source_state.height != target_state.height {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if source_state.format != TextureFormat::Rgba16Float
+        || target_state.format != TextureFormat::Rgba16Float
+    {
+        return Err(RendererError::Validation(
+            "RHI custom RGBA16F resolve requires Rgba16Float source and target".to_owned(),
+        ));
+    }
+    if !source_state.usage.contains(RhiTextureUsage::SAMPLED) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source requires SAMPLED usage".to_owned(),
+        ));
+    }
+    if !target_state.usage.contains(RhiTextureUsage::STORAGE) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve target requires STORAGE usage".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_rgba32f_custom_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    if source_state.samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_state.samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_state.width != target_state.width || source_state.height != target_state.height {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if source_state.format != TextureFormat::Rgba32Float
+        || target_state.format != TextureFormat::Rgba32Float
+    {
+        return Err(RendererError::Validation(
+            "RHI custom RGBA32F resolve requires Rgba32Float source and target".to_owned(),
+        ));
+    }
+    if !source_state.usage.contains(RhiTextureUsage::SAMPLED) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve source requires SAMPLED usage".to_owned(),
+        ));
+    }
+    if !target_state.usage.contains(RhiTextureUsage::STORAGE) {
+        return Err(RendererError::Validation(
+            "RHI custom resolve target requires STORAGE usage".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_8bit_color_fragment_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    if source_state.samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom 8-bit color resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_state.samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom 8-bit color resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_state.width != target_state.width || source_state.height != target_state.height {
+        return Err(RendererError::Validation(
+            "RHI custom 8-bit color resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if !is_rhi_8bit_color_texture_format(source_state.format)
+        || !is_rhi_8bit_color_texture_format(target_state.format)
+    {
+        return Err(RendererError::Validation(
+            "RHI custom 8-bit color resolve requires 8-bit color source and target".to_owned(),
+        ));
+    }
+    if source_state.format != target_state.format {
+        return Err(RendererError::Validation(
+            "RHI custom 8-bit color resolve requires matching source and target formats".to_owned(),
+        ));
+    }
+    if !source_state.usage.contains(RhiTextureUsage::SAMPLED) {
+        return Err(RendererError::Validation(
+            "RHI custom 8-bit color resolve source requires SAMPLED usage".to_owned(),
+        ));
+    }
+    if !target_state
+        .usage
+        .contains(RhiTextureUsage::RENDER_ATTACHMENT)
+    {
+        return Err(RendererError::Validation(
+            "RHI custom 8-bit color resolve target requires RENDER_ATTACHMENT usage".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "backend-wgpu")]
+fn validate_wgpu_depth32f_custom_resolve_textures(
+    source: RhiTexture,
+    source_state: &WgpuTextureState,
+    target: RhiTexture,
+    target_state: &WgpuTextureState,
+) -> Result<(), RendererError> {
+    if source_state.samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom depth resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_state.samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI custom depth resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_state.width != target_state.width || source_state.height != target_state.height {
+        return Err(RendererError::Validation(
+            "RHI custom depth resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if source_state.format != TextureFormat::Depth32Float
+        || target_state.format != TextureFormat::Depth32Float
+    {
+        return Err(RendererError::Validation(
+            "RHI custom depth resolve requires Depth32Float source and target".to_owned(),
+        ));
+    }
+    if !source_state.usage.contains(RhiTextureUsage::SAMPLED) {
+        return Err(RendererError::Validation(
+            "RHI custom depth resolve source requires SAMPLED usage".to_owned(),
+        ));
+    }
+    if !target_state
+        .usage
+        .contains(RhiTextureUsage::RENDER_ATTACHMENT)
+    {
+        return Err(RendererError::Validation(
+            "RHI custom depth resolve target requires RENDER_ATTACHMENT usage".to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "backend-wgpu")]
@@ -3858,6 +5847,13 @@ fn is_storage_texture_format(format: TextureFormat) -> bool {
     matches!(
         format,
         TextureFormat::Rgba8Unorm | TextureFormat::Rgba16Float | TextureFormat::Rgba32Float
+    )
+}
+
+fn is_rhi_8bit_color_texture_format(format: TextureFormat) -> bool {
+    matches!(
+        format,
+        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::Bgra8UnormSrgb
     )
 }
 
@@ -4000,6 +5996,73 @@ fn validate_pipeline_target_formats(
     Ok(())
 }
 
+fn validate_pipeline_target_samples(
+    pipeline_sample_count: u32,
+    color_target_samples: Option<u32>,
+    depth_target_samples: Option<u32>,
+) -> Result<(), RendererError> {
+    if color_target_samples.is_some_and(|samples| samples != pipeline_sample_count) {
+        return Err(RendererError::Validation(
+            "RHI render pass color target sample count must match the graphics pipeline".to_owned(),
+        ));
+    }
+    if depth_target_samples.is_some_and(|samples| samples != pipeline_sample_count) {
+        return Err(RendererError::Validation(
+            "RHI render pass depth target sample count must match the graphics pipeline".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_rgba8_resolve_shape_and_usage(
+    source: RhiTexture,
+    source_width: u32,
+    source_height: u32,
+    source_samples: u32,
+    source_format: TextureFormat,
+    source_usage: RhiTextureUsage,
+    target: RhiTexture,
+    target_width: u32,
+    target_height: u32,
+    target_samples: u32,
+    target_format: TextureFormat,
+    target_usage: RhiTextureUsage,
+) -> Result<(), RendererError> {
+    if source_samples <= 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI resolve source texture {} must be multisampled",
+            source.0
+        )));
+    }
+    if target_samples != 1 {
+        return Err(RendererError::Validation(format!(
+            "RHI resolve target texture {} must be single-sampled",
+            target.0
+        )));
+    }
+    if source_width != target_width || source_height != target_height {
+        return Err(RendererError::Validation(
+            "RHI resolve source and target dimensions must match".to_owned(),
+        ));
+    }
+    if source_format != TextureFormat::Rgba8Unorm || target_format != TextureFormat::Rgba8Unorm {
+        return Err(RendererError::Validation(
+            "RHI explicit RGBA8 resolve requires Rgba8Unorm source and target".to_owned(),
+        ));
+    }
+    if !source_usage.contains(RhiTextureUsage::RENDER_ATTACHMENT) {
+        return Err(RendererError::Validation(
+            "RHI resolve source requires RENDER_ATTACHMENT usage".to_owned(),
+        ));
+    }
+    if !target_usage.contains(RhiTextureUsage::RENDER_ATTACHMENT) {
+        return Err(RendererError::Validation(
+            "RHI resolve target requires RENDER_ATTACHMENT usage".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn depth_pipeline_texture_format(format: DepthFormat) -> Result<TextureFormat, RendererError> {
     match format {
         DepthFormat::D32Float => Ok(TextureFormat::Depth32Float),
@@ -4097,7 +6160,6 @@ fn rgba8_region_len(region: RhiTextureRegion) -> Result<usize, RendererError> {
         .map_err(|_| RendererError::Validation("RHI RGBA8 region size is too large".to_owned()))
 }
 
-#[cfg(feature = "backend-wgpu")]
 fn depth32f_region_len(region: RhiTextureRegion) -> Result<usize, RendererError> {
     let pixel_count = region.width.checked_mul(region.height).ok_or_else(|| {
         RendererError::Validation("RHI depth32f region size overflows".to_owned())
@@ -4155,6 +6217,22 @@ fn copy_rgba32f_region_to_texture(
         let dst_start = ((region.y as usize + row) * texture_stride) + region.x as usize * 4;
         texture[dst_start..dst_start + row_channels]
             .copy_from_slice(&data[src_start..src_start + row_channels]);
+    }
+}
+
+fn copy_depth32f_region_to_texture(
+    texture: &mut [f32],
+    texture_width: u32,
+    region: RhiTextureRegion,
+    data: &[f32],
+) {
+    let row_values = region.width as usize;
+    let texture_stride = texture_width as usize;
+    for row in 0..region.height as usize {
+        let src_start = row * row_values;
+        let dst_start = ((region.y as usize + row) * texture_stride) + region.x as usize;
+        texture[dst_start..dst_start + row_values]
+            .copy_from_slice(&data[src_start..src_start + row_values]);
     }
 }
 
@@ -4344,12 +6422,40 @@ fn map_depth_format(format: DepthFormat) -> wgpu::TextureFormat {
 #[cfg(feature = "backend-wgpu")]
 fn map_vertex_format(format: VertexFormat) -> Result<wgpu::VertexFormat, RendererError> {
     match format {
+        VertexFormat::Uint8x2 => Ok(wgpu::VertexFormat::Uint8x2),
+        VertexFormat::Uint8x4 => Ok(wgpu::VertexFormat::Uint8x4),
+        VertexFormat::Sint8x2 => Ok(wgpu::VertexFormat::Sint8x2),
+        VertexFormat::Sint8x4 => Ok(wgpu::VertexFormat::Sint8x4),
+        VertexFormat::Unorm8x2 => Ok(wgpu::VertexFormat::Unorm8x2),
+        VertexFormat::Unorm8x4 => Ok(wgpu::VertexFormat::Unorm8x4),
+        VertexFormat::Snorm8x2 => Ok(wgpu::VertexFormat::Snorm8x2),
+        VertexFormat::Snorm8x4 => Ok(wgpu::VertexFormat::Snorm8x4),
+        VertexFormat::Uint16x2 => Ok(wgpu::VertexFormat::Uint16x2),
+        VertexFormat::Uint16x4 => Ok(wgpu::VertexFormat::Uint16x4),
+        VertexFormat::Sint16x2 => Ok(wgpu::VertexFormat::Sint16x2),
+        VertexFormat::Sint16x4 => Ok(wgpu::VertexFormat::Sint16x4),
+        VertexFormat::Unorm16x2 => Ok(wgpu::VertexFormat::Unorm16x2),
+        VertexFormat::Unorm16x4 => Ok(wgpu::VertexFormat::Unorm16x4),
+        VertexFormat::Snorm16x2 => Ok(wgpu::VertexFormat::Snorm16x2),
+        VertexFormat::Snorm16x4 => Ok(wgpu::VertexFormat::Snorm16x4),
+        VertexFormat::Float16x2 => Ok(wgpu::VertexFormat::Float16x2),
+        VertexFormat::Float16x4 => Ok(wgpu::VertexFormat::Float16x4),
+        VertexFormat::Float64 => Ok(wgpu::VertexFormat::Float64),
+        VertexFormat::Float64x2 => Ok(wgpu::VertexFormat::Float64x2),
+        VertexFormat::Float64x3 => Ok(wgpu::VertexFormat::Float64x3),
+        VertexFormat::Float64x4 => Ok(wgpu::VertexFormat::Float64x4),
+        VertexFormat::Float32 => Ok(wgpu::VertexFormat::Float32),
         VertexFormat::Float32x2 => Ok(wgpu::VertexFormat::Float32x2),
         VertexFormat::Float32x3 => Ok(wgpu::VertexFormat::Float32x3),
         VertexFormat::Float32x4 => Ok(wgpu::VertexFormat::Float32x4),
-        VertexFormat::Uint16x2 => Ok(wgpu::VertexFormat::Uint16x2),
-        VertexFormat::Uint16x4 => Ok(wgpu::VertexFormat::Uint16x4),
         VertexFormat::Uint32 => Ok(wgpu::VertexFormat::Uint32),
+        VertexFormat::Uint32x2 => Ok(wgpu::VertexFormat::Uint32x2),
+        VertexFormat::Uint32x3 => Ok(wgpu::VertexFormat::Uint32x3),
+        VertexFormat::Uint32x4 => Ok(wgpu::VertexFormat::Uint32x4),
+        VertexFormat::Sint32 => Ok(wgpu::VertexFormat::Sint32),
+        VertexFormat::Sint32x2 => Ok(wgpu::VertexFormat::Sint32x2),
+        VertexFormat::Sint32x3 => Ok(wgpu::VertexFormat::Sint32x3),
+        VertexFormat::Sint32x4 => Ok(wgpu::VertexFormat::Sint32x4),
     }
 }
 
@@ -5436,6 +7542,7 @@ impl HeadlessBufferState {
 struct HeadlessTextureState {
     width: u32,
     height: u32,
+    samples: u32,
     format: TextureFormat,
     usage: RhiTextureUsage,
     rgba8: Vec<u8>,
@@ -5449,6 +7556,7 @@ impl HeadlessTextureState {
         Self {
             width: desc.width,
             height: desc.height,
+            samples: desc.samples,
             format: desc.format,
             usage: desc.usage,
             rgba8: vec![
@@ -5494,6 +7602,7 @@ impl HeadlessBindGroupState {
 struct HeadlessGraphicsPipelineState {
     color_format: Option<TextureFormat>,
     depth_format: Option<DepthFormat>,
+    sample_count: u32,
     vertex_buffer_layouts: Vec<RhiVertexBufferLayout>,
 }
 
@@ -5502,6 +7611,7 @@ impl HeadlessGraphicsPipelineState {
         Self {
             color_format: desc.color_format,
             depth_format: desc.depth.map(|depth| depth.format),
+            sample_count: desc.sample_count,
             vertex_buffer_layouts: desc.vertex_buffers.clone(),
         }
     }
@@ -5540,6 +7650,7 @@ struct WgpuRhiState {
 #[derive(Clone)]
 struct WgpuBufferState {
     buffer: Arc<wgpu::Buffer>,
+    size: u64,
     usage: RhiBufferUsage,
 }
 
@@ -5547,8 +7658,11 @@ struct WgpuBufferState {
 #[derive(Clone)]
 struct WgpuTextureState {
     texture: Arc<wgpu::Texture>,
+    width: u32,
+    height: u32,
     format: TextureFormat,
     usage: RhiTextureUsage,
+    samples: u32,
 }
 
 #[cfg(feature = "backend-wgpu")]
@@ -5582,6 +7696,7 @@ struct WgpuGraphicsPipelineState {
     pipeline: wgpu::RenderPipeline,
     color_format: Option<TextureFormat>,
     depth_format: Option<DepthFormat>,
+    sample_count: u32,
     vertex_buffer_layouts: Vec<RhiVertexBufferLayout>,
 }
 
@@ -5592,6 +7707,7 @@ impl WgpuGraphicsPipelineState {
             pipeline,
             color_format: desc.color_format,
             depth_format: desc.depth.map(|depth| depth.format),
+            sample_count: desc.sample_count,
             vertex_buffer_layouts: desc.vertex_buffers.clone(),
         }
     }
@@ -5948,6 +8064,7 @@ mod tests {
                 label: Some("depth".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
             })
@@ -5958,12 +8075,14 @@ mod tests {
                 label: Some("color".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT
                     | RhiTextureUsage::COPY_SRC
                     | RhiTextureUsage::COPY_DST,
             })
             .unwrap();
+        assert_eq!(device.texture_samples(texture).unwrap(), 1);
         let region = RhiTextureRegion {
             x: 1,
             y: 1,
@@ -6012,6 +8131,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let compute = device
@@ -6210,9 +8330,1336 @@ mod tests {
         );
     }
 
+    #[test]
+    fn headless_rhi_texture_samples_are_queryable() {
+        let device = HeadlessRhiDevice::new();
+        let texture = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_msaa_query".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT,
+            })
+            .unwrap();
+
+        assert_eq!(device.texture_samples(texture).unwrap(), 4);
+        assert!(device.texture_samples(RhiTexture(999)).is_err());
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_texture_samples_are_queryable() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let texture = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_msaa_query".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT,
+            })
+            .unwrap();
+
+        assert_eq!(device.texture_samples(texture).unwrap(), 4);
+        assert!(device.texture_samples(RhiTexture(999)).is_err());
+    }
+
+    #[test]
+    fn headless_rhi_graphics_pipeline_sample_count_matches_render_targets() {
+        let device = HeadlessRhiDevice::new();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("headless_msaa_pipeline_shader".to_owned()),
+                source: "shader".to_owned(),
+            })
+            .unwrap();
+        let msaa_target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_msaa_pipeline_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT,
+            })
+            .unwrap();
+        let msaa_pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("headless_msaa_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let single_sample_pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("headless_single_sample_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 1,
+            })
+            .unwrap();
+
+        let mut encoder = device
+            .create_command_encoder(Some("headless_msaa_pipeline_match"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("headless_msaa_pipeline_match".to_owned()),
+                pipeline: msaa_pipeline,
+                color_target: Some(msaa_target),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        assert!(matches!(
+            encoder.encode_render_pass(&RhiRenderPassDesc {
+                label: Some("headless_msaa_pipeline_mismatch".to_owned()),
+                pipeline: single_sample_pipeline,
+                color_target: Some(msaa_target),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            }),
+            Err(RendererError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn headless_rhi_resolves_rgba8_msaa_texture_explicitly() {
+        let device = HeadlessRhiDevice::new();
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_explicit_msaa_resolve_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_DST,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_explicit_msaa_resolve_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let bytes = vec![
+            10_u8, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,
+        ];
+        device
+            .write_texture_rgba8(
+                source,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 2,
+                    height: 2,
+                },
+                &bytes,
+            )
+            .unwrap();
+
+        device.resolve_texture_rgba8(source, target).unwrap();
+
+        assert_eq!(
+            device
+                .read_texture_rgba8(
+                    target,
+                    RhiTextureRegion {
+                        x: 0,
+                        y: 0,
+                        width: 2,
+                        height: 2,
+                    },
+                )
+                .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn headless_rhi_resolves_rgba8_msaa_texture_with_first_sample_mode() {
+        let device = HeadlessRhiDevice::new();
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_first_sample_resolve_source".to_owned()),
+                width: 1,
+                height: 1,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT
+                    | RhiTextureUsage::SAMPLED
+                    | RhiTextureUsage::COPY_DST,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("headless_first_sample_resolve_target".to_owned()),
+                width: 1,
+                height: 1,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT
+                    | RhiTextureUsage::STORAGE
+                    | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let bytes = vec![12_u8, 34, 56, 255];
+        device
+            .write_texture_rgba8(
+                source,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                &bytes,
+            )
+            .unwrap();
+
+        device
+            .resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::FirstSample)
+            .unwrap();
+
+        assert_eq!(
+            device
+                .read_texture_rgba8(
+                    target,
+                    RhiTextureRegion {
+                        x: 0,
+                        y: 0,
+                        width: 1,
+                        height: 1,
+                    },
+                )
+                .unwrap(),
+            bytes
+        );
+        device
+            .resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::Sample(2))
+            .unwrap();
+        assert!(matches!(
+            device.resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::Sample(4)),
+            Err(RendererError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn rhi_custom_resolve_support_reports_supported_paths() {
+        let headless = RhiCustomResolveSupport::headless();
+        assert!(!headless.supports(RhiCustomResolvePath::Rgba8StorageCompute));
+        assert!(!headless.supports(RhiCustomResolvePath::Rgba16FloatStorageCompute));
+        assert!(!headless.supports(RhiCustomResolvePath::Rgba32FloatStorageCompute));
+        assert!(!headless.supports(RhiCustomResolvePath::EightBitColorFragment));
+        assert!(!headless.supports(RhiCustomResolvePath::Depth32FloatFragment));
+        assert!(headless
+            .support_for(RhiCustomResolvePath::Depth32FloatFragment)
+            .and_then(|support| support.unsupported_reason.as_deref())
+            .is_some());
+
+        let wgpu = RhiCustomResolveSupport::backend_wgpu();
+        assert!(wgpu.supports(RhiCustomResolvePath::Rgba8StorageCompute));
+        assert!(wgpu.supports(RhiCustomResolvePath::Rgba16FloatStorageCompute));
+        assert!(wgpu.supports(RhiCustomResolvePath::Rgba32FloatStorageCompute));
+        assert!(wgpu.supports(RhiCustomResolvePath::EightBitColorFragment));
+        assert!(wgpu.supports(RhiCustomResolvePath::Depth32FloatFragment));
+    }
+
+    #[test]
+    fn headless_rhi_rejects_custom_resolve_shader() {
+        let device = HeadlessRhiDevice::new();
+        let err = device
+            .resolve_texture_rgba8_with_shader(
+                RhiTexture(1),
+                RhiTexture(2),
+                &RhiResolveShaderDesc {
+                    label: Some("headless_custom_resolve".to_owned()),
+                    source: "@compute @workgroup_size(1) fn main() {}".to_owned(),
+                    entry_point: "main".to_owned(),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RendererError::UnsupportedFeature(RendererFeature::BackendWgpu)
+        ));
+        let err = device
+            .resolve_texture_8bit_color_with_shader(
+                RhiTexture(1),
+                RhiTexture(2),
+                &RhiResolveShaderDesc {
+                    label: Some("headless_8bit_custom_resolve".to_owned()),
+                    source:
+                        "@fragment fn main() -> @location(0) vec4<f32> { return vec4<f32>(1.0); }"
+                            .to_owned(),
+                    entry_point: "main".to_owned(),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RendererError::UnsupportedFeature(RendererFeature::BackendWgpu)
+        ));
+        let err = device
+            .resolve_texture_depth32f_with_shader(
+                RhiTexture(1),
+                RhiTexture(2),
+                &RhiResolveShaderDesc {
+                    label: Some("headless_depth_custom_resolve".to_owned()),
+                    source: "@fragment fn main() -> @builtin(frag_depth) f32 { return 1.0; }"
+                        .to_owned(),
+                    entry_point: "main".to_owned(),
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            RendererError::UnsupportedFeature(RendererFeature::BackendWgpu)
+        ));
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_graphics_pipeline_sample_count_matches_msaa_target() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_msaa_pipeline_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT,
+            })
+            .unwrap();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_msaa_pipeline_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_msaa_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_msaa_pipeline_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_msaa_pipeline_draw".to_owned()),
+                pipeline,
+                color_target: Some(target),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba8_msaa_texture_explicitly() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_explicit_msaa_resolve_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_explicit_msaa_resolve_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_explicit_msaa_resolve_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_explicit_msaa_resolve_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_explicit_msaa_source_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_explicit_msaa_source_draw".to_owned()),
+                pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+
+        device.resolve_texture_rgba8(source, target).unwrap();
+
+        let resolved = device
+            .read_texture_rgba8(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![255, 0, 0, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba8_msaa_texture_with_first_sample_mode() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_first_sample_resolve_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_first_sample_resolve_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT
+                    | RhiTextureUsage::STORAGE
+                    | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_first_sample_resolve_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_first_sample_resolve_draw_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_first_sample_resolve_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_first_sample_resolve_draw".to_owned()),
+                pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+
+        device
+            .resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::FirstSample)
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba8(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![0, 255, 0, 255]);
+        device
+            .resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::Sample(2))
+            .unwrap();
+        assert!(matches!(
+            device.resolve_texture_rgba8_with_mode(source, target, RhiResolveMode::Sample(4)),
+            Err(RendererError::Validation(_))
+        ));
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba8_msaa_texture_with_custom_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT
+                    | RhiTextureUsage::STORAGE
+                    | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_custom_resolve_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_custom_resolve_draw_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8Unorm),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_custom_resolve_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_custom_resolve_draw".to_owned()),
+                pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+        device
+            .resolve_texture_rgba8_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @group(0) @binding(1)
+                        var target_tex: texture_storage_2d<rgba8unorm, write>;
+
+                        @compute @workgroup_size(8, 8)
+                        fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                            let dims = textureDimensions(target_tex);
+                            if (id.x >= dims.x || id.y >= dims.y) {
+                                return;
+                            }
+                            let value = textureLoad(source_tex, vec2<i32>(i32(id.x), i32(id.y)), 0);
+                            textureStore(
+                                target_tex,
+                                vec2<i32>(i32(id.x), i32(id.y)),
+                                vec4<f32>(0.0, value.r, 1.0, value.a)
+                            );
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba8(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![0, 255, 255, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba16f_msaa_texture_with_custom_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba16f_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba16Float,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba16f_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba16Float,
+                usage: RhiTextureUsage::STORAGE | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_custom_resolve_rgba16f_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_custom_resolve_rgba16f_draw_pipeline".to_owned()),
+                vertex_shader: shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba16Float),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_custom_resolve_rgba16f_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_custom_resolve_rgba16f_draw".to_owned()),
+                pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+        device
+            .resolve_texture_rgba16f_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_rgba16f_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @group(0) @binding(1)
+                        var target_tex: texture_storage_2d<rgba16float, write>;
+
+                        @compute @workgroup_size(8, 8)
+                        fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                            let dims = textureDimensions(target_tex);
+                            if (id.x >= dims.x || id.y >= dims.y) {
+                                return;
+                            }
+                            let value = textureLoad(source_tex, vec2<i32>(i32(id.x), i32(id.y)), 0);
+                            textureStore(
+                                target_tex,
+                                vec2<i32>(i32(id.x), i32(id.y)),
+                                vec4<f32>(0.0, value.r, 1.0, value.a)
+                            );
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba16f(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![0x0000, 0x3c00, 0x3c00, 0x3c00]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba32f_msaa_texture_with_custom_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let rgba32f_features = wgpu::TextureFormat::Rgba32Float
+            .guaranteed_format_features(graphics.device().features());
+        if !rgba32f_features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba32f_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba32Float,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba32f_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba32Float,
+                usage: RhiTextureUsage::STORAGE | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        device
+            .resolve_texture_rgba32f_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_rgba32f_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @group(0) @binding(1)
+                        var target_tex: texture_storage_2d<rgba32float, write>;
+
+                        @compute @workgroup_size(8, 8)
+                        fn main(@builtin(global_invocation_id) id: vec3<u32>) {
+                            let dims = textureDimensions(target_tex);
+                            if (id.x >= dims.x || id.y >= dims.y) {
+                                return;
+                            }
+                            textureStore(
+                                target_tex,
+                                vec2<i32>(i32(id.x), i32(id.y)),
+                                vec4<f32>(0.25, 0.5, 0.75, 1.0)
+                            );
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba32f(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![0.25, 0.5, 0.75, 1.0]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_rgba8_srgb_msaa_texture_with_custom_fragment_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let features = wgpu::TextureFormat::Rgba8UnormSrgb
+            .guaranteed_format_features(graphics.device().features());
+        if !features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba8_srgb_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Rgba8UnormSrgb,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_rgba8_srgb_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Rgba8UnormSrgb,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let draw_shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_custom_resolve_rgba8_srgb_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_custom_resolve_rgba8_srgb_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Rgba8UnormSrgb),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_custom_resolve_rgba8_srgb_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_custom_resolve_rgba8_srgb_draw".to_owned()),
+                pipeline: draw_pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+
+        device
+            .resolve_texture_8bit_color_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_rgba8_srgb_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @fragment
+                        fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+                            let value = textureLoad(
+                                source_tex,
+                                vec2<i32>(i32(position.x), i32(position.y)),
+                                0
+                            );
+                            return vec4<f32>(value.r, value.g, 1.0, value.a);
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba8(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![0, 255, 255, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_bgra8_srgb_msaa_texture_with_custom_fragment_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let features = wgpu::TextureFormat::Bgra8UnormSrgb
+            .guaranteed_format_features(graphics.device().features());
+        if !features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_bgra8_srgb_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Bgra8UnormSrgb,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_bgra8_srgb_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Bgra8UnormSrgb,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let draw_shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_custom_resolve_bgra8_srgb_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @location(0) vec4<f32> {
+                        return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_custom_resolve_bgra8_srgb_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: Some(TextureFormat::Bgra8UnormSrgb),
+                depth_format: None,
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: None,
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_custom_resolve_bgra8_srgb_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_custom_resolve_bgra8_srgb_draw".to_owned()),
+                pipeline: draw_pipeline,
+                color_target: Some(source),
+                depth_target: None,
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+
+        device
+            .resolve_texture_8bit_color_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_bgra8_srgb_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_multisampled_2d<f32>;
+
+                        @fragment
+                        fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+                            let value = textureLoad(
+                                source_tex,
+                                vec2<i32>(i32(position.x), i32(position.y)),
+                                0
+                            );
+                            return vec4<f32>(value.g, value.g, value.g, value.a);
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_rgba8(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(resolved, vec![255, 255, 255, 255]);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_resolves_depth32f_msaa_texture_with_custom_shader() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let depth_features = wgpu::TextureFormat::Depth32Float
+            .guaranteed_format_features(graphics.device().features());
+        if !depth_features.flags.sample_count_supported(4) {
+            return;
+        }
+        let device = WgpuRhiDevice::new(&graphics);
+        let source = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_depth_source".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 4,
+                format: TextureFormat::Depth32Float,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::SAMPLED,
+            })
+            .unwrap();
+        let target = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("wgpu_custom_resolve_depth_target".to_owned()),
+                width: 2,
+                height: 2,
+                samples: 1,
+                format: TextureFormat::Depth32Float,
+                usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
+            })
+            .unwrap();
+        let draw_shader = device
+            .create_shader_module(&RhiShaderModuleDesc {
+                label: Some("wgpu_custom_resolve_depth_draw_shader".to_owned()),
+                source: r#"
+                    @vertex
+                    fn vs(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+                        let x = f32((vertex_index << 1u) & 2u);
+                        let y = f32(vertex_index & 2u);
+                        return vec4<f32>(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.25, 1.0);
+                    }
+
+                    @fragment
+                    fn fs() -> @builtin(frag_depth) f32 {
+                        return 0.25;
+                    }
+                "#
+                .to_owned(),
+            })
+            .unwrap();
+        let draw_pipeline = device
+            .create_graphics_pipeline(&RhiGraphicsPipelineDesc {
+                label: Some("wgpu_custom_resolve_depth_draw_pipeline".to_owned()),
+                vertex_shader: draw_shader,
+                vertex_entry: "vs".to_owned(),
+                fragment_shader: Some(draw_shader),
+                fragment_entry: Some("fs".to_owned()),
+                color_format: None,
+                depth_format: Some(DepthFormat::D32Float),
+                vertex_buffers: Vec::new(),
+                primitive: RhiPrimitiveState::default(),
+                depth: Some(RhiDepthState {
+                    format: DepthFormat::D32Float,
+                    write_enabled: true,
+                    compare: RhiCompareFunction::Always,
+                }),
+                sample_count: 4,
+            })
+            .unwrap();
+        let mut encoder = device
+            .create_command_encoder(Some("wgpu_custom_resolve_depth_draw"))
+            .unwrap();
+        encoder
+            .encode_render_pass(&RhiRenderPassDesc {
+                label: Some("wgpu_custom_resolve_depth_draw".to_owned()),
+                pipeline: draw_pipeline,
+                color_target: None,
+                depth_target: Some(source),
+                vertex_buffers: Vec::new(),
+                index_buffer: None,
+                bind_groups: Vec::new(),
+                vertex_count: 3,
+                index_count: None,
+                instance_count: 1,
+            })
+            .unwrap();
+        let command = encoder.finish().unwrap();
+        device.submit(vec![command]).unwrap();
+
+        device
+            .resolve_texture_depth32f_with_shader(
+                source,
+                target,
+                &RhiResolveShaderDesc {
+                    label: Some("wgpu_custom_resolve_depth_shader".to_owned()),
+                    entry_point: "main".to_owned(),
+                    source: r#"
+                        @group(0) @binding(0)
+                        var source_tex: texture_depth_multisampled_2d;
+
+                        @fragment
+                        fn main(@builtin(position) position: vec4<f32>) -> @builtin(frag_depth) f32 {
+                            let depth = textureLoad(
+                                source_tex,
+                                vec2<i32>(i32(position.x), i32(position.y)),
+                                0
+                            );
+                            return depth + 0.125;
+                        }
+                    "#
+                    .to_owned(),
+                },
+            )
+            .unwrap();
+
+        let resolved = device
+            .read_texture_depth32f(
+                target,
+                RhiTextureRegion {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+            )
+            .unwrap();
+        assert!((resolved[0] - 0.375).abs() < 0.001);
+    }
+
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_compute_pass_binds_storage_buffer() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6280,6 +9727,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_occlusion_query_resolves_readback() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6289,6 +9737,7 @@ mod tests {
                 label: Some("occlusion_depth".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })
@@ -6298,6 +9747,7 @@ mod tests {
                 label: Some("occlusion_color".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })
@@ -6340,6 +9790,7 @@ mod tests {
                     write_enabled: false,
                     compare: RhiCompareFunction::Always,
                 }),
+                sample_count: 1,
             })
             .unwrap();
         let query = device
@@ -6378,6 +9829,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_picking_id_shader_writes_readable_object_id() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6387,6 +9839,7 @@ mod tests {
                 label: Some("picking_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -6438,6 +9891,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -6477,6 +9931,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_render_pass_binds_sampled_texture_and_sampler() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6486,6 +9941,7 @@ mod tests {
                 label: Some("sampled_red".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::SAMPLED | RhiTextureUsage::COPY_DST,
             })
@@ -6514,6 +9970,7 @@ mod tests {
                 label: Some("sampled_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -6555,6 +10012,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let bind_group = device
@@ -6616,6 +10074,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_render_pass_binds_vertex_buffers() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6625,6 +10084,7 @@ mod tests {
                 label: Some("vertex_buffer_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -6685,6 +10145,7 @@ mod tests {
                 }],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -6730,6 +10191,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_render_pass_draws_instanced_vertex_buffers() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6739,6 +10201,7 @@ mod tests {
                 label: Some("instanced_target".to_owned()),
                 width: 8,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -6850,6 +10313,7 @@ mod tests {
                 ],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -6912,6 +10376,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_render_pass_draws_indexed_geometry() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -6921,6 +10386,7 @@ mod tests {
                 label: Some("indexed_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -6995,6 +10461,7 @@ mod tests {
                 }],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -7042,6 +10509,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_indexed_indirect_pass_draws_indexed_geometry() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7051,6 +10519,7 @@ mod tests {
                 label: Some("indexed_indirect_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -7142,6 +10611,7 @@ mod tests {
                 }],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let color_bytes = [1.0_f32, 0.0, 1.0, 1.0]
@@ -7218,6 +10688,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_indirect_pass_draws_multiple_commands() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7227,6 +10698,7 @@ mod tests {
                 label: Some("multi_indirect_target".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -7304,6 +10776,7 @@ mod tests {
                 }],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let color_bytes = [0.25_f32, 0.75, 1.0, 1.0]
@@ -7375,6 +10848,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_writes_and_reads_rgba16f_texture() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7384,6 +10858,7 @@ mod tests {
                 label: Some("rgba16f_upload".to_owned()),
                 width: 3,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba16Float,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             })
@@ -7422,6 +10897,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_writes_and_reads_rgba32f_texture() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7431,6 +10907,7 @@ mod tests {
                 label: Some("rgba32f_upload".to_owned()),
                 width: 3,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba32Float,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             })
@@ -7467,6 +10944,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_motion_vector_shader_writes_readable_rgba16f_target() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7476,6 +10954,7 @@ mod tests {
                 label: Some("motion_vectors".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Rgba16Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -7514,6 +10993,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
 
@@ -7555,6 +11035,7 @@ mod tests {
     #[cfg(feature = "backend-wgpu")]
     #[test]
     fn wgpu_rhi_depth_pass_writes_readable_depth32f_target() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
         let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
             return;
         };
@@ -7564,6 +11045,7 @@ mod tests {
                 label: Some("readable_depth".to_owned()),
                 width: 4,
                 height: 4,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT | RhiTextureUsage::COPY_SRC,
             })
@@ -7601,6 +11083,7 @@ mod tests {
                     write_enabled: true,
                     compare: RhiCompareFunction::LessEqual,
                 }),
+                sample_count: 1,
             })
             .unwrap();
 
@@ -7636,6 +11119,40 @@ mod tests {
             .unwrap();
         assert_eq!(depth_values.len(), 1);
         assert!((depth_values[0] - 0.5).abs() < 0.001);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_rhi_write_texture_depth32f_writes_readable_region() {
+        let _wgpu_guard = crate::wgpu_test_serial_guard();
+        let Ok(graphics) = WgpuGraphics::new(graphics_wgpu::WgpuGraphicsOptions::default()) else {
+            return;
+        };
+        let device = WgpuRhiDevice::new(&graphics);
+        let depth = device
+            .create_texture(&RhiTextureDesc {
+                label: Some("direct_depth_write".to_owned()),
+                width: 4,
+                height: 4,
+                samples: 1,
+                format: TextureFormat::Depth32Float,
+                usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
+            })
+            .unwrap();
+        let region = RhiTextureRegion {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        };
+        let values = vec![0.125, 0.25, 0.5, 0.75];
+
+        device
+            .write_texture_depth32f(depth, region, &values)
+            .unwrap();
+
+        let readback = device.read_texture_depth32f(depth, region).unwrap();
+        assert_eq!(readback, values);
     }
 
     #[test]
@@ -7708,6 +11225,7 @@ mod tests {
                 label: None,
                 width: 1,
                 height: 0,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             }),
@@ -7718,6 +11236,7 @@ mod tests {
                 label: Some("empty_usage".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::empty(),
             }),
@@ -7728,6 +11247,7 @@ mod tests {
                 label: Some("srgb_storage".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba8UnormSrgb,
                 usage: RhiTextureUsage::STORAGE,
             }),
@@ -7738,6 +11258,7 @@ mod tests {
                 label: Some("depth_storage".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::STORAGE,
             }),
@@ -7787,6 +11308,7 @@ mod tests {
                 label: Some("sampled_only".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::SAMPLED,
             })
@@ -7847,6 +11369,7 @@ mod tests {
                 label: Some("small".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             })
@@ -7920,6 +11443,7 @@ mod tests {
                 label: Some("rgba16f_upload".to_owned()),
                 width: 3,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba16Float,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             })
@@ -7971,6 +11495,7 @@ mod tests {
                 label: Some("rgba16f_without_copy_dst".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba16Float,
                 usage: RhiTextureUsage::COPY_SRC,
             })
@@ -7993,6 +11518,7 @@ mod tests {
                 label: Some("rgba32f_upload".to_owned()),
                 width: 3,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba32Float,
                 usage: RhiTextureUsage::COPY_SRC | RhiTextureUsage::COPY_DST,
             })
@@ -8055,6 +11581,7 @@ mod tests {
                 label: Some("rgba32f_without_copy_dst".to_owned()),
                 width: 1,
                 height: 1,
+                samples: 1,
                 format: TextureFormat::Rgba32Float,
                 usage: RhiTextureUsage::COPY_SRC,
             })
@@ -8077,6 +11604,7 @@ mod tests {
                 label: Some("readable_depth".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::COPY_SRC,
             })
@@ -8100,6 +11628,7 @@ mod tests {
                 label: Some("depth_without_copy_src".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })
@@ -8164,6 +11693,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             }),
             Err(RendererError::Validation(_))
         ));
@@ -8179,6 +11709,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             }),
             Err(RendererError::PipelineCompile(_))
         ));
@@ -8232,6 +11763,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         assert!(matches!(
@@ -8258,6 +11790,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let other_graphics = device
@@ -8272,6 +11805,7 @@ mod tests {
                 vertex_buffers: Vec::new(),
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let vertex_graphics = device
@@ -8294,6 +11828,7 @@ mod tests {
                 }],
                 primitive: RhiPrimitiveState::default(),
                 depth: None,
+                sample_count: 1,
             })
             .unwrap();
         let pipeline_statistics = device
@@ -8482,6 +12017,7 @@ mod tests {
                 label: Some("depth_attachment".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Depth32Float,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })
@@ -8521,6 +12057,7 @@ mod tests {
                 label: Some("color_attachment".to_owned()),
                 width: 2,
                 height: 2,
+                samples: 1,
                 format: TextureFormat::Rgba8Unorm,
                 usage: RhiTextureUsage::RENDER_ATTACHMENT,
             })

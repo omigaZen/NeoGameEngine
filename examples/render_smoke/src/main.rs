@@ -136,9 +136,13 @@ impl PlatformApp for RenderSmokeApp {
         )
         .map_err(platform_error)?;
         let probe_size = if is_feature_showcase() { 64 } else { 128 };
-        let probe =
-            WgpuEnvironmentProbe::new(&graphics, probe_size, surface.format(), surface.depth_format())
-                .map_err(platform_error)?;
+        let probe = WgpuEnvironmentProbe::new(
+            &graphics,
+            probe_size,
+            surface.format(),
+            surface.depth_format(),
+        )
+        .map_err(platform_error)?;
 
         self.window = Some(window_id);
         self.graphics = Some(graphics);

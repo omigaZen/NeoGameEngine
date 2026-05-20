@@ -1,6 +1,7 @@
 /target/
+target/
+/.tools/
 /.idea/
 /.vscode/
 *.swp
 *.swo
-
