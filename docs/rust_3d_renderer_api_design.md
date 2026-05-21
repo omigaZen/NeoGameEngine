@@ -2268,6 +2268,7 @@ pub struct FrameStats {
     pub post_process_support: PostProcessSupport,
     pub frame_capture_support: FrameCaptureSupport,
     pub debug_tooling_support: DebugToolingSupport,
+    pub rhi_support: RendererRhiSupport,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
     pub shader_variants_used_this_frame: usize,
@@ -2447,6 +2448,7 @@ pub struct FrameCapture {
     pub post_process_support: PostProcessSupport,
     pub frame_capture_support: FrameCaptureSupport,
     pub debug_tooling_support: DebugToolingSupport,
+    pub rhi_support: RendererRhiSupport,
     pub pipeline_shader_interface_layouts: usize,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
@@ -2478,6 +2480,7 @@ pub struct FrameCaptureResourceDump {
     pub post_process_support: PostProcessSupport,
     pub frame_capture_support: FrameCaptureSupport,
     pub debug_tooling_support: DebugToolingSupport,
+    pub rhi_support: RendererRhiSupport,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub texture_configuration: TextureConfigurationStats,
     pub sampler_configuration: SamplerConfigurationStats,
@@ -3034,6 +3037,10 @@ Storage textures are represented as `BindingType::StorageTexture { dimension, fo
 ### WGPU runtime pipeline cache stats integration
 
 `WgpuRendererRuntime` now owns `WgpuNativePipelineCacheMetadata` and exposes methods to record, mark-used, invalidate, and query reflected native pipeline metadata. During `render_scene()`, fixed `MeshRenderer` pipeline inventory is merged with native reflected pipeline cache stats before publishing `FrameStats.pipeline_cache`, so editor/debug consumers can observe both legacy fixed pipelines and reflected backend pipeline cache entries through the same stats path.
+
+Reflected custom-material facade pipeline entries preserve an alias set from the public/facade `PipelineKey` to material-specific backend-wgpu native reflected pipeline keys. When any aliased native object exists, `Renderer::pipeline_cache_entries()`, `PipelineCacheStats::{ready_entries_without_backend_object, used_entries_without_backend_object}`, and `PipelineCacheBackendCoverage` report the facade entry as backend-backed instead of leaving a false missing-backend-object gap. Cache-stat refresh prunes dead native aliases, so invalidating one material-specific native object does not hide another live native object that shares the same facade key.
+
+When facade frame stats are merged with backend-wgpu stats, `PipelineCacheStats::backend_objects` preserves the stronger backend-object evidence from either side. This keeps backend native inventory visible without erasing facade cache entries that are known to be backend-backed through reflected native aliases.
 
 ### WGPU backend resource tombstones
 
@@ -4710,3 +4717,9 @@ This API provides public capability-gate/error semantics for the unsupported fea
 ### 2026-05-20 API note: RenderGraph support matrix in frame observability
 
 `RendererRenderGraphSupport` is now included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`. The renderer fills the field from `Renderer::render_graph_support()`, making graph capability support and limitations visible to debug/editor tooling and captures without a separate query.
+
+### 2026-05-22 API note: RHI support matrix in frame observability
+
+`Renderer::rhi_support()` returns `RendererRhiSupport`, covering headless RHI device availability, RenderGraph RHI execution, active backend-wgpu runtime, native backend pass metrics, and complete backend execution coverage. Each `RendererRhiFeatureSupport` entry exposes support state, implementation level, and limitation text so tools can distinguish graph/headless evidence from full backend-renderer coverage.
+
+`RendererRhiSupport` is included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `rhi_support`. The renderer fills the field from `Renderer::rhi_support()` during frame instrumentation/resource-dump construction, so debug/editor and capture artifacts preserve the same RHI/backend execution boundary as the standalone query.

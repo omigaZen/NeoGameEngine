@@ -1563,3 +1563,36 @@ Goal 仍未完成：built-in RenderDoc/external debugger SDK loading 与 capture
 未运行验证。建议后续执行：`cargo test -p engine_renderer debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
 
 Goal 仍未完成：该切片只巩固 debug tooling 的 frame/capture 可观测性；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-22 本轮进展：RHI support 进入 frame/capture 诊断
+
+本轮推进 `RHI abstraction` 的可观测闭环，把 RHI/backend 执行边界从分散的 graph stats 和 backend label 证据整理成 product-facing 支持矩阵，并传播到 frame/capture artifact：
+
+- 新增 `RendererRhiSupport`、`RendererRhiFeatureSupport`、`RendererRhiFeature`、`RendererRhiImplementationLevel`。
+- `Renderer::rhi_support()` 明确区分 headless RHI device、RenderGraph RHI execution、backend-wgpu runtime、native pass metrics 和 complete backend execution coverage。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `rhi_support`。
+- frame instrumentation 从 `Renderer::rhi_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `rhi_support_distinguishes_headless_graph_and_backend_execution_gap` 覆盖 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性，并保持 complete backend execution coverage 为 unsupported。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report、capture payload 和 resource dump 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer rhi_support_distinguishes_headless_graph_and_backend_execution_gap -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：该切片只让 RHI/backend 执行边界可被工具和 capture 直接消费；完整 backend-native standard pass/resource execution 仍是 `RHI abstraction` 与其他非外部 `Partial` 行的后续缺口。
+
+## 2026-05-22 本轮进展：reflected facade pipeline cache backend alias
+
+本轮推进 `Pipeline / pipeline key / cache` 的真实 backend-object 覆盖，而不是新增支持矩阵：
+
+- `WgpuFacadeReflectedDraw` 保留原始 facade `PipelineKey`，同时保留 material/parameter/texture revision 派生出的 native reflected pipeline key。
+- backend-wgpu 成功创建并队列化 reflected native draw 后，`Renderer` 记录 facade key 到 native key 的 backend alias set。
+- `sync_pipeline_cache_backend_object_ids()` 现在通过 alias set 判断 facade pipeline cache entry 是否已有真实 backend-wgpu native object，并在刷新 stats 时剔除已经失效的 native aliases。
+- `PipelineCacheStats::backend_objects`、`ready_entries_without_backend_object`、`used_entries_without_backend_object`、`PipelineCacheEntryInfo::has_backend_object` 和 `PipelineCacheBackendCoverage` 不再把已创建 native reflected object 的 facade entry 误报为 missing backend object。
+- wgpu facade frame stats merge 现在保留 facade alias coverage 与 backend native inventory 两侧中更强的 `backend_objects` 证据，避免 backend inventory merge 抹掉 facade backend-backed entry 证据。
+- 新增 `wgpu_reflected_facade_draw_marks_facade_pipeline_cache_backend_object`，覆盖 reflected custom-material facade key 的 backend-object coverage 路径。
+- 新增 `wgpu_reflected_facade_pipeline_cache_aliases_survive_one_material_invalidation`，覆盖同一 facade key 下多个 material-specific native objects 的 alias lifecycle：一个 material native object 失效后，另一个仍存活的 native object 继续让 facade cache entry 保持 backend-backed。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 backend alias 行为。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer wgpu_reflected_facade_draw_marks_facade_pipeline_cache_backend_object -- --nocapture`、`cargo test -p engine_renderer wgpu_reflected_facade_pipeline_cache_aliases_survive_one_material_invalidation -- --nocapture`、`cargo test -p engine_renderer pipeline -- --nocapture`。
+
+Goal 仍未完成：该切片关闭 reflected custom-material subset 的一个 facade/backend cache 误报缺口；标准材质、更广泛动态 material-template pipeline/bind-group 接线和完整 backend-native cache coverage 仍按矩阵保留为 `Partial`。

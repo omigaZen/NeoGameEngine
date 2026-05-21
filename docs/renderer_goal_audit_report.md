@@ -3764,3 +3764,24 @@ Debug/editor tooling capability support is now visible from frame and capture to
 - Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::debug_tooling_support()`.
 - Test coverage added but not run in this slice: `debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
 - Remaining gap: renderer-layer debug draw/editor tooling remains implemented; native frame debugger SDK capture is still represented as an external SDK blocker rather than a renderer-layer debug/editor gap.
+
+## 2026-05-22 audit update: RHI support frame/capture observability
+
+RHI/backend execution boundary support is now visible from frame and capture tooling surfaces, not only inferred from graph stats and backend labels.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `RendererRhiSupport`, `RendererRhiFeatureSupport`, `RendererRhiFeature`, and `RendererRhiImplementationLevel`, plus `Renderer::rhi_support()`.
+- Propagation: `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` now carry `rhi_support` from the same renderer query.
+- Boundary semantics: the matrix reports headless RHI and RenderGraph RHI execution as supported, backend-wgpu runtime/native pass metrics as active only when a backend runtime exists, and complete backend execution coverage as unsupported.
+- Test coverage added but not run in this slice: `rhi_support_distinguishes_headless_graph_and_backend_execution_gap` asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report, capture, and resource-dump propagation.
+- Remaining gap: this improves auditability of RHI/backend coverage, but it does not complete backend-native execution for every standard pass/resource path.
+
+## 2026-05-22 audit update: reflected facade pipeline cache backend aliases
+
+Reflected custom-material facade pipeline cache entries now report backend-object coverage from the native reflected pipeline objects actually created by backend-wgpu, including the case where multiple material-specific native objects share one facade key.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds the original facade key to `WgpuFacadeReflectedDraw` and records facade-to-native pipeline backend alias sets after native object creation/queueing.
+- Coverage change: `sync_pipeline_cache_backend_object_ids()` checks both direct backend object keys and aliased reflected native keys before setting `PipelineCacheEntryInfo::has_backend_object`; dead native aliases are pruned during cache stat refresh.
+- Stats change: `PipelineCacheStats::backend_objects` now counts facade cache entries with direct or aliased backend objects, while the ready/used missing-backend-object gap counters use the same source.
+- Merge change: facade/backend frame stat merge now preserves the maximum backend-object evidence from facade alias coverage and backend native inventory, instead of allowing backend inventory merge to erase facade backend-backed entry evidence.
+- Test coverage added but not run in this slice: `wgpu_reflected_facade_draw_marks_facade_pipeline_cache_backend_object` covers the alias path for reflected custom material draws; `wgpu_reflected_facade_pipeline_cache_aliases_survive_one_material_invalidation` covers multiple native aliases for one facade key and stale-alias pruning after one material invalidation.
+- Remaining gap: this closes a reflected custom-material cache coverage false-negative; it does not complete standard material backend integration or all dynamic material-template pipeline/bind-group paths.

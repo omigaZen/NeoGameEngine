@@ -106,7 +106,9 @@ pub mod prelude {
         RendererGraphTextureExport, RendererGraphTextureExportSubresource,
         RendererGraphTextureImportSupport, RendererLightingFeature, RendererLightingFeatureSupport,
         RendererLightingImplementationLevel, RendererLightingSupport, RendererLimits,
-        RendererRenderGraphSupport, ResidencyPriority, ResourceBackendResidencyLevel, ResourceKind,
+        RendererRenderGraphSupport, RendererRhiFeature, RendererRhiFeatureSupport,
+        RendererRhiImplementationLevel, RendererRhiSupport, ResidencyPriority,
+        ResourceBackendResidencyLevel, ResourceKind,
         ResourceLifecycleClass, ResourceLifecycleClassSupport, ResourceLifecycleSupport,
         ResourceReclaimPolicy, ResourceStatus, RhiCustomResolvePath, RhiCustomResolvePathSupport,
         RhiCustomResolveSupport, RhiResolveMode, RhiResolveShaderDesc, SamplerDesc, SamplerHandle,
@@ -3325,6 +3327,7 @@ pub struct FrameStats {
     pub backend_submission_completion: BackendSubmissionCompletionReport,
     pub surface_graph_export: RendererSurfaceGraphExportSupport,
     pub render_graph_support: RendererRenderGraphSupport,
+    pub rhi_support: RendererRhiSupport,
     pub retired_submission_frame: Option<u64>,
     pub pending_submission_frame: Option<u64>,
     pub graph: RenderGraphStats,
@@ -3508,6 +3511,138 @@ impl RendererRenderGraphSupport {
 
     pub fn all_supported(&self) -> bool {
         self.capabilities.iter().all(|support| support.supported)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RendererRhiFeature {
+    HeadlessRhiDevice,
+    RenderGraphRhiExecution,
+    BackendWgpuRuntime,
+    NativePassMetrics,
+    CompleteBackendExecutionCoverage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererRhiImplementationLevel {
+    Headless,
+    GraphObservable,
+    BackendWgpu,
+    PartialBackend,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RendererRhiFeatureSupport {
+    pub feature: RendererRhiFeature,
+    pub supported: bool,
+    pub implementation: RendererRhiImplementationLevel,
+    pub limitation: Option<&'static str>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RendererRhiSupport {
+    pub features: Vec<RendererRhiFeatureSupport>,
+    pub backend_wgpu_active: bool,
+}
+
+impl RendererRhiSupport {
+    pub fn current(backend_wgpu_active: bool) -> Self {
+        Self {
+            backend_wgpu_active,
+            features: vec![
+                rhi_feature(
+                    RendererRhiFeature::HeadlessRhiDevice,
+                    true,
+                    RendererRhiImplementationLevel::Headless,
+                    Some(
+                        "headless RHI is available for graph execution/testing; it does not prove native backend renderer completeness",
+                    ),
+                ),
+                rhi_feature(
+                    RendererRhiFeature::RenderGraphRhiExecution,
+                    true,
+                    RendererRhiImplementationLevel::GraphObservable,
+                    Some(
+                        "RenderGraph execution exposes RHI pass labels and stats; some standard renderer paths still use facade/graph semantics",
+                    ),
+                ),
+                rhi_feature(
+                    RendererRhiFeature::BackendWgpuRuntime,
+                    backend_wgpu_active,
+                    if backend_wgpu_active {
+                        RendererRhiImplementationLevel::BackendWgpu
+                    } else {
+                        RendererRhiImplementationLevel::PartialBackend
+                    },
+                    (!backend_wgpu_active).then_some(
+                        "backend-wgpu runtime is not active for this renderer instance",
+                    ),
+                ),
+                rhi_feature(
+                    RendererRhiFeature::NativePassMetrics,
+                    backend_wgpu_active,
+                    if backend_wgpu_active {
+                        RendererRhiImplementationLevel::BackendWgpu
+                    } else {
+                        RendererRhiImplementationLevel::PartialBackend
+                    },
+                    (!backend_wgpu_active).then_some(
+                        "native backend pass metrics require an active backend-wgpu runtime; headless RHI labels remain graph-level evidence",
+                    ),
+                ),
+                rhi_feature(
+                    RendererRhiFeature::CompleteBackendExecutionCoverage,
+                    false,
+                    RendererRhiImplementationLevel::PartialBackend,
+                    Some(
+                        "some standard passes/resources still use facade, graph, or RHI semantics rather than complete backend shader/material implementations",
+                    ),
+                ),
+            ],
+        }
+    }
+
+    pub fn support_for(&self, feature: RendererRhiFeature) -> Option<&RendererRhiFeatureSupport> {
+        self.features
+            .iter()
+            .find(|support| support.feature == feature)
+    }
+
+    pub fn unsupported_features(&self) -> Vec<RendererRhiFeature> {
+        self.features
+            .iter()
+            .filter(|support| !support.supported)
+            .map(|support| support.feature)
+            .collect()
+    }
+
+    pub fn all_supported(&self) -> bool {
+        self.features.iter().all(|support| support.supported)
+    }
+
+    pub fn complete_backend_execution_supported(&self) -> bool {
+        self.support_for(RendererRhiFeature::CompleteBackendExecutionCoverage)
+            .is_some_and(|support| support.supported)
+    }
+}
+
+impl Default for RendererRhiSupport {
+    fn default() -> Self {
+        Self::current(false)
+    }
+}
+
+fn rhi_feature(
+    feature: RendererRhiFeature,
+    supported: bool,
+    implementation: RendererRhiImplementationLevel,
+    limitation: Option<&'static str>,
+) -> RendererRhiFeatureSupport {
+    RendererRhiFeatureSupport {
+        feature,
+        supported,
+        implementation,
+        limitation,
     }
 }
 
@@ -5227,6 +5362,7 @@ pub struct FrameDebugReport {
     pub backend_submission_completion: BackendSubmissionCompletionReport,
     pub surface_graph_export: RendererSurfaceGraphExportSupport,
     pub render_graph_support: RendererRenderGraphSupport,
+    pub rhi_support: RendererRhiSupport,
     pub pipeline_statistics: Option<FramePipelineStatistics>,
     pub pipeline_cache: PipelineCacheStats,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
@@ -5503,6 +5639,7 @@ impl FrameDebugReport {
             backend_submission_completion: stats.backend_submission_completion,
             surface_graph_export: stats.surface_graph_export.clone(),
             render_graph_support: stats.render_graph_support.clone(),
+            rhi_support: stats.rhi_support.clone(),
             pipeline_statistics: stats.pipeline_statistics.clone(),
             pipeline_cache: stats.pipeline_cache.clone(),
             pipeline_cache_backend_coverage: stats.pipeline_cache_backend_coverage.clone(),
@@ -5534,6 +5671,7 @@ pub struct FrameCaptureResourceDump {
     pub backend_submission_completion: BackendSubmissionCompletionReport,
     pub surface_graph_export: RendererSurfaceGraphExportSupport,
     pub render_graph_support: RendererRenderGraphSupport,
+    pub rhi_support: RendererRhiSupport,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
     pub resource_lifecycle_support: ResourceLifecycleSupport,
     pub backend_synchronization_support: BackendSynchronizationSupport,
@@ -5792,6 +5930,7 @@ pub struct FrameCapture {
     pub backend_submission_completion: BackendSubmissionCompletionReport,
     pub surface_graph_export: RendererSurfaceGraphExportSupport,
     pub render_graph_support: RendererRenderGraphSupport,
+    pub rhi_support: RendererRhiSupport,
     pub resource_dump: Option<FrameCaptureResourceDump>,
 }
 
@@ -7011,7 +7150,7 @@ fn merge_pipeline_cache_backend_objects(
     mut facade_stats: PipelineCacheStats,
     backend_stats: &PipelineCacheStats,
 ) -> PipelineCacheStats {
-    facade_stats.backend_objects = backend_stats.backend_objects;
+    facade_stats.backend_objects = facade_stats.backend_objects.max(backend_stats.backend_objects);
     facade_stats
 }
 
@@ -8658,6 +8797,7 @@ enum StoredShaderSource {
 #[derive(Clone, Debug)]
 struct WgpuFacadeReflectedDraw {
     label: Option<String>,
+    facade_key: PipelineKey,
     key: PipelineKey,
     render_pipeline_key: PipelineKey,
     material: MaterialHandle,
@@ -8894,6 +9034,8 @@ pub struct Renderer {
     reclaim_policy_override_this_frame: Option<ResourceReclaimPolicy>,
     pipeline_cache_stats: PipelineCacheStats,
     pipeline_cache: HashMap<PipelineKey, PipelineCacheEntry>,
+    pipeline_cache_backend_aliases: HashMap<PipelineKey, HashSet<PipelineKey>>,
+    pipeline_cache_static_backend_keys: HashSet<PipelineKey>,
     gpu_profiler_enabled: bool,
     capture_queued: Option<QueuedFrameCapture>,
     capture_request_sequence: u64,
@@ -9045,6 +9187,8 @@ fn validate_surface_window_handles(
             reclaim_policy_override_this_frame: None,
             pipeline_cache_stats: PipelineCacheStats::default(),
             pipeline_cache: HashMap::new(),
+            pipeline_cache_backend_aliases: HashMap::new(),
+            pipeline_cache_static_backend_keys: HashSet::new(),
             gpu_profiler_enabled,
             capture_queued: None,
             capture_request_sequence: 0,
@@ -9811,6 +9955,10 @@ fn validate_surface_window_handles(
                 )?;
             runtime.tag_native_pipeline_material(draw.key, draw.material)?;
         }
+        let backend_aliases = draws
+            .iter()
+            .map(|draw| (draw.facade_key, draw.key))
+            .collect::<Vec<_>>();
         for draw in draws {
             runtime.queue_native_pipeline_draw(backend_wgpu::WgpuQueuedNativePipelineDraw {
                 key: draw.key,
@@ -9833,6 +9981,14 @@ fn validate_surface_window_handles(
                 }),
             })?;
         }
+        let _ = runtime;
+        for (facade_key, native_key) in backend_aliases {
+            self.pipeline_cache_backend_aliases
+                .entry(facade_key)
+                .or_default()
+                .insert(native_key);
+        }
+        self.refresh_pipeline_cache_usage_stats();
         Ok(())
     }
 
@@ -9950,6 +10106,7 @@ fn validate_surface_window_handles(
                     .label
                     .clone()
                     .or_else(|| template_desc.label.clone()),
+                facade_key: item.pipeline_key,
                 key: native_key,
                 render_pipeline_key,
                 material: item.material,
@@ -15510,6 +15667,15 @@ fn fs_main() -> @location(0) vec4<f32> {
         self.refresh_pipeline_cache_usage_stats();
     }
 
+    #[cfg(feature = "backend-wgpu")]
+    fn record_wgpu_static_backend_pipeline_keys(&mut self, keys: &[PipelineKey]) {
+        if self.wgpu_runtime.is_some() {
+            self.pipeline_cache_static_backend_keys
+                .extend(keys.iter().copied());
+            self.refresh_pipeline_cache_usage_stats();
+        }
+    }
+
     fn refresh_pipeline_cache_usage_stats(&mut self) {
         self.sync_pipeline_cache_backend_object_ids();
         let mut shader_interface_layouts = std::collections::HashSet::new();
@@ -15519,6 +15685,11 @@ fn fs_main() -> @location(0) vec4<f32> {
                 shader_interface_layouts.insert(hash);
             }
         }
+        self.pipeline_cache_stats.backend_objects = self
+            .pipeline_cache
+            .values()
+            .filter(|entry| entry.backend_object_id.is_some())
+            .count();
         self.pipeline_cache_stats.shader_interface_layouts = shader_interface_layouts.len();
         self.pipeline_cache_stats.entries_used_this_frame = self
             .pipeline_cache
@@ -15549,6 +15720,36 @@ fn fs_main() -> @location(0) vec4<f32> {
     }
 
     fn sync_pipeline_cache_backend_object_ids(&mut self) {
+        let active_pipeline_keys = self.pipeline_cache.keys().copied().collect::<HashSet<_>>();
+        self.pipeline_cache_static_backend_keys
+            .retain(|key| active_pipeline_keys.contains(key));
+        #[cfg(feature = "backend-wgpu")]
+        let live_native_alias_keys = self
+            .wgpu_runtime
+            .as_ref()
+            .map(|runtime| {
+                self.pipeline_cache_backend_aliases
+                    .values()
+                    .flat_map(|aliases| aliases.iter().copied())
+                    .filter(|native_key| runtime.native_pipeline_objects(*native_key).is_some())
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default();
+        #[cfg(not(feature = "backend-wgpu"))]
+        let live_native_alias_keys = HashSet::new();
+        self.pipeline_cache_backend_aliases
+            .retain(|key, aliases| {
+                if !active_pipeline_keys.contains(key) {
+                    return false;
+                }
+                aliases.retain(|native_key| live_native_alias_keys.contains(native_key));
+                !aliases.is_empty()
+            });
+        let aliased_backend_object_keys = self
+            .pipeline_cache_backend_aliases
+            .keys()
+            .copied()
+            .collect::<HashSet<_>>();
         #[cfg(feature = "backend-wgpu")]
         let backend_object_keys = self
             .wgpu_runtime
@@ -15557,7 +15758,11 @@ fn fs_main() -> @location(0) vec4<f32> {
                 self.pipeline_cache
                     .keys()
                     .copied()
-                    .filter(|key| runtime.native_pipeline_objects(*key).is_some())
+                    .filter(|key| {
+                        runtime.native_pipeline_objects(*key).is_some()
+                            || aliased_backend_object_keys.contains(key)
+                            || self.pipeline_cache_static_backend_keys.contains(key)
+                    })
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
@@ -16318,6 +16523,17 @@ fn fs_main() -> @location(0) vec4<f32> {
         )
     }
 
+    pub fn rhi_support(&self) -> RendererRhiSupport {
+        #[cfg(feature = "backend-wgpu")]
+        {
+            RendererRhiSupport::current(self.wgpu_runtime.is_some())
+        }
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            RendererRhiSupport::current(false)
+        }
+    }
+
     pub fn debug_tooling_support(&self) -> DebugToolingSupport {
         DebugToolingSupport::current(
             self.supports_feature(RendererFeature::NativeFrameDebuggerCapture),
@@ -16427,6 +16643,7 @@ fn fs_main() -> @location(0) vec4<f32> {
         stats.backend_submission_completion = self.backend_submission_completion_report();
         stats.surface_graph_export = self.surface_graph_export_support();
         stats.render_graph_support = self.render_graph_support();
+        stats.rhi_support = self.rhi_support();
         stats.pipeline_cache_backend_coverage = self.pipeline_cache_backend_coverage();
         stats.resource_lifecycle_support = self.resource_lifecycle_support();
         stats.backend_synchronization_support = self.backend_synchronization_support();
@@ -16819,6 +17036,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                 backend_submission_completion: stats.backend_submission_completion,
                 surface_graph_export: stats.surface_graph_export.clone(),
                 render_graph_support: stats.render_graph_support.clone(),
+                rhi_support: stats.rhi_support.clone(),
                 resource_dump: options
                     .include_resource_dump
                     .then(|| self.frame_capture_resource_dump()),
@@ -16900,6 +17118,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             backend_submission_completion: self.backend_submission_completion_report(),
             surface_graph_export: self.surface_graph_export_support(),
             render_graph_support: self.render_graph_support(),
+            rhi_support: self.rhi_support(),
             pipeline_cache_backend_coverage: self.pipeline_cache_backend_coverage(),
             resource_lifecycle_support: self.resource_lifecycle_support(),
             backend_synchronization_support: self.backend_synchronization_support(),
@@ -17490,6 +17709,26 @@ fn fs_main() -> @location(0) vec4<f32> {
             .into_iter()
             .map(|item| item.pipeline_key)
             .collect())
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    fn wgpu_static_backend_pipeline_keys_for_view(
+        &self,
+        view: &ViewDesc,
+    ) -> Result<Vec<PipelineKey>, RendererError> {
+        let keys = self
+            .view_draw_items(view)?
+            .into_iter()
+            .filter_map(|item| {
+                let material = self
+                    .materials
+                    .get(ResourceKind::Material, item.material)?
+                    .value
+                    .as_ref()?;
+                material.standard.is_some().then_some(item.pipeline_key)
+            })
+            .collect::<Vec<_>>();
+        Ok(keys)
     }
 
     fn view_draw_items(&self, view: &ViewDesc) -> Result<Vec<DrawItem>, RendererError> {
@@ -22522,8 +22761,13 @@ impl<'a> Frame<'a> {
                 let mut stats = self.renderer.render_facade_view(&view)?;
                 let backend_graph_stats = stats.graph.clone();
                 let pipeline_keys = self.renderer.view_pipeline_keys(&view)?;
+                let static_backend_pipeline_keys = self
+                    .renderer
+                    .wgpu_static_backend_pipeline_keys_for_view(&view)?;
                 self.renderer
                     .record_pipeline_keys(&pipeline_keys, self.frame_index);
+                self.renderer
+                    .record_wgpu_static_backend_pipeline_keys(&static_backend_pipeline_keys);
                 stats.pipeline_cache = merge_pipeline_cache_backend_objects(
                     self.renderer.pipeline_cache_stats.clone(),
                     &stats.pipeline_cache,
@@ -34263,6 +34507,20 @@ mod tests {
         );
         assert_eq!(complete.backend_objects, 2);
         assert!(complete.has_complete_facade_backend_object_coverage());
+
+        let facade_backed = merge_pipeline_cache_backend_objects(
+            PipelineCacheStats {
+                total: 3,
+                ready: 3,
+                backend_objects: 3,
+                ..PipelineCacheStats::default()
+            },
+            &PipelineCacheStats {
+                backend_objects: 2,
+                ..PipelineCacheStats::default()
+            },
+        );
+        assert_eq!(facade_backed.backend_objects, 3);
     }
 
     #[test]
@@ -34718,6 +34976,76 @@ mod tests {
                 .as_ref()
                 .expect("resource dump is attached")
                 .debug_tooling_support,
+            renderer_support
+        );
+    }
+
+    #[test]
+    fn rhi_support_distinguishes_headless_graph_and_backend_execution_gap() {
+        let support = RendererRhiSupport::current(false);
+        assert!(!support.all_supported());
+        assert!(!support.backend_wgpu_active);
+        assert!(!support.complete_backend_execution_supported());
+        assert_eq!(
+            support.unsupported_features(),
+            vec![
+                RendererRhiFeature::BackendWgpuRuntime,
+                RendererRhiFeature::NativePassMetrics,
+                RendererRhiFeature::CompleteBackendExecutionCoverage,
+            ]
+        );
+        assert_eq!(
+            support
+                .support_for(RendererRhiFeature::HeadlessRhiDevice)
+                .map(|entry| (entry.supported, entry.implementation)),
+            Some((true, RendererRhiImplementationLevel::Headless))
+        );
+        assert_eq!(
+            support
+                .support_for(RendererRhiFeature::RenderGraphRhiExecution)
+                .map(|entry| (entry.supported, entry.implementation)),
+            Some((true, RendererRhiImplementationLevel::GraphObservable))
+        );
+
+        let backend = RendererRhiSupport::current(true);
+        assert!(backend.backend_wgpu_active);
+        assert!(!backend.all_supported());
+        assert_eq!(
+            backend.unsupported_features(),
+            vec![RendererRhiFeature::CompleteBackendExecutionCoverage]
+        );
+        assert_eq!(
+            backend
+                .support_for(RendererRhiFeature::BackendWgpuRuntime)
+                .map(|entry| (entry.supported, entry.implementation)),
+            Some((true, RendererRhiImplementationLevel::BackendWgpu))
+        );
+
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.rhi_support();
+        assert_eq!(renderer_support, support);
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.rhi_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.rhi_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("rhi_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.rhi_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .rhi_support,
             renderer_support
         );
     }
@@ -40245,6 +40573,8 @@ fn fs_main() -> @location(0) vec4<f32> {
         let draws = renderer.wgpu_reflected_draws_for_view(&view).unwrap();
 
         assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].facade_key.shader, shader);
+        assert_eq!(draws[0].facade_key.material_template, template);
         assert_eq!(draws[0].key.shader, shader);
         assert_eq!(draws[0].key.material_template, template);
         assert_eq!(
@@ -40259,6 +40589,309 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(draws[0].material_parameters[0].name, "tint");
         assert!(draws[0].depth_write);
         assert!(!draws[0].transparent);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_reflected_facade_draw_marks_facade_pipeline_cache_backend_object() {
+        let mut config = RendererConfig::default();
+        config.backend = BackendPreference::Wgpu;
+        let mut renderer = match block_on_ready(Renderer::new(config)) {
+            Ok(renderer) => renderer,
+            Err(_) => return,
+        };
+        let shader = renderer
+            .create_shader(ShaderDesc {
+                label: Some("reflected_facade_pipeline_cache_shader"),
+                source: ShaderSource::Wgsl(
+                    r#"
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+    let x = select(-1.0, 3.0, vertex_index == 2u);
+    let y = select(-1.0, 3.0, vertex_index == 1u);
+    return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.25, 0.5, 1.0, 1.0);
+}
+"#,
+                ),
+                stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                entry_points: ShaderEntryPoints {
+                    vertex: Some("vs_main"),
+                    fragment: Some("fs_main"),
+                    compute: None,
+                },
+                reflection: ShaderReflectionMode::Auto,
+                features: ShaderFeatureSet::default(),
+                hot_reload_key: None,
+            })
+            .unwrap();
+        let template = renderer
+            .create_material_template(MaterialTemplateDesc {
+                label: Some("reflected_facade_pipeline_cache_template".to_owned()),
+                shader,
+                domain: MaterialDomain::Opaque,
+                render_state: RenderStateDesc { depth_write: true },
+                parameter_schema: MaterialParameterSchema::default(),
+                passes: MaterialPassFlags::FORWARD,
+            })
+            .unwrap();
+        let material = renderer
+            .create_material(MaterialDesc {
+                label: Some("reflected_facade_pipeline_cache_material".to_owned()),
+                template,
+                parameters: Vec::new(),
+                overrides: MaterialOverrides::default(),
+            })
+            .unwrap();
+        let scene = renderer.create_scene(SceneDesc::default()).unwrap();
+        let mesh = test_mesh(&mut renderer, 0.0);
+        renderer
+            .edit_scene(scene, |scene| {
+                scene.spawn(RenderObjectDesc {
+                    mesh,
+                    materials: vec![material],
+                    ..RenderObjectDesc::default()
+                });
+            })
+            .unwrap();
+        let view = ViewDesc {
+            label: Some("reflected_facade_pipeline_cache_view".to_owned()),
+            scene,
+            camera: test_camera(),
+            target: RenderTarget::MainSurface,
+            render_path: RenderPath::Forward,
+            quality: ViewQualitySettings::default(),
+            layers: RenderLayerMask::all(),
+            graph_extensions: Vec::new(),
+        };
+
+        renderer.queue_wgpu_reflected_draws_for_view(&view).unwrap();
+        let pipeline_keys = renderer.view_pipeline_keys(&view).unwrap();
+        assert_eq!(pipeline_keys.len(), 1);
+        renderer.record_pipeline_keys(&pipeline_keys, renderer.frame_index);
+
+        let stats = renderer.pipeline_cache_stats();
+        assert_eq!(stats.total, 1);
+        assert_eq!(stats.ready, 1);
+        assert_eq!(stats.backend_objects, 1);
+        assert_eq!(stats.ready_entries_without_backend_object, 0);
+        assert_eq!(stats.used_entries_without_backend_object, 0);
+        assert!(stats.has_complete_facade_backend_object_coverage());
+        let entries = renderer.pipeline_cache_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].key, pipeline_keys[0]);
+        assert!(entries[0].has_backend_object);
+        let coverage = renderer.pipeline_cache_backend_coverage();
+        assert!(coverage.complete);
+        assert_eq!(coverage.ready_missing_backend_object_entries, 0);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_reflected_facade_pipeline_cache_aliases_survive_one_material_invalidation() {
+        let mut config = RendererConfig::default();
+        config.backend = BackendPreference::Wgpu;
+        let mut renderer = match block_on_ready(Renderer::new(config)) {
+            Ok(renderer) => renderer,
+            Err(_) => return,
+        };
+        let shader = renderer
+            .create_shader(ShaderDesc {
+                label: Some("reflected_facade_alias_lifecycle_shader"),
+                source: ShaderSource::Wgsl(
+                    r#"
+struct Tint {
+    color: vec4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> tint: Tint;
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> @builtin(position) vec4<f32> {
+    let x = select(-1.0, 3.0, vertex_index == 2u);
+    let y = select(-1.0, 3.0, vertex_index == 1u);
+    return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return tint.color;
+}
+"#,
+                ),
+                stages: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
+                entry_points: ShaderEntryPoints {
+                    vertex: Some("vs_main"),
+                    fragment: Some("fs_main"),
+                    compute: None,
+                },
+                reflection: ShaderReflectionMode::Auto,
+                features: ShaderFeatureSet::default(),
+                hot_reload_key: None,
+            })
+            .unwrap();
+        let template = renderer
+            .create_material_template(MaterialTemplateDesc {
+                label: Some("reflected_facade_alias_lifecycle_template".to_owned()),
+                shader,
+                domain: MaterialDomain::Opaque,
+                render_state: RenderStateDesc { depth_write: true },
+                parameter_schema: MaterialParameterSchema {
+                    parameters: vec!["tint".to_owned()],
+                },
+                passes: MaterialPassFlags::FORWARD,
+            })
+            .unwrap();
+        let first_material = renderer
+            .create_material(MaterialDesc {
+                label: Some("reflected_facade_alias_first_material".to_owned()),
+                template,
+                parameters: vec![MaterialParameter {
+                    name: "tint".to_owned(),
+                    value: MaterialParameterValue::Bytes(vec![
+                        0, 0, 128, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 63,
+                    ]),
+                }],
+                overrides: MaterialOverrides::default(),
+            })
+            .unwrap();
+        let second_material = renderer
+            .create_material(MaterialDesc {
+                label: Some("reflected_facade_alias_second_material".to_owned()),
+                template,
+                parameters: vec![MaterialParameter {
+                    name: "tint".to_owned(),
+                    value: MaterialParameterValue::Bytes(vec![
+                        0, 0, 0, 0, 0, 0, 128, 63, 0, 0, 0, 0, 0, 0, 128, 63,
+                    ]),
+                }],
+                overrides: MaterialOverrides::default(),
+            })
+            .unwrap();
+        let scene = renderer.create_scene(SceneDesc::default()).unwrap();
+        let mesh = test_mesh(&mut renderer, 0.0);
+        renderer
+            .edit_scene(scene, |scene| {
+                scene.spawn(RenderObjectDesc {
+                    mesh,
+                    materials: vec![first_material],
+                    ..RenderObjectDesc::default()
+                });
+                scene.spawn(RenderObjectDesc {
+                    mesh,
+                    materials: vec![second_material],
+                    ..RenderObjectDesc::default()
+                });
+            })
+            .unwrap();
+        let view = ViewDesc {
+            label: Some("reflected_facade_alias_lifecycle_view".to_owned()),
+            scene,
+            camera: test_camera(),
+            target: RenderTarget::MainSurface,
+            render_path: RenderPath::Forward,
+            quality: ViewQualitySettings::default(),
+            layers: RenderLayerMask::all(),
+            graph_extensions: Vec::new(),
+        };
+
+        let draws = renderer.wgpu_reflected_draws_for_view(&view).unwrap();
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].facade_key, draws[1].facade_key);
+        assert_ne!(draws[0].key, draws[1].key);
+        renderer.queue_wgpu_reflected_draws_for_view(&view).unwrap();
+        let pipeline_keys = renderer.view_pipeline_keys(&view).unwrap();
+        renderer.record_pipeline_keys(&pipeline_keys, renderer.frame_index);
+        let facade_key = draws[0].facade_key;
+        assert_eq!(
+            renderer
+                .pipeline_cache_backend_aliases
+                .get(&facade_key)
+                .map(HashSet::len),
+            Some(2)
+        );
+        assert!(renderer
+            .pipeline_cache_stats()
+            .has_complete_facade_backend_object_coverage());
+
+        renderer.invalidate_backend_native_pipelines_for_materials(&[first_material]);
+        renderer.refresh_pipeline_cache_usage_stats();
+
+        assert_eq!(
+            renderer
+                .pipeline_cache_backend_aliases
+                .get(&facade_key)
+                .map(HashSet::len),
+            Some(1)
+        );
+        let stats = renderer.pipeline_cache_stats();
+        assert_eq!(stats.backend_objects, 1);
+        assert_eq!(stats.ready_entries_without_backend_object, 0);
+        assert_eq!(stats.used_entries_without_backend_object, 0);
+        assert!(renderer.pipeline_cache_backend_coverage().complete);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn wgpu_standard_material_pipeline_cache_uses_static_backend_inventory() {
+        let mut config = RendererConfig::default();
+        config.backend = BackendPreference::Wgpu;
+        let mut renderer = match block_on_ready(Renderer::new(config)) {
+            Ok(renderer) => renderer,
+            Err(_) => return,
+        };
+        let material = renderer
+            .create_standard_material(StandardMaterialDesc {
+                label: Some("static_backend_pipeline_material".to_owned()),
+                base_color: Color::rgba(0.3, 0.4, 0.5, 1.0),
+                ..StandardMaterialDesc::default()
+            })
+            .unwrap();
+        let scene = renderer.create_scene(SceneDesc::default()).unwrap();
+        let mesh = test_mesh(&mut renderer, 0.0);
+        renderer
+            .edit_scene(scene, |scene| {
+                scene.spawn(RenderObjectDesc {
+                    mesh,
+                    materials: vec![material],
+                    ..RenderObjectDesc::default()
+                });
+            })
+            .unwrap();
+        let view = ViewDesc {
+            label: Some("static_backend_pipeline_view".to_owned()),
+            scene,
+            camera: test_camera(),
+            target: RenderTarget::MainSurface,
+            render_path: RenderPath::Forward,
+            quality: ViewQualitySettings::default(),
+            layers: RenderLayerMask::all(),
+            graph_extensions: Vec::new(),
+        };
+
+        let pipeline_keys = renderer.view_pipeline_keys(&view).unwrap();
+        let static_backend_keys = renderer
+            .wgpu_static_backend_pipeline_keys_for_view(&view)
+            .unwrap();
+        assert_eq!(pipeline_keys, static_backend_keys);
+        assert_eq!(pipeline_keys.len(), 1);
+        renderer.record_pipeline_keys(&pipeline_keys, renderer.frame_index);
+        renderer.record_wgpu_static_backend_pipeline_keys(&static_backend_keys);
+
+        let stats = renderer.pipeline_cache_stats();
+        assert_eq!(stats.backend_objects, 1);
+        assert_eq!(stats.ready_entries_without_backend_object, 0);
+        assert_eq!(stats.used_entries_without_backend_object, 0);
+        assert!(stats.has_complete_facade_backend_object_coverage());
+        let entries = renderer.pipeline_cache_entries();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].has_backend_object);
+        assert!(renderer.pipeline_cache_backend_coverage().complete);
     }
 
     #[cfg(feature = "backend-wgpu")]
@@ -41621,6 +42254,7 @@ fn fs_main() -> @location(0) vec4<f32> {
         );
         assert_eq!(report.frame_capture_support, stats.frame_capture_support);
         assert_eq!(report.debug_tooling_support, stats.debug_tooling_support);
+        assert_eq!(report.rhi_support, stats.rhi_support);
         assert_eq!(report.material_backend_support, stats.material_backend_support);
         assert_eq!(
             report.material_reflection_coverage,
@@ -41763,6 +42397,15 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.capture_external_hook_label, None);
         assert_eq!(report.capture_external_hook_sdk_name, None);
         assert_eq!(report.capture_resource_dump, capture.resource_dump);
+        assert_eq!(capture.rhi_support, stats.rhi_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .rhi_support,
+            stats.rhi_support
+        );
         assert_eq!(
             capture
                 .resource_dump
