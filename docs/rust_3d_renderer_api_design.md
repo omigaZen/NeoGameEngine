@@ -779,8 +779,25 @@ pub struct SamplerDesc {
 
 pub type SamplerHandle = Handle<SamplerTag>;
 
+pub struct SamplerConfigurationStats {
+    pub comparison_samplers: usize,
+    pub anisotropic_samplers: usize,
+    pub custom_lod_samplers: usize,
+}
+
+pub struct TextureConfigurationStats {
+    pub sampled_textures: usize,
+    pub render_target_textures: usize,
+    pub copy_src_textures: usize,
+    pub multi_mip_textures: usize,
+    pub generated_mip_textures: usize,
+    pub multisampled_textures: usize,
+}
+
 impl Renderer {
     pub fn create_sampler(&mut self, desc: SamplerDesc) -> Result<SamplerHandle, RendererError>;
+    pub fn texture_configuration_stats(&self) -> TextureConfigurationStats;
+    pub fn sampler_configuration_stats(&self) -> SamplerConfigurationStats;
 }
 ```
 
@@ -867,7 +884,22 @@ pub struct ShaderVariantInfo {
 }
 ```
 
-Shader variant warmup canonicalizes feature flags, rejects duplicate/blank flags, rejects feature requests not declared by the shader's `ShaderFeatureSet`, records the shader interface layout hash for the cached variant, and exposes per-frame use state for editor/cache diagnostics. When a wgpu runtime exists, warmup also compiles and caches a native WGSL shader module for the requested variant and reports that through `ShaderVariantInfo::backend_compiled`. `FrameStats`, `FrameDebugReport`, and `FrameCapture` mirror aggregate shader variant cache entry count, variants used this frame, backend-compiled variant count, and unique shader interface layout count so frame tooling and capture artifacts can inspect variant cache pressure without enumerating every variant. Shader reload and shader destroy invalidate matching variant cache entries and backend-wgpu cached variant shader modules. Invalidated backend-wgpu shader variant modules are moved into backend resource tombstones and retired through `poll_backend_resource_retirements()` rather than being dropped immediately.
+Shader variant warmup canonicalizes feature flags, rejects duplicate/blank flags, rejects feature requests not declared by the shader's `ShaderFeatureSet`, records the shader interface layout hash for the cached variant, and exposes per-frame use state for editor/cache diagnostics. When a wgpu runtime exists, warmup also compiles and caches a native WGSL shader module for the requested variant and reports that through `ShaderVariantInfo::backend_compiled`. `FrameStats`, `FrameDebugReport`, and `FrameCapture` mirror aggregate shader variant cache entry count, variants used this frame, ready-but-unused variant count, backend-compiled variant count, variants without backend modules, and unique shader interface layout count so frame tooling and capture artifacts can inspect variant cache pressure without enumerating every variant. Shader reload and shader destroy invalidate matching variant cache entries and backend-wgpu cached variant shader modules. Invalidated backend-wgpu shader variant modules are moved into backend resource tombstones and retired through `poll_backend_resource_retirements()` rather than being dropped immediately.
+
+```rust
+pub struct ShaderVariantCacheStats {
+    pub entries: usize,
+    pub used_this_frame: usize,
+    pub ready_unused: usize,
+    pub backend_compiled: usize,
+    pub without_backend_module: usize,
+    pub interface_layouts: usize,
+}
+
+impl Renderer {
+    pub fn shader_variant_cache_stats(&self) -> ShaderVariantCacheStats;
+}
+```
 
 ### 10.3 Shader interface
 
@@ -1460,6 +1492,41 @@ impl<'a> Frame<'a> {
     pub fn debug_draw(&mut self) -> DebugDraw<'_>;
 
     pub fn finish(self) -> Result<FrameStats, RendererError>;
+}
+
+pub enum EditorGizmoKind {
+    Translate,
+    Rotate,
+    Scale,
+}
+
+impl<'a> DebugDraw<'a> {
+    pub fn editor_gizmo(&mut self, transform: Mat4, kind: EditorGizmoKind, size: f32);
+    pub fn scene_object_gizmo(
+        &mut self,
+        scene: SceneHandle,
+        object: ObjectHandle,
+        kind: EditorGizmoKind,
+        size: f32,
+    ) -> Result<(), RendererError>;
+    pub fn translation_gizmo(&mut self, transform: Mat4, size: f32);
+    pub fn rotation_gizmo(&mut self, transform: Mat4, size: f32);
+    pub fn scale_gizmo(&mut self, transform: Mat4, size: f32);
+}
+
+pub struct FrameEditorGizmoOutput {
+    pub scene: SceneHandle,
+    pub object: ObjectHandle,
+    pub kind: EditorGizmoKind,
+}
+
+pub struct FrameDebugDrawOutput {
+    pub command_count: u32,
+    pub primitive_command_count: u32,
+    pub text_command_count: u32,
+    pub editor_gizmo_count: u32,
+    pub pickable_editor_gizmo_count: u32,
+    pub pickable_editor_gizmos: Vec<FrameEditorGizmoOutput>,
 }
 ```
 
@@ -2162,10 +2229,16 @@ pub struct FrameStats {
     pub pipeline_switches: u32,
     pub material_switches: u32,
     pub pipeline_cache: PipelineCacheStats,
+    pub material_backend_support: MaterialBackendSupport,
+    pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
     pub shader_variants_used_this_frame: usize,
+    pub shader_variants_ready_unused: usize,
     pub shader_variants_backend_compiled: usize,
+    pub shader_variants_without_backend_module: usize,
     pub shader_variant_interface_layouts: usize,
+    pub texture_configuration: TextureConfigurationStats,
+    pub sampler_configuration: SamplerConfigurationStats,
     pub upload: UploadStats,
     pub memory: MemoryStats,
     pub graph: RenderGraphStats,
@@ -2327,11 +2400,17 @@ pub struct FrameCapture {
     pub frame_index: u64,
     pub graph: RenderGraphStats,
     pub pipeline_cache: PipelineCacheStats,
+    pub material_backend_support: MaterialBackendSupport,
     pub pipeline_shader_interface_layouts: usize,
+    pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
     pub shader_variants_used_this_frame: usize,
+    pub shader_variants_ready_unused: usize,
     pub shader_variants_backend_compiled: usize,
+    pub shader_variants_without_backend_module: usize,
     pub shader_variant_interface_layouts: usize,
+    pub texture_configuration: TextureConfigurationStats,
+    pub sampler_configuration: SamplerConfigurationStats,
     pub retired_submission_frame: Option<u64>,
     pub pending_submission_frame: Option<u64>,
     pub resource_dump: Option<FrameCaptureResourceDump>,
@@ -2344,6 +2423,13 @@ pub struct FrameCaptureResourceDump {
     pub textures: usize,
     pub generated_mip_textures: usize,
     pub samplers: usize,
+    pub material_backend_support: MaterialBackendSupport,
+    pub shader_variant_cache: ShaderVariantCacheStats,
+    pub texture_configuration: TextureConfigurationStats,
+    pub sampler_configuration: SamplerConfigurationStats,
+    pub comparison_samplers: usize,
+    pub anisotropic_samplers: usize,
+    pub custom_lod_samplers: usize,
     pub shaders: usize,
     pub materials: usize,
     pub resident_bytes: u64,

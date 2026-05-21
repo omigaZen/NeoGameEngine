@@ -1267,3 +1267,181 @@ The complete renderer goal remains open. Native direct swapchain image graph exp
 - 这形成了窗口句柄无效分支之外的独立错误路径，避免将 display 依赖缺失误判为窗口句柄错误。
 - 该轮附加验证：新增测试 `with_surface_short_circuits_display_validation_on_window_handle_error`，构建窗口句柄不可用但 display 跟踪桩，确认 `with_surface` 在窗口句柄阶段失败时不会继续调用 display 校验。若 display 被误调用会触发桩的 panic，帮助防止错误分支错配。
 - 该轮附加验证：新增测试 `with_surface_invokes_window_handle_validation_before_display_validation`，使用顺序计数桩确认当 `display` 不可用时仍需先进行 `window_handle()` 查询，并且窗口与 display 查询各发生一次。
+
+## 2026-05-21 本轮进展：frame capture 原生 SDK 外部阻塞分流
+
+本轮将 frame capture 的两层能力在当前权威矩阵中拆开：
+
+- `Frame API / stats / capture` 收敛为 `Implemented`，因为 public frame lifecycle、capture queue、pending capture inspection、capture payload、resource dump、debug report propagation、pipeline cache snapshot、external hook handoff、callback success/failure/removed-hook 状态和 focused tests 已经具备当前仓库内实现闭环。
+- `Frame capture / RenderDoc hooks` 收敛为 `External Blocked`，因为真正的 RenderDoc/external debugger SDK loading 与 capture begin/end 调用依赖仓库外 SDK 链接，不应继续作为泛化 `Partial` 混在 renderer 内部实现缺口里。
+- 当前 in-repo 支持路径保持为 internal capture 加 registered external-hook callback handoff；没有注册 hook 的直接 RenderDoc/external-debugger capture request 通过 `RendererFeature::NativeFrameDebuggerCapture` gate 返回用户可见 `RendererError::UnsupportedFeature`。
+- `FrameCaptureSupport::complete_native_sdk_integration` 的文档口径同步为：外部 backend 必须同时具备 availability metadata 和 registered callback，metadata-only availability 不计为完整 native SDK integration。
+
+Goal 仍未完成：矩阵中还存在 resource lifecycle、backend-wgpu、standard graph、RHI、pipeline/material、memory/upload/streaming、debug/editor 等仓库内可继续实现的 `Partial` 项。
+
+## 2026-05-21 本轮进展：debug draw/editor gizmo renderer 可观测路径
+
+本轮继续推进 `Debug draw / editor API` 的仓库内 renderer 实现闭环，而不是把 live editor UI 交互本身并入 renderer：
+
+- `DebugDraw` 新增 `editor_gizmo`、`translation_gizmo`、`rotation_gizmo`、`scale_gizmo`，公开 renderer-side editor gizmo overlay command。
+- 新增 `EditorGizmoKind`，把 Translate/Rotate/Scale gizmo 类型作为 public facade 语义暴露。
+- `FrameDebugDrawOutput` 新增 `primitive_command_count`、`text_command_count`、`editor_gizmo_count`，让 frame stats / debug report consumers 能直接区分普通 debug primitive、3D text 与 editor gizmo handle。
+- backend-wgpu legacy scene conversion 已把 translation gizmo 展开为 native debug line mesh，避免 editor gizmo 只停留在 command bookkeeping。
+- API 设计文档同步补充了 `DebugDraw` gizmo 方法。
+
+建议后续验证命令：`cargo test -p engine_renderer scene_command_buffer_debug_draw_and_picking_are_exposed frame_debug_report_summarizes_last_frame_for_editor debug_draw_lines_are_added_to_legacy_render_scene -- --nocapture`。
+
+Goal 仍未完成：live editor UI docking / event routing 属于 renderer 外 host editor 交互边界，但矩阵中仍有 resource lifecycle、backend-wgpu、standard graph、RHI、pipeline/material、memory/upload/streaming 等仓库内 `Partial` 项需要继续实现。
+
+## 2026-05-21 本轮进展：debug/editor gizmo 三类可视化闭环
+
+延续上一轮 debug/editor renderer-side gizmo 工作，本轮把验证语义从 translation-only 扩展到三类 gizmo：
+
+- `DebugDraw::translation_gizmo`、`rotation_gizmo`、`scale_gizmo` 均进入 frame debug overlay command 流，并由 `FrameDebugDrawOutput::editor_gizmo_count` 直接统计。
+- backend-wgpu legacy scene conversion 路径现在通过现有 debug line mesh 展开 translate/rotate/scale gizmo，使三类 gizmo 都有 backend-visible debug geometry，而不是只停留在 renderer command metadata。
+- `DebugToolingSupport` 文案同步为 debug draw 与 editor gizmo visualization 均属于 renderer-facade supported；live editor interaction/event routing 仍明确属于 host editor 边界。
+- 既有 focused assertions 已更新，建议后续验证：`cargo test -p engine_renderer scene_command_buffer_debug_draw_and_picking_are_exposed frame_debug_report_summarizes_last_frame_for_editor debug_draw_lines_are_added_to_legacy_render_scene -- --nocapture`。
+
+Goal 仍未完成：该切片只推进 Debug draw/editor API；矩阵中仍存在 resource lifecycle、backend-wgpu、standard graph、RHI、pipeline/material、memory/upload/streaming 等非外部 `Partial` 项。
+
+## 2026-05-21 本轮进展：debug/editor scene-object gizmo picking metadata
+
+本轮继续推进 `Debug draw / editor API` 的 renderer 内闭环，补齐 gizmo visualization 与 retained scene object 的关联能力：
+
+- `DebugDraw::scene_object_gizmo(scene, object, kind, size)` 新增为 public facade helper，会验证 `SceneHandle` / `ObjectHandle`，从 retained scene object 读取 transform，并把 gizmo command 标记为 object-associated。
+- `FrameDebugDrawOutput` 新增 `pickable_editor_gizmo_count`，让 editor/debug report 可以直接观察当前 frame 中有多少 gizmo 与 scene object 关联，而不需要解析 debug command 内部。
+- `scene_command_buffer_debug_draw_and_picking_are_exposed` 的断言同步覆盖 scene-object gizmo 成功路径、invalid scene/object 错误路径、三类 gizmo command 统计，以及 pickable gizmo 计数。
+- API 设计文档同步补充 `scene_object_gizmo`。
+
+该切片仍不实现 host editor UI docking、鼠标事件路由或交互拖拽状态；这些属于 renderer 外的编辑器宿主边界。Goal 仍未完成，后续继续处理矩阵中其他非外部 `Partial` 项。
+
+## 2026-05-21 本轮进展：debug/editor pickable gizmo 精确目标输出
+
+本轮把上一轮的 `pickable_editor_gizmo_count` 从 aggregate count 推进到可定位输出：
+
+- 新增 `FrameEditorGizmoOutput { scene, object, kind }`，作为 frame debug draw output 中 object-associated gizmo 的精确目标记录。
+- `FrameDebugDrawOutput::pickable_editor_gizmos` 现在列出当前 frame 中可由 editor 关联回 retained scene object 的 gizmo，避免 editor/debug tooling 只能根据 count 或解析 internal command 推断目标。
+- `scene_command_buffer_debug_draw_and_picking_are_exposed` 的期望输出同步覆盖 `FrameEditorGizmoOutput`，证明 `scene_object_gizmo` 的 scene/object/kind metadata 进入 frame stats/debug report 传播链。
+- API 设计文档与能力矩阵已同步该 public observability 字段。
+
+Goal 仍未完成；本切片只继续推进 Debug draw/editor API，剩余非外部 `Partial` 项仍需逐项实现。
+
+## 2026-05-21 本轮进展：Debug draw/editor API 收敛为 renderer-layer Implemented
+
+基于连续几个切片补齐的 debug/editor renderer 能力，本轮将能力矩阵主表中的 `Debug draw/editor API` 从泛化 `Partial` 收敛为 `Implemented`：
+
+- public facade 已覆盖 debug draw primitives、3D text、translate/rotate/scale editor gizmo、scene-object gizmo helper、picking request/result 和 frame debug report。
+- `scene_object_gizmo` 提供 renderer 内可负责的 scene/object handle validation、retained transform lookup、object association metadata 和 invalid-handle 错误路径。
+- `FrameDebugDrawOutput` 与 `FrameEditorGizmoOutput` 把 primitive/text/gizmo 计数、pickable gizmo 数量和 exact scene/object/kind 目标输出到 frame stats/debug report。
+- backend-wgpu legacy scene conversion 已把 gizmo command 展开为 backend-visible debug line geometry，避免只停留在 metadata。
+- host editor UI docking、输入事件路由和交互拖拽状态属于 renderer 外宿主编辑器边界，不再作为 renderer-layer implementation gap 记录。
+
+Goal 仍未完成：矩阵中还存在 resource lifecycle、texture/sampler、shader/material、light/environment、animation/deformation、standard graph、RHI、pipeline/cache、GPU memory/upload/streaming 等非外部 `Partial` 项。
+
+## 2026-05-21 本轮进展：sampler 配置进入 capture resource dump
+
+本轮推进 `Texture / sampler API` 的 frame/capture 可观测性闭环：
+
+- `FrameCaptureResourceDump` 新增 `comparison_samplers`、`anisotropic_samplers`、`custom_lod_samplers`。
+- capture resource dump 现在从 Ready `SamplerDesc` 统计 compare sampler、anisotropy > 1 sampler、自定义 LOD range sampler，而不只报告 sampler 总数。
+- `frame_capture_resource_dump_counts_only_ready_resources` 已扩展一个 diagnostic sampler，断言这些 sampler 配置摘要进入 capture payload。
+- 该切片让 sampler API 的 descriptor/status 查询能力与 capture/debug artifact 对齐，便于工具在 capture 中观察 sampler feature usage。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer frame_capture_resource_dump_counts_only_ready_resources -- --nocapture`。
+
+Goal 仍未完成：`Texture / sampler API` 仍保留 `Partial`，因为 public CPU retained mip/headless tooling 与 backend GPU mip generation 之间仍有最终产品口径差异；其他非外部 `Partial` 项也仍需继续推进。
+
+## 2026-05-21 本轮进展：SamplerConfigurationStats 进入 frame/debug/capture 传播链
+
+本轮把 sampler feature usage 从 capture dump 局部字段提升为统一 frame 级可观测摘要：
+
+- 新增 `SamplerConfigurationStats { comparison_samplers, anisotropic_samplers, custom_lod_samplers }`。
+- 新增 `Renderer::sampler_configuration_stats()`，直接从 Ready `SamplerDesc` 汇总 compare sampler、anisotropy > 1 sampler、自定义 LOD range sampler。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 均携带 `sampler_configuration`，并由 frame instrumentation 从同一 source of truth 填充。
+- `FrameCaptureResourceDump` 继续保留平铺 `comparison_samplers`、`anisotropic_samplers`、`custom_lod_samplers`，便于 capture artifact 消费。
+- `frame_capture_resource_dump_counts_only_ready_resources` 与 `frame_debug_report_summarizes_last_frame_for_editor` 的断言语义已覆盖该传播路径。
+- API 设计文档同步补充 `SamplerConfigurationStats`、`Renderer::sampler_configuration_stats()`、frame/capture/resource dump 字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer frame_capture_resource_dump_counts_only_ready_resources frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：本切片只推进 sampler observability；`Texture / sampler API` 的最终状态仍受 public retained CPU mip compatibility 与 backend GPU mip generation 产品口径差异影响，其他非外部 `Partial` 项仍需继续推进。
+
+## 2026-05-21 本轮进展：TextureConfigurationStats 进入 frame/debug/capture 传播链
+
+本轮继续推进 `Texture / sampler API` 的可观测性闭环，把 texture usage/mip/sample 摘要提升到 frame 级：
+
+- 新增 `TextureConfigurationStats { sampled_textures, render_target_textures, copy_src_textures, multi_mip_textures, generated_mip_textures, multisampled_textures }`。
+- 新增 `Renderer::texture_configuration_stats()`，从 Ready `StoredTexture` / `TextureDescOwned` 汇总 usage、mip 和 sample 配置。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 均携带 `texture_configuration`，并由 frame instrumentation / resource dump 从同一 source of truth 填充。
+- `frame_capture_resource_dump_counts_only_ready_resources` 的断言同步覆盖 renderer query、frame stats、capture payload 和 dump 的 texture summary 一致性。
+- API 设计文档和能力矩阵同步补充 `TextureConfigurationStats` 与传播字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer frame_capture_resource_dump_counts_only_ready_resources frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：`Texture / sampler API` 的最终状态仍受 retained CPU mip compatibility 与 backend GPU generation 产品口径差异影响；其他非外部 `Partial` 项仍需继续推进。
+
+## 2026-05-21 本轮进展：texture/sampler summary 字段覆盖审计
+
+本轮对刚新增的 texture/sampler summary 字段做了结构覆盖审计，确认并补齐其主传播路径口径：
+
+- `TextureConfigurationStats` / `SamplerConfigurationStats` 已作为 `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 的统一字段存在。
+- `FrameDebugReport::from_stats` 与 frame capture 构造路径均从 `FrameStats` 复制 summary，避免 debug report/capture 与 frame 返回值分叉。
+- `Renderer::frame_capture_resource_dump()` 使用 `Renderer::texture_configuration_stats()` / `Renderer::sampler_configuration_stats()` 作为同源统计，并将 legacy flat sampler counters 保持为 capture consumer 兼容字段。
+- 显式 `FrameDebugDrawOutput` 期望也包含新增 pickable gizmo 目标字段，避免 debug/editor row 的新增字段只在默认值路径中存在。
+
+未运行验证。Goal 仍未完成，后续继续处理其他非外部 `Partial` 项或对 `Texture / sampler API` 的 backend GPU mip/public retained mip 产品边界做进一步收敛。
+
+## 2026-05-21 本轮进展：shader variant cache pressure 指标补齐
+
+本轮推进 `Shader API` 的 frame/debug/capture 可观测性，补齐 shader variant cache 的 ready-unused 与 backend-module 覆盖缺口：
+
+- `FrameStats`、`FrameDebugReport`、`FrameCapture` 新增 `shader_variants_ready_unused`，用于观察 warmed/ready 但本帧未使用的 shader variant 数量。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture` 新增 `shader_variants_without_backend_module`，用于观察 cache 中尚无 backend shader module 的 variant 数量。
+- `apply_shader_variant_cache_stats` 从现有 variant cache 条目统一计算 entries、used、ready-unused、backend-compiled、without-backend-module 和 interface-layout 数量。
+- `shader_variant_cache_tracks_features_and_invalidates_with_shader` 与 `frame_debug_report_summarizes_last_frame_for_editor` 的断言语义同步覆盖 frame/debug/capture 传播。
+- API 设计文档与能力矩阵同步更新。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer shader_variant_cache_tracks_features_and_invalidates_with_shader frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：`Shader API` 仍保留 `Partial`，因为 broader variant-to-native-pipeline/material-template permutation integration 仍是后续 backend 工作；其他非外部 `Partial` 项也仍需继续推进。
+
+## 2026-05-21 本轮进展：ShaderVariantCacheStats public query 与 frame 复用
+
+本轮把 shader variant cache 的分散 frame counters 收敛为可直接查询的 public aggregate：
+
+- 新增 `ShaderVariantCacheStats { entries, used_this_frame, ready_unused, backend_compiled, without_backend_module, interface_layouts }`。
+- 新增 `Renderer::shader_variant_cache_stats()`，从 shader variant cache 统一计算 cache pressure 与 backend module 覆盖状态。
+- `FrameStats::shader_variant_cache`、`FrameDebugReport::shader_variant_cache`、`FrameCapture::shader_variant_cache` 复用该 aggregate；既有 flat fields 继续保留，便于兼容现有工具。
+- `apply_shader_variant_cache_stats` 改为从 `Renderer::shader_variant_cache_stats()` 拆分 flat fields，避免 query 与 frame instrumentation 分叉。
+- 现有 focused assertions 已更新，覆盖 renderer query、frame stats、debug report、capture payload 的 aggregate 与 flat 字段一致性。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer shader_variant_cache_tracks_features_and_invalidates_with_shader frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：该切片继续推进 `Shader API` 可观测性；broader variant-to-native-pipeline/material-template permutation integration 仍未完成。
+
+## 2026-05-21 本轮进展：ShaderVariantCacheStats 进入 capture resource dump
+
+本轮延续 shader variant cache aggregate 工作，把同一份 `ShaderVariantCacheStats` 扩展到 capture resource dump：
+
+- `FrameCaptureResourceDump::shader_variant_cache` 新增，和 `FrameStats`、`FrameDebugReport`、`FrameCapture` 使用同一 `Renderer::shader_variant_cache_stats()` source of truth。
+- `shader_variant_cache_tracks_features_and_invalidates_with_shader` 的 capture request 改为包含 resource dump，并断言 dump 中的 shader variant aggregate 与 frame/capture payload 一致。
+- API 设计文档和能力矩阵同步补充 resource dump 传播路径。
+- 本轮同时修正了新增 aggregate 字段在 `FrameStats` / `FrameDebugReport` 中的重复字段插入风险，保证每个结构只保留一份 aggregate 字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer shader_variant_cache_tracks_features_and_invalidates_with_shader -- --nocapture`。
+
+Goal 仍未完成：`Shader API` 仍受 broader variant-to-native-pipeline/material-template permutation integration 阻塞，其他非外部 `Partial` 项仍需推进。
+
+## 2026-05-21 本轮进展：MaterialBackendSupport 进入 frame/debug/capture 传播链
+
+本轮推进 `Material API` 的可观测闭环，把 material backend 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `MaterialBackendSupport` 新增 `Default`，默认表示无 active backend-wgpu 的 facade/support 状态。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `material_backend_support`。
+- frame instrumentation 从 `Renderer::material_backend_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- API 设计文档与能力矩阵同步补充该传播路径。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap -- --nocapture`。
+
+Goal 仍未完成：`Material API` 的完整动态 material-template backend pipeline-layout/bind-group integration 仍未实现，其他非外部 `Partial` 项仍需继续推进。

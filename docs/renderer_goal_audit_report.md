@@ -3534,3 +3534,160 @@ Current audit conclusion for this slice:
 
 - `cargo test -p engine_renderer with_surface_short_circuits_display_validation_on_window_handle_error -- --nocapture`
   - Result: passed, including a short-circuit regression ensuring `Renderer::with_surface` returns window-handle validation errors without querying display handles; display queries were tracked and confirmed not invoked when `HasWindowHandle::window_handle()` returns `HandleError::Unavailable`.
+
+## 2026-05-21 audit update: frame capture native SDK external blocker classification
+
+Frame capture status is now split by implementation boundary rather than reported as one generic partial bucket.
+
+- `Frame API / stats / capture` is classified as implemented for the current in-repo renderer path: frame lifecycle, capture queueing, pending capture inspection, capture payload metadata, resource dumps, frame debug propagation, pipeline cache snapshots, registered external-hook handoff, callback success/failure reporting, and removed-hook `BackendUnavailable` reporting are covered by existing capture/support tests.
+- `Frame capture / RenderDoc hooks` is classified as `External Blocked` for built-in RenderDoc/external debugger SDK loading and capture begin/end calls. That work requires repository-external SDK integration.
+- Current user-visible behavior remains explicit: `RendererFeature::NativeFrameDebuggerCapture` is reserved unsupported, direct native debugger capture without a registered hook returns `RendererError::UnsupportedFeature(RendererFeature::NativeFrameDebuggerCapture)`, and the supported in-repo integration point is `Renderer::register_frame_capture_backend_callback`.
+- `FrameCaptureSupport::complete_native_sdk_integration` now requires external backend callback registration in addition to availability metadata, preventing metadata-only hook availability from being reported as complete native SDK integration.
+
+No validation command was run in this update; this audit entry records the current code/matrix classification and keeps the overall renderer goal open for the remaining non-external `Partial` rows.
+
+## 2026-05-21 audit update: debug draw editor gizmo observability
+
+Debug/editor renderer coverage now includes public editor gizmo visualization commands instead of only generic primitive/text debug draw commands.
+
+- Added `EditorGizmoKind` and `DebugDraw::{editor_gizmo, translation_gizmo, rotation_gizmo, scale_gizmo}` to the public facade.
+- `FrameDebugDrawOutput` now exposes command breakdown fields: primitive, text, and editor-gizmo counts. These propagate through existing frame stats and `FrameDebugReport` cloning paths.
+- Backend-wgpu legacy scene conversion expands translation gizmos into native debug line meshes, giving the gizmo path a renderer/backend-visible output rather than metadata-only bookkeeping.
+- Updated focused assertions in the existing debug draw, frame debug report, and legacy scene debug draw tests. Validation was not run in this turn.
+
+Remaining audit boundary: live editor UI docking, interactive event routing, and host-editor manipulation state are outside the renderer crate. The renderer-side visualization/stat/debug-report path is now represented, while the overall renderer goal remains open for other non-external `Partial` rows.
+
+## 2026-05-21 audit update: translate/rotate/scale editor gizmo backend-visible coverage
+
+The editor-gizmo debug draw slice now covers all three public gizmo helpers rather than only translation visualization.
+
+- `translation_gizmo`, `rotation_gizmo`, and `scale_gizmo` all contribute to `FrameDebugDrawOutput::editor_gizmo_count` through the frame stats/debug-report path.
+- The backend-wgpu legacy scene conversion path expands translate/rotate/scale gizmo commands into debug line mesh output, giving each helper backend-visible geometry.
+- `DebugToolingSupport` limitation text now distinguishes renderer-supported debug/gizmo visualization from host editor event routing and interactive manipulation state.
+- Validation was not run in this turn; updated assertions are present in the existing focused debug draw/editor tests.
+
+Remaining boundary: host editor UI docking, input routing, and manipulation state are outside the renderer crate. The renderer goal remains open for other non-external partial rows.
+
+## 2026-05-21 audit update: scene-object editor gizmo picking metadata
+
+Renderer-side editor gizmo support now includes object association metadata for editor picking/selection workflows.
+
+- Added `DebugDraw::scene_object_gizmo`, which validates scene/object handles, reads the retained object transform, and records the gizmo as associated with that object.
+- Added `FrameDebugDrawOutput::pickable_editor_gizmo_count` so frame stats and editor debug reports can distinguish object-associated gizmos from generic overlay gizmos.
+- Updated focused assertions for success and invalid-handle error paths in the existing debug draw/picking test.
+- API design documentation and the coverage matrix were updated. Validation was not run in this turn.
+
+Remaining boundary: renderer exposes visualization and object association; host editor event routing, UI docking, and interactive manipulation state remain outside this crate.
+
+## 2026-05-21 audit update: exact pickable editor gizmo targets
+
+Editor gizmo observability now exposes exact object targets, not only aggregate counts.
+
+- Added `FrameEditorGizmoOutput { scene, object, kind }`.
+- Added `FrameDebugDrawOutput::pickable_editor_gizmos` and populated it from `DebugDrawCommand::EditorGizmo` records that carry both `target_scene` and `target_object`.
+- Updated focused expected output for the debug draw/picking test to assert the scene/object/kind metadata survives into frame output.
+- Updated API design documentation and coverage matrix. Validation was not run in this turn.
+
+Remaining boundary: renderer exposes visualization and target metadata; editor UI event routing and manipulation state remain outside this crate.
+
+## 2026-05-21 audit update: Debug draw/editor API implemented at renderer layer
+
+The coverage matrix now classifies `Debug draw/editor API` as `Implemented` for the renderer layer.
+
+Evidence basis:
+
+- Public facade commands cover debug primitives, 3D text, translate/rotate/scale editor gizmos, and scene-object gizmos.
+- Scene-object gizmos validate scene/object handles, use retained object transforms, expose invalid-handle errors, and carry object-association metadata.
+- `FrameDebugDrawOutput` exposes primitive/text/gizmo split counts, pickable gizmo count, and exact `FrameEditorGizmoOutput { scene, object, kind }` records.
+- Existing frame stats/debug-report propagation carries these outputs, and backend-wgpu legacy scene conversion expands gizmo commands into backend-visible debug geometry.
+- Focused assertions were updated in the existing debug draw/editor tests, though validation was not run in this turn.
+
+Boundary note: editor UI docking, host input routing, and manipulation state are outside the renderer crate and are not counted as renderer-layer implementation gaps.
+
+## 2026-05-21 audit update: sampler capture-dump configuration observability
+
+Sampler observability now reaches capture resource dumps, not only direct `sampler_info` queries.
+
+- Added `FrameCaptureResourceDump::{comparison_samplers, anisotropic_samplers, custom_lod_samplers}`.
+- The dump population counts Ready sampler descriptors with compare state, anisotropy greater than one, and non-default LOD ranges.
+- Updated `frame_capture_resource_dump_counts_only_ready_resources` to create a diagnostic sampler and assert the capture payload reports these sampler configuration summaries.
+- Validation was not run in this turn.
+
+Remaining gap: this improves sampler observability but does not by itself close the broader `Texture / sampler API` partial row, especially the final distinction between retained CPU mip compatibility and backend GPU mip generation paths.
+
+## 2026-05-21 audit update: SamplerConfigurationStats frame/debug/capture propagation
+
+Sampler configuration observability is now available from the standard frame tooling surfaces.
+
+- Added `SamplerConfigurationStats` and `Renderer::sampler_configuration_stats()`.
+- `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` now carry `sampler_configuration` from frame instrumentation.
+- `FrameCaptureResourceDump` also retains flat comparison/anisotropic/custom-LOD sampler counters for lightweight capture consumers.
+- Existing focused assertions were updated to cover renderer query, frame stats, capture payload, resource dump, and debug report propagation. Validation was not run in this turn.
+
+Remaining gap: this closes sampler configuration observability, not the broader texture/sampler row's retained CPU mip versus backend GPU generation product-boundary concern.
+
+## 2026-05-21 audit update: TextureConfigurationStats frame/debug/capture propagation
+
+Texture configuration observability now mirrors sampler configuration observability across standard frame tooling surfaces.
+
+- Added `TextureConfigurationStats` and `Renderer::texture_configuration_stats()`.
+- `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` now carry `texture_configuration` from frame instrumentation/resource dump construction.
+- The stats summarize Ready sampled/render-target/copy-src/multi-mip/generated-mip/multisampled textures.
+- Updated focused expected output in the capture resource dump test to assert renderer query, frame stats, capture payload, and dump consistency. Validation was not run in this turn.
+
+Remaining gap: this closes texture usage/mip/sample observability, not the broader texture/sampler row's product-boundary concern around retained CPU mip compatibility versus backend GPU generation.
+
+## 2026-05-21 audit update: texture/sampler summary propagation coverage check
+
+A follow-up propagation audit was performed for the newly added texture/sampler summary fields.
+
+- `TextureConfigurationStats` and `SamplerConfigurationStats` are present on `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- `FrameDebugReport::from_stats`, capture construction, and resource-dump construction copy/populate these summaries from the same renderer/frame sources.
+- Existing focused assertions now cover renderer query, frame stats, capture payload, dump, debug report propagation, and explicit debug draw output initialization for the newer editor fields.
+- Validation was not run in this turn.
+
+This audit reduces field-propagation risk but does not close the overall renderer goal.
+
+## 2026-05-21 audit update: shader variant cache pressure observability
+
+Shader variant cache observability now distinguishes warmed-but-unused variants and variants missing backend modules.
+
+- Added `shader_variants_ready_unused` to `FrameStats`, `FrameDebugReport`, and `FrameCapture`.
+- Added `shader_variants_without_backend_module` to the same frame tooling surfaces.
+- `apply_shader_variant_cache_stats` computes these from the existing shader variant cache source of truth.
+- Existing focused assertions were updated to cover frame stats, debug report, and capture propagation. Validation was not run in this turn.
+
+Remaining gap: this improves shader variant cache diagnostics but does not complete the broader variant-to-native-pipeline/material-template permutation integration.
+
+## 2026-05-21 audit update: ShaderVariantCacheStats aggregate query
+
+Shader variant cache pressure now has a public aggregate query and frame propagation path.
+
+- Added `ShaderVariantCacheStats` and `Renderer::shader_variant_cache_stats()`.
+- `FrameStats`, `FrameDebugReport`, and `FrameCapture` now carry the aggregate in addition to legacy flat counters.
+- `apply_shader_variant_cache_stats` uses the public aggregate method as its source of truth.
+- Updated focused assertions to cover query/frame/debug/capture consistency. Validation was not run in this turn.
+
+Remaining gap: broader backend-native pipeline/material-template permutation integration remains outside this diagnostic slice.
+
+## 2026-05-21 audit update: ShaderVariantCacheStats in capture resource dumps
+
+The shader variant aggregate now reaches capture resource dumps.
+
+- Added `FrameCaptureResourceDump::shader_variant_cache`.
+- Resource dump construction uses `Renderer::shader_variant_cache_stats()`, matching frame/debug/capture aggregate sources.
+- Updated focused shader variant cache assertions to request a resource dump and verify dump/capture/frame aggregate consistency.
+- Fixed duplicate aggregate-field insertion introduced during the previous propagation edit. Validation was not run in this turn.
+
+Remaining gap: backend-native variant-to-pipeline/material-template permutation integration remains outside this diagnostic/resource-dump slice.
+
+## 2026-05-21 audit update: MaterialBackendSupport frame/capture propagation
+
+Material backend support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Added `MaterialBackendSupport` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Frame instrumentation fills the support matrix from `Renderer::material_backend_support()`.
+- The existing material backend support focused test now asserts query/frame/debug/capture/resource-dump consistency.
+- API design documentation and the coverage matrix were updated. Validation was not run in this turn.
+
+Remaining gap: complete dynamic material-template backend pipeline-layout/bind-group integration remains outside this observability slice.
