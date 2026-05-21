@@ -1391,6 +1391,49 @@ Goal 仍未完成：`Texture / sampler API` 的最终状态仍受 retained CPU m
 
 未运行验证。Goal 仍未完成，后续继续处理其他非外部 `Partial` 项或对 `Texture / sampler API` 的 backend GPU mip/public retained mip 产品边界做进一步收敛。
 
+## 2026-05-22 本轮进展：texture backend GPU mip 边界进入 public observability
+
+本轮推进 `Texture / sampler API` 的 public mip-generation 与 backend-wgpu material GPU mip path 对齐：
+
+- `TextureInfo` 新增 `backend_gpu_mip_generation_eligible` 与 `backend_gpu_mip_generation_active`，区分“描述符可走 backend GPU mip 生成路径”和“当前已 materialize 为 backend-wgpu sampled material texture binding”。
+- `TextureConfigurationStats` 新增 `backend_gpu_mip_generation_eligible_textures` 与 `backend_gpu_mip_generation_active_textures`，继续通过既有 frame/debug/capture/resource dump 传播链进入工具面。
+- `Renderer::generate_mips()` 现在会在 active backend-wgpu 且 texture descriptor eligible 时立即创建/register backend material texture binding；`backend_gpu_mip_generation_active` 来自该真实 backend binding 的 `generated_mips`，不再只由 runtime 是否存在推断。
+- `WgpuRendererRuntime::material_texture_generated_mips()` / `WgpuMaterialExternalResourceRegistry::texture_generated_mips()` 暴露该 backend binding 状态，供 renderer-level texture info/stat 查询消费。
+- `generate_mips_builds_retained_rgba8_chain` 现在断言 headless retained mip chain 可以是 backend-eligible，但不会误报 active backend path。
+- 新增 `texture_info_reports_backend_gpu_mip_generation_material_path`，覆盖 backend-wgpu runtime 下 `generate_mips()` materialize backend texture binding 后的 active GPU mip path 统计。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer texture_info_reports_backend_gpu_mip_generation_material_path generate_mips_builds_retained_rgba8_chain frame_capture_resource_dump_counts_only_ready_resources -- --nocapture`。
+
+Goal 仍未完成：该切片闭合了 eligible sampled texture 的 public retained mip / backend GPU mip execution 与观测差异，但 `Texture / sampler API` 仍因 public `Renderer::generate_mips` 保留 CPU mip bytes、backend GPU mip generation 仍局限于支持的 sampled material texture shape 而保持 `Partial`。
+
+## 2026-05-22 本轮进展：backend-wgpu materialized IBL prefiltered mip path
+
+本轮推进 `Light / shadow / environment / IBL` 的 backend-real IBL bake 路径：
+
+- `Renderer::bake_environment()` 仍保留 public/headless/tooling 可检查的 irradiance、prefiltered-specular、BRDF texture bytes。
+- 当 backend-wgpu active 且 prefiltered-specular cube texture eligible 时，bake 会立即注册 backend material texture binding，并通过 base-mip upload + GPU mip generation 生成 backend mip resource。
+- `FrameEnvironmentOutput` 新增 skybox / irradiance / prefiltered specular / BRDF LUT 的 backend GPU mip active 字段，frame/debug/capture 可以观察 baked IBL texture 是否已有真实 backend materialized mip path。
+- `RendererLightingSupport` 新增 `BackendIblPrefilteredSpecularGpuMips` 子能力，单独报告 eligible baked prefiltered-specular cube 是否已经 materialize 为 backend-wgpu GPU mip binding，不再把该子路径混在完整 `BackendIblConvolution` 缺口里。
+- 新增 `bake_environment_registers_backend_gpu_prefiltered_specular_binding`，覆盖 backend binding、`generated_mips`、`TextureInfo`、`TextureConfigurationStats`、frame environment output、`FrameDebugReport` 和 lighting support subfeature 的 active 观测。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer bake_environment_registers_backend_gpu_prefiltered_specular_binding environment_ -- --nocapture`。
+
+Goal 仍未完成：该切片把 eligible prefiltered IBL cube texture 从 retained-only 推进为 backend-wgpu materialized GPU mip path，但 runtime cubemap/probe capture 与完整 backend-real IBL convolution/capture 仍未实现，矩阵中也还有其他非外部 `Partial` 项。
+
+## 2026-05-22 本轮进展：public backend-wgpu environment probe capture
+
+本轮继续推进 `Light / shadow / environment / IBL`，把 runtime cubemap/probe capture 从 unsupported-only 推进到 public backend-wgpu 路径：
+
+- 新增 `EnvironmentProbeCaptureDesc`、`EnvironmentProbeCaptureMip`、`EnvironmentProbeCapture`。
+- 新增 `Renderer::capture_environment_probe(&ViewDesc, EnvironmentProbeCaptureDesc)` public facade。
+- backend-wgpu runtime 会基于传入 view 构建 legacy scene，使用 `render_wgpu::WgpuEnvironmentProbe` 渲染六个 cubemap faces，执行 backend prefilter，并 readback RGBA8 mip/face bytes。
+- `RendererLightingSupport::EnvironmentCapture` 在 active backend-wgpu runtime 下报告 `BackendGenerated` support；无 backend-wgpu 时仍返回用户可见 unsupported backend feature error。
+- 新增 `capture_environment_probe_uses_backend_wgpu_runtime_capture_path`，覆盖 public capture metadata、mip/face byte layout 和 lighting support activation。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer capture_environment_probe_uses_backend_wgpu_runtime_capture_path -- --nocapture`。
+
+Goal 仍未完成：runtime probe capture 已有 public backend path，但完整 backend-real IBL convolution、persistent probe resource lifecycle、多 probe blending/policy 和其他矩阵 `Partial` 项仍需继续收敛。
+
 ## 2026-05-21 本轮进展：shader variant cache pressure 指标补齐
 
 本轮推进 `Shader API` 的 frame/debug/capture 可观测性，补齐 shader variant cache 的 ready-unused 与 backend-module 覆盖缺口：

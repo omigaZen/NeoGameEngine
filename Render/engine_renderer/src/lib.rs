@@ -73,7 +73,8 @@ pub mod prelude {
         DebugToolingFeatureSupport, DebugToolingImplementationLevel, DebugToolingSupport,
         DeformationFeature, DeformationFeatureSupport, DeformationImplementationLevel,
         DeformationSupport, DepthFormat, DeviceStatus, DirectionalLightDesc, DirectionalShadowDesc,
-        EnvironmentBakeDesc, EnvironmentDesc, EnvironmentHandle, Exposure, ExtractRenderData,
+        EnvironmentBakeDesc, EnvironmentDesc, EnvironmentHandle, EnvironmentProbeCapture,
+        EnvironmentProbeCaptureDesc, EnvironmentProbeCaptureMip, Exposure, ExtractRenderData,
         FilterMode, FormatCaps, Frame, FrameCapture, FrameCaptureBackend, FrameCaptureBackendInfo,
         FrameCaptureHookDesc, FrameCaptureHookEvent, FrameCaptureIntegration,
         FrameCaptureRequestInfo, FrameCaptureResourceDump, FrameCaptureStatus, FrameCaptureSupport,
@@ -1966,6 +1967,8 @@ pub struct TextureInfo {
     pub depth_or_layers: u32,
     pub mip_levels: u32,
     pub mips_generated: bool,
+    pub backend_gpu_mip_generation_eligible: bool,
+    pub backend_gpu_mip_generation_active: bool,
     pub samples: u32,
     pub format: TextureFormat,
     pub usage: TextureUsage,
@@ -2075,6 +2078,8 @@ pub struct TextureConfigurationStats {
     pub copy_src_textures: usize,
     pub multi_mip_textures: usize,
     pub generated_mip_textures: usize,
+    pub backend_gpu_mip_generation_eligible_textures: usize,
+    pub backend_gpu_mip_generation_active_textures: usize,
     pub multisampled_textures: usize,
 }
 
@@ -3015,6 +3020,47 @@ pub struct EnvironmentBakeDesc {
     pub mip_levels: u32,
     pub intensity: f32,
     pub rotation: Quat,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvironmentProbeCaptureDesc {
+    pub label: Option<String>,
+    pub position: [f32; 3],
+    pub near: f32,
+    pub far: f32,
+    pub resolution: u32,
+    pub clear_color: Color,
+}
+
+impl Default for EnvironmentProbeCaptureDesc {
+    fn default() -> Self {
+        Self {
+            label: None,
+            position: [0.0, 0.0, 0.0],
+            near: 0.05,
+            far: 50.0,
+            resolution: 64,
+            clear_color: Color::BLACK,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvironmentProbeCaptureMip {
+    pub size: u32,
+    pub faces_rgba8: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnvironmentProbeCapture {
+    pub label: Option<String>,
+    pub position: [f32; 3],
+    pub near: f32,
+    pub far: f32,
+    pub resolution: u32,
+    pub mip_levels: u32,
+    pub format: TextureFormat,
+    pub mips: Vec<EnvironmentProbeCaptureMip>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -4646,6 +4692,10 @@ pub struct FrameEnvironmentOutput {
     pub irradiance_mips_generated: Option<bool>,
     pub prefiltered_specular_mips_generated: Option<bool>,
     pub brdf_lut_mips_generated: Option<bool>,
+    pub skybox_backend_gpu_mip_generation_active: Option<bool>,
+    pub irradiance_backend_gpu_mip_generation_active: Option<bool>,
+    pub prefiltered_specular_backend_gpu_mip_generation_active: Option<bool>,
+    pub brdf_lut_backend_gpu_mip_generation_active: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4779,6 +4829,7 @@ pub enum RendererLightingFeature {
     RetainedLights,
     ShadowMapping,
     EnvironmentIbl,
+    BackendIblPrefilteredSpecularGpuMips,
     BackendIblConvolution,
     EnvironmentCapture,
 }
@@ -4805,9 +4856,37 @@ pub struct RendererLightingSupport {
 
 impl RendererLightingSupport {
     pub fn current(backend_ibl_convolution_supported: bool) -> Self {
+        Self::current_with_backend_features(false, backend_ibl_convolution_supported, false)
+    }
+
+    pub fn current_with_backend_prefiltered_specular(
+        backend_prefiltered_specular_gpu_mips_supported: bool,
+        backend_ibl_convolution_supported: bool,
+    ) -> Self {
+        Self::current_with_backend_features(
+            backend_prefiltered_specular_gpu_mips_supported,
+            backend_ibl_convolution_supported,
+            false,
+        )
+    }
+
+    pub fn current_with_backend_features(
+        backend_prefiltered_specular_gpu_mips_supported: bool,
+        backend_ibl_convolution_supported: bool,
+        environment_capture_supported: bool,
+    ) -> Self {
         let backend_limitation = (!backend_ibl_convolution_supported).then_some(
             "backend-real environment convolution/capture is not implemented; current environment bake is retained facade output",
         );
+        let prefiltered_limitation = if backend_prefiltered_specular_gpu_mips_supported {
+            Some(
+                "backend-wgpu materializes eligible baked prefiltered-specular cube mip chains, but this is not complete runtime environment capture or full IBL convolution",
+            )
+        } else {
+            Some(
+                "no baked environment prefiltered-specular cube texture is currently materialized through backend-wgpu GPU mip generation",
+            )
+        };
         Self {
             features: vec![
                 RendererLightingFeatureSupport {
@@ -4835,6 +4914,16 @@ impl RendererLightingSupport {
                     ),
                 },
                 RendererLightingFeatureSupport {
+                    feature: RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips,
+                    supported: backend_prefiltered_specular_gpu_mips_supported,
+                    implementation: if backend_prefiltered_specular_gpu_mips_supported {
+                        RendererLightingImplementationLevel::BackendGenerated
+                    } else {
+                        RendererLightingImplementationLevel::GraphObservable
+                    },
+                    limitation: prefiltered_limitation,
+                },
+                RendererLightingFeatureSupport {
                     feature: RendererLightingFeature::BackendIblConvolution,
                     supported: backend_ibl_convolution_supported,
                     implementation: if backend_ibl_convolution_supported {
@@ -4846,11 +4935,21 @@ impl RendererLightingSupport {
                 },
                 RendererLightingFeatureSupport {
                     feature: RendererLightingFeature::EnvironmentCapture,
-                    supported: false,
-                    implementation: RendererLightingImplementationLevel::GraphObservable,
-                    limitation: Some(
-                        "runtime backend cubemap capture/probe rendering is not implemented; current environment data is descriptor/bake based",
-                    ),
+                    supported: environment_capture_supported,
+                    implementation: if environment_capture_supported {
+                        RendererLightingImplementationLevel::BackendGenerated
+                    } else {
+                        RendererLightingImplementationLevel::GraphObservable
+                    },
+                    limitation: if environment_capture_supported {
+                        Some(
+                            "backend-wgpu can capture and prefilter runtime cubemap probes through Renderer::capture_environment_probe; complete multi-probe lifecycle integration remains separate",
+                        )
+                    } else {
+                        Some(
+                            "runtime backend cubemap capture/probe rendering requires an active backend-wgpu runtime",
+                        )
+                    },
                 },
             ],
         }
@@ -4879,6 +4978,16 @@ impl RendererLightingSupport {
 
     pub fn backend_ibl_convolution_supported(&self) -> bool {
         self.support_for(RendererLightingFeature::BackendIblConvolution)
+            .is_some_and(|support| support.supported)
+    }
+
+    pub fn backend_prefiltered_specular_gpu_mips_supported(&self) -> bool {
+        self.support_for(RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips)
+            .is_some_and(|support| support.supported)
+    }
+
+    pub fn environment_capture_supported(&self) -> bool {
+        self.support_for(RendererLightingFeature::EnvironmentCapture)
             .is_some_and(|support| support.supported)
     }
 }
@@ -10494,13 +10603,34 @@ fn validate_surface_window_handles(
     }
 
     pub fn texture_info(&self, texture: TextureHandle) -> Option<TextureInfo> {
+        let backend_gpu_mip_generation_active =
+            self.backend_gpu_mip_generation_active_for_texture(texture);
         self.textures
             .get(ResourceKind::Texture, texture)
             .and_then(|slot| {
-                slot.value
-                    .as_ref()
-                    .and_then(|texture| texture_info_from_stored(texture, slot.status).ok())
+                slot.value.as_ref().and_then(|texture| {
+                    texture_info_from_stored(
+                        texture,
+                        slot.status,
+                        backend_gpu_mip_generation_active,
+                    )
+                    .ok()
+                })
             })
+    }
+
+    fn backend_gpu_mip_generation_active_for_texture(&self, texture: TextureHandle) -> bool {
+        #[cfg(feature = "backend-wgpu")]
+        {
+            self.wgpu_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.material_texture_generated_mips(texture))
+                .is_some_and(|generated_mips| generated_mips > 0)
+        }
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            false
+        }
     }
 
     pub fn texture_bytes(&self, texture: TextureHandle) -> Option<&[u8]> {
@@ -10532,6 +10662,38 @@ fn validate_surface_window_handles(
         };
         self.queue_upload_bytes(upload_bytes);
         self.invalidate_backend_material_texture_dependents(texture);
+        self.register_backend_gpu_mip_texture_binding(texture)?;
+        Ok(())
+    }
+
+    fn register_backend_gpu_mip_texture_binding(
+        &mut self,
+        texture: TextureHandle,
+    ) -> Result<(), RendererError> {
+        #[cfg(feature = "backend-wgpu")]
+        {
+            let should_register = self
+                .textures
+                .get(ResourceKind::Texture, texture)
+                .and_then(|slot| slot.value.as_ref())
+                .is_some_and(|stored| {
+                    stored.mips_generated
+                        && stored.desc.usage.contains(TextureUsage::SAMPLED)
+                        && wgpu_material_texture_gpu_mip_generation_supported(&stored.desc)
+                });
+            if should_register && self.wgpu_runtime.is_some() {
+                let desc = self.wgpu_material_texture_upload_desc(texture, false, true)?;
+                if desc.generate_mips_from_base {
+                    if let Some(runtime) = &mut self.wgpu_runtime {
+                        runtime.create_and_register_material_texture_binding(texture, &desc)?;
+                    }
+                }
+            }
+        }
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            let _ = texture;
+        }
         Ok(())
     }
 
@@ -11835,6 +11997,7 @@ fn fs_main() -> @location(0) vec4<f32> {
         })?;
         if desc.mip_levels > 1 {
             self.mark_texture_mips_generated(prefiltered_specular)?;
+            self.register_backend_gpu_mip_texture_binding(prefiltered_specular)?;
         }
         let brdf_lut = self.create_texture(TextureDesc {
             label: Some("environment_brdf_lut"),
@@ -11868,6 +12031,31 @@ fn fs_main() -> @location(0) vec4<f32> {
             texture: Some(source),
             background_intensity: desc.intensity,
         })
+    }
+
+    pub fn capture_environment_probe(
+        &mut self,
+        view: &ViewDesc,
+        desc: EnvironmentProbeCaptureDesc,
+    ) -> Result<EnvironmentProbeCapture, RendererError> {
+        #[cfg(feature = "backend-wgpu")]
+        {
+            let scene = self.build_legacy_scene(view)?;
+            let Some(runtime) = self.wgpu_runtime.as_mut() else {
+                return Err(RendererError::UnsupportedFeature(
+                    RendererFeature::BackendIblConvolution,
+                ));
+            };
+            return runtime.capture_environment_probe(&scene, &desc);
+        }
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            let _ = view;
+            let _ = desc;
+            Err(RendererError::UnsupportedFeature(
+                RendererFeature::BackendIblConvolution,
+            ))
+        }
     }
 
     fn mark_texture_mips_generated(&mut self, texture: TextureHandle) -> Result<(), RendererError> {
@@ -15587,9 +15775,33 @@ fn fs_main() -> @location(0) vec4<f32> {
     }
 
     pub fn lighting_support(&self) -> RendererLightingSupport {
-        RendererLightingSupport::current(
+        RendererLightingSupport::current_with_backend_features(
+            self.backend_ibl_prefiltered_specular_gpu_mips_active(),
             self.supports_feature(RendererFeature::BackendIblConvolution),
+            self.backend_environment_capture_active(),
         )
+    }
+
+    fn backend_ibl_prefiltered_specular_gpu_mips_active(&self) -> bool {
+        self.environments.resources.iter().any(|slot| {
+            slot.status == ResourceStatus::Ready
+                && slot
+                    .value
+                    .as_ref()
+                    .and_then(|environment| environment.desc.prefiltered_specular)
+                    .is_some_and(|texture| self.backend_gpu_mip_generation_active_for_texture(texture))
+        })
+    }
+
+    fn backend_environment_capture_active(&self) -> bool {
+        #[cfg(feature = "backend-wgpu")]
+        {
+            self.wgpu_runtime.is_some()
+        }
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            false
+        }
     }
 
     fn pipeline_key_shader_interface_layout_hash(&self, key: PipelineKey) -> u64 {
@@ -17073,13 +17285,15 @@ fn fs_main() -> @location(0) vec4<f32> {
 
     pub fn texture_configuration_stats(&self) -> TextureConfigurationStats {
         let mut stats = TextureConfigurationStats::default();
-        for slot in &self.textures.resources {
+        for (index, slot) in self.textures.resources.iter().enumerate() {
             if slot.status != ResourceStatus::Ready {
                 continue;
             }
             let Some(texture) = slot.value.as_ref() else {
                 continue;
             };
+            let handle =
+                make_handle::<TextureTag>(ResourceKind::Texture, index as u32, slot.generation);
             if texture.desc.usage.contains(TextureUsage::SAMPLED) {
                 stats.sampled_textures = stats.sampled_textures.saturating_add(1);
             }
@@ -17094,6 +17308,22 @@ fn fs_main() -> @location(0) vec4<f32> {
             }
             if texture.mips_generated {
                 stats.generated_mip_textures = stats.generated_mip_textures.saturating_add(1);
+            }
+            let backend_gpu_mip_generation_eligible =
+                texture.desc.usage.contains(TextureUsage::SAMPLED)
+                    && wgpu_material_texture_gpu_mip_generation_supported(&texture.desc);
+            if backend_gpu_mip_generation_eligible {
+                stats.backend_gpu_mip_generation_eligible_textures = stats
+                    .backend_gpu_mip_generation_eligible_textures
+                    .saturating_add(1);
+            }
+            if self.backend_gpu_mip_generation_active_for_texture(handle)
+                && texture.mips_generated
+                && backend_gpu_mip_generation_eligible
+            {
+                stats.backend_gpu_mip_generation_active_textures = stats
+                    .backend_gpu_mip_generation_active_textures
+                    .saturating_add(1);
             }
             if texture.desc.samples > 1 {
                 stats.multisampled_textures = stats.multisampled_textures.saturating_add(1);
@@ -18850,7 +19080,6 @@ fn wgpu_material_texture_mip_uploads(
     Ok(uploads)
 }
 
-#[cfg(feature = "backend-wgpu")]
 fn wgpu_material_texture_gpu_mip_generation_supported(texture: &TextureDescOwned) -> bool {
     texture.samples == 1
         && texture.mip_levels > 1
@@ -23902,6 +24131,18 @@ fn environment_output(
             .as_ref()
             .map(|info| info.mips_generated),
         brdf_lut_mips_generated: brdf_lut.as_ref().map(|info| info.mips_generated),
+        skybox_backend_gpu_mip_generation_active: skybox
+            .as_ref()
+            .map(|info| info.backend_gpu_mip_generation_active),
+        irradiance_backend_gpu_mip_generation_active: irradiance
+            .as_ref()
+            .map(|info| info.backend_gpu_mip_generation_active),
+        prefiltered_specular_backend_gpu_mip_generation_active: prefiltered_specular
+            .as_ref()
+            .map(|info| info.backend_gpu_mip_generation_active),
+        brdf_lut_backend_gpu_mip_generation_active: brdf_lut
+            .as_ref()
+            .map(|info| info.backend_gpu_mip_generation_active),
     }))
 }
 
@@ -23909,6 +24150,7 @@ struct EnvironmentTextureFrameInfo {
     label: Option<String>,
     mip_levels: u32,
     mips_generated: bool,
+    backend_gpu_mip_generation_active: bool,
 }
 
 fn optional_environment_texture_frame_info(
@@ -23932,6 +24174,7 @@ fn optional_environment_texture_frame_info(
                 label: info.label,
                 mip_levels: info.mip_levels,
                 mips_generated: info.mips_generated,
+                backend_gpu_mip_generation_active: info.backend_gpu_mip_generation_active,
             })
         })
         .transpose()
@@ -26721,11 +26964,18 @@ fn renderer_graph_texture_export_coverage_for_desc(
 fn texture_info_from_stored(
     stored: &StoredTexture,
     status: ResourceStatus,
+    backend_gpu_mip_generation_active: bool,
 ) -> Result<TextureInfo, RendererError> {
     let graph_subresources =
         renderer_graph_texture_export_subresources_from_stored(stored).unwrap_or_default();
     let (complete_mip_coverage, complete_layer_coverage, complete_subresource_coverage) =
         renderer_graph_texture_export_coverage_for_desc(&stored.desc, &graph_subresources);
+    let backend_gpu_mip_generation_eligible =
+        stored.desc.usage.contains(TextureUsage::SAMPLED)
+            && wgpu_material_texture_gpu_mip_generation_supported(&stored.desc);
+    let backend_gpu_mip_generation_active = backend_gpu_mip_generation_active
+        && stored.mips_generated
+        && backend_gpu_mip_generation_eligible;
     let subresources = graph_subresources
         .into_iter()
         .map(|subresource| TextureInfoSubresource {
@@ -26749,6 +26999,8 @@ fn texture_info_from_stored(
         depth_or_layers: stored.desc.depth_or_layers,
         mip_levels: stored.desc.mip_levels,
         mips_generated: stored.mips_generated,
+        backend_gpu_mip_generation_eligible,
+        backend_gpu_mip_generation_active,
         samples: stored.desc.samples,
         format: stored.desc.format,
         usage: stored.desc.usage,
@@ -32593,6 +32845,8 @@ mod tests {
         let info = renderer.texture_info(texture).unwrap();
         assert_eq!(info.mip_levels, 3);
         assert!(info.mips_generated);
+        assert!(info.backend_gpu_mip_generation_eligible);
+        assert!(!info.backend_gpu_mip_generation_active);
         let bytes = renderer.texture_bytes(texture).unwrap();
         assert_eq!(bytes.len(), 4 * 4 * 4 + 2 * 2 * 4 + 4);
         assert_eq!(
@@ -32620,6 +32874,53 @@ mod tests {
             )
             .unwrap();
         assert!(!renderer.texture_info(texture).unwrap().mips_generated);
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn texture_info_reports_backend_gpu_mip_generation_material_path() {
+        let mut renderer = match Renderer::new_wgpu(RendererConfig::default()) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                eprintln!("skipping backend GPU mip texture-info test: {error}");
+                return;
+            }
+        };
+        let texture = renderer
+            .create_texture(TextureDesc {
+                label: Some("backend_gpu_mip_info"),
+                dimension: TextureDimension::D2,
+                width: 4,
+                height: 4,
+                depth_or_layers: 1,
+                mip_levels: 1,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsage::SAMPLED | TextureUsage::COPY_SRC,
+                initial_data: Some(TextureInitialData {
+                    bytes: &[128; 64],
+                    bytes_per_row: 16,
+                    rows_per_image: 4,
+                }),
+            })
+            .unwrap();
+
+        assert!(!renderer
+            .texture_info(texture)
+            .unwrap()
+            .backend_gpu_mip_generation_eligible);
+        renderer.generate_mips(texture).unwrap();
+
+        let info = renderer.texture_info(texture).unwrap();
+        assert!(info.mips_generated);
+        assert!(info.backend_gpu_mip_generation_eligible);
+        assert!(info.backend_gpu_mip_generation_active);
+
+        let stats = renderer.texture_configuration_stats();
+        assert_eq!(stats.generated_mip_textures, 1);
+        assert_eq!(stats.backend_gpu_mip_generation_eligible_textures, 1);
+        assert_eq!(stats.backend_gpu_mip_generation_active_textures, 1);
+        assert_eq!(renderer.backend_material_resource_stats().texture_bindings, 1);
     }
 
     #[test]
@@ -32695,6 +32996,7 @@ mod tests {
             .unwrap();
         assert!(!renderer.texture_info(texture).unwrap().mips_generated);
     }
+
 
     #[test]
     fn generate_mips_builds_retained_rgba32f_volume_chain() {
@@ -33771,6 +34073,10 @@ mod tests {
                 irradiance_mips_generated: Some(false),
                 prefiltered_specular_mips_generated: Some(false),
                 brdf_lut_mips_generated: Some(false),
+                skybox_backend_gpu_mip_generation_active: Some(false),
+                irradiance_backend_gpu_mip_generation_active: Some(false),
+                prefiltered_specular_backend_gpu_mip_generation_active: Some(false),
+                brdf_lut_backend_gpu_mip_generation_active: Some(false),
             }]
         );
 
@@ -33886,6 +34192,22 @@ mod tests {
         assert_eq!(baked_output.irradiance_mips_generated, Some(false));
         assert_eq!(baked_output.prefiltered_specular_mips_generated, Some(true));
         assert_eq!(baked_output.brdf_lut_mips_generated, Some(false));
+        assert_eq!(
+            baked_output.skybox_backend_gpu_mip_generation_active,
+            Some(false)
+        );
+        assert_eq!(
+            baked_output.irradiance_backend_gpu_mip_generation_active,
+            Some(false)
+        );
+        assert_eq!(
+            baked_output.prefiltered_specular_backend_gpu_mip_generation_active,
+            Some(false)
+        );
+        assert_eq!(
+            baked_output.brdf_lut_backend_gpu_mip_generation_active,
+            Some(false)
+        );
 
         assert!(matches!(
             renderer.create_environment(EnvironmentDesc {
@@ -34031,6 +34353,170 @@ mod tests {
                 .gpu_time_ms,
             stats.gpu_time_ms
         );
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn bake_environment_registers_backend_gpu_prefiltered_specular_binding() {
+        let mut renderer = match Renderer::new_wgpu(RendererConfig::default()) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                eprintln!("skipping backend IBL bake binding test: {error}");
+                return;
+            }
+        };
+        let source = renderer
+            .create_texture(TextureDesc {
+                label: Some("backend_ibl_source"),
+                dimension: TextureDimension::D2,
+                width: 4,
+                height: 4,
+                depth_or_layers: 1,
+                mip_levels: 1,
+                samples: 1,
+                format: TextureFormat::Rgba8Unorm,
+                usage: TextureUsage::SAMPLED | TextureUsage::COPY_SRC,
+                initial_data: Some(TextureInitialData {
+                    bytes: &[192; 64],
+                    bytes_per_row: 16,
+                    rows_per_image: 4,
+                }),
+            })
+            .unwrap();
+
+        let environment = renderer
+            .bake_environment(
+                source,
+                EnvironmentBakeDesc {
+                    label: Some("backend_ibl_bake".to_owned()),
+                    resolution: 4,
+                    mip_levels: 3,
+                    intensity: 1.0,
+                    rotation: Quat::IDENTITY,
+                },
+            )
+            .unwrap();
+        let desc = renderer.environment_desc(environment).unwrap();
+        let prefiltered = desc
+            .prefiltered_specular
+            .expect("environment bake creates a prefiltered specular texture");
+        let info = renderer.texture_info(prefiltered).unwrap();
+        assert!(info.mips_generated);
+        assert!(info.backend_gpu_mip_generation_eligible);
+        assert!(info.backend_gpu_mip_generation_active);
+        assert_eq!(
+            renderer
+                .wgpu_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.material_texture_generated_mips(prefiltered)),
+            Some(2)
+        );
+        assert_eq!(renderer.backend_material_resource_stats().texture_bindings, 1);
+        assert_eq!(
+            renderer
+                .texture_configuration_stats()
+                .backend_gpu_mip_generation_active_textures,
+            1
+        );
+
+        let scene = renderer.create_scene(SceneDesc::default()).unwrap();
+        renderer
+            .edit_scene(scene, |scene| {
+                scene.set_environment(Some(environment)).unwrap();
+            })
+            .unwrap();
+        let mut frame = renderer.begin_frame(FrameInput::default()).unwrap();
+        frame
+            .render_view(ViewDesc {
+                label: Some("backend_ibl_frame_output".to_owned()),
+                scene,
+                camera: test_camera(),
+                target: RenderTarget::Headless {
+                    width: 4,
+                    height: 4,
+                    format: TextureFormat::Rgba8Unorm,
+                },
+                render_path: RenderPath::Deferred,
+                quality: ViewQualitySettings::default(),
+                layers: RenderLayerMask::all(),
+                graph_extensions: Vec::new(),
+            })
+            .unwrap();
+        let stats = frame.finish().unwrap();
+        let output = stats
+            .environment_outputs
+            .first()
+            .expect("baked environment output should be reported");
+        assert_eq!(
+            output.prefiltered_specular_backend_gpu_mip_generation_active,
+            Some(true)
+        );
+        assert_eq!(
+            FrameDebugReport::from_stats(&stats).environment_outputs,
+            stats.environment_outputs
+        );
+        let lighting_support = renderer.lighting_support();
+        assert!(lighting_support.backend_prefiltered_specular_gpu_mips_supported());
+        assert!(lighting_support
+            .support_for(RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips)
+            .is_some_and(|entry| {
+                entry.supported
+                    && entry.implementation == RendererLightingImplementationLevel::BackendGenerated
+            }));
+        assert!(lighting_support.environment_capture_supported());
+    }
+
+    #[cfg(feature = "backend-wgpu")]
+    #[test]
+    fn capture_environment_probe_uses_backend_wgpu_runtime_capture_path() {
+        let mut renderer = match Renderer::new_wgpu(RendererConfig::default()) {
+            Ok(renderer) => renderer,
+            Err(error) => {
+                eprintln!("skipping backend environment probe capture test: {error}");
+                return;
+            }
+        };
+        assert!(renderer.lighting_support().environment_capture_supported());
+        let scene = renderer.create_scene(SceneDesc::default()).unwrap();
+        let view = ViewDesc {
+            label: Some("environment_probe_capture_view".to_owned()),
+            scene,
+            camera: test_camera(),
+            target: RenderTarget::Headless {
+                width: 2,
+                height: 2,
+                format: TextureFormat::Rgba8Unorm,
+            },
+            render_path: RenderPath::Forward,
+            quality: ViewQualitySettings::default(),
+            layers: RenderLayerMask::all(),
+            graph_extensions: Vec::new(),
+        };
+        let capture = renderer
+            .capture_environment_probe(
+                &view,
+                EnvironmentProbeCaptureDesc {
+                    label: Some("runtime_probe".to_owned()),
+                    resolution: 2,
+                    near: 0.05,
+                    far: 10.0,
+                    clear_color: Color::BLACK,
+                    ..EnvironmentProbeCaptureDesc::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(capture.label, Some("runtime_probe".to_owned()));
+        assert_eq!(capture.resolution, 2);
+        assert_eq!(capture.mip_levels, 2);
+        assert_eq!(capture.format, TextureFormat::Rgba8Unorm);
+        assert_eq!(capture.mips.len(), 2);
+        assert_eq!(capture.mips[0].size, 2);
+        assert_eq!(capture.mips[0].faces_rgba8.len(), 6);
+        assert_eq!(capture.mips[0].faces_rgba8[0].len(), 2 * 2 * 4);
+        assert_eq!(capture.mips[1].size, 1);
+        assert_eq!(capture.mips[1].faces_rgba8.len(), 6);
+        assert_eq!(capture.mips[1].faces_rgba8[0].len(), 4);
     }
 
     #[test]
@@ -34727,6 +35213,7 @@ mod tests {
         assert_eq!(
             support.unsupported_features(),
             vec![
+                RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips,
                 RendererLightingFeature::BackendIblConvolution,
                 RendererLightingFeature::EnvironmentCapture,
             ]
@@ -34744,6 +35231,10 @@ mod tests {
             Some((true, RendererLightingImplementationLevel::GraphObservable))
         );
         assert!(support
+            .support_for(RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips)
+            .and_then(|entry| entry.limitation)
+            .is_some());
+        assert!(support
             .support_for(RendererLightingFeature::BackendIblConvolution)
             .and_then(|entry| entry.limitation)
             .is_some());
@@ -34753,7 +35244,21 @@ mod tests {
         assert!(backend.backend_ibl_convolution_supported());
         assert_eq!(
             backend.unsupported_features(),
-            vec![RendererLightingFeature::EnvironmentCapture]
+            vec![
+                RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips,
+                RendererLightingFeature::EnvironmentCapture,
+            ]
+        );
+
+        let backend_prefiltered =
+            RendererLightingSupport::current_with_backend_prefiltered_specular(true, false);
+        assert!(backend_prefiltered.backend_prefiltered_specular_gpu_mips_supported());
+        assert!(!backend_prefiltered.backend_ibl_convolution_supported());
+        assert_eq!(
+            backend_prefiltered
+                .support_for(RendererLightingFeature::BackendIblPrefilteredSpecularGpuMips)
+                .map(|entry| (entry.supported, entry.implementation)),
+            Some((true, RendererLightingImplementationLevel::BackendGenerated))
         );
 
         let mut renderer = Renderer::new_headless(RendererConfig::default());
@@ -38825,6 +39330,8 @@ mod tests {
             copy_src_textures: 1,
             multi_mip_textures: 1,
             generated_mip_textures: 1,
+            backend_gpu_mip_generation_eligible_textures: 1,
+            backend_gpu_mip_generation_active_textures: 0,
             multisampled_textures: 0,
         };
         assert_eq!(

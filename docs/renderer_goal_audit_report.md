@@ -3648,6 +3648,46 @@ A follow-up propagation audit was performed for the newly added texture/sampler 
 
 This audit reduces field-propagation risk but does not close the overall renderer goal.
 
+## 2026-05-22 audit update: texture backend GPU mip boundary observability
+
+Texture mip-generation observability now exposes whether a public retained mip chain can use the backend-wgpu sampled material GPU mip-generation path.
+
+- `TextureInfo` now reports `backend_gpu_mip_generation_eligible` and `backend_gpu_mip_generation_active`.
+- `TextureConfigurationStats` now reports `backend_gpu_mip_generation_eligible_textures` and `backend_gpu_mip_generation_active_textures`.
+- Headless generated mip chains remain retained CPU bytes for tooling/graph compatibility and report eligible-but-not-active when the descriptor matches the backend path.
+- Active backend-wgpu generated sampled textures are now immediately materialized into registered backend material texture bindings by `Renderer::generate_mips()`, and both texture info and aggregate stats report active state from that concrete binding's `generated_mips`.
+- `WgpuRendererRuntime::material_texture_generated_mips()` and `WgpuMaterialExternalResourceRegistry::texture_generated_mips()` expose the backend binding state consumed by renderer-level texture info/stat queries.
+- Focused coverage added: `texture_info_reports_backend_gpu_mip_generation_material_path`; existing retained mip coverage was extended in `generate_mips_builds_retained_rgba8_chain`.
+- Validation was not run in this turn.
+
+Remaining gap: this makes the retained public mip-chain/backend GPU mip-generation boundary explicit and materializes eligible sampled textures on backend-wgpu, but does not convert all public mip generation to backend-resident GPU execution or broaden backend GPU mip support beyond the existing supported sampled material texture shapes.
+
+## 2026-05-22 audit update: backend-wgpu materialized IBL prefiltered mip path
+
+Environment bake now has a backend-wgpu materialized path for eligible prefiltered-specular cube textures.
+
+- `Renderer::bake_environment()` keeps the public retained texture outputs for irradiance, prefiltered specular, and BRDF LUT.
+- For active backend-wgpu renderers, eligible generated prefiltered-specular cube textures are immediately registered as backend material texture bindings using base-mip upload plus GPU mip generation.
+- `FrameEnvironmentOutput` now mirrors backend GPU mip active state for skybox, irradiance, prefiltered specular, and BRDF LUT slots.
+- `RendererLightingSupport` now exposes `BackendIblPrefilteredSpecularGpuMips` as a backend-generated subfeature when a ready environment has a materialized prefiltered-specular GPU mip binding.
+- Focused coverage added but not run: `bake_environment_registers_backend_gpu_prefiltered_specular_binding`, including `FrameDebugReport` propagation for the environment output payload and lighting support subfeature activation.
+- Validation was not run in this turn.
+
+Remaining gap: this closes a retained-only IBL bake subpath for eligible backend-wgpu prefiltered specular textures, but runtime cubemap/probe capture and complete backend-real IBL convolution for all environment paths remain incomplete.
+
+## 2026-05-22 audit update: public backend-wgpu environment probe capture
+
+Runtime environment probe capture is now exposed through the renderer facade when backend-wgpu is active.
+
+- Added public `EnvironmentProbeCaptureDesc`, `EnvironmentProbeCaptureMip`, and `EnvironmentProbeCapture`.
+- Added `Renderer::capture_environment_probe(&ViewDesc, EnvironmentProbeCaptureDesc)`.
+- Backend-wgpu implementation builds the legacy scene for the supplied view, renders six cubemap faces with `WgpuEnvironmentProbe`, runs backend prefilter, and reads RGBA8 mip/face bytes back into the public payload.
+- `RendererLightingSupport::EnvironmentCapture` reports backend-generated support for active backend-wgpu renderers instead of always reporting unsupported.
+- Focused coverage added but not run: `capture_environment_probe_uses_backend_wgpu_runtime_capture_path`.
+- Validation was not run in this turn.
+
+Remaining gap: this closes the unsupported-only runtime capture boundary for backend-wgpu, but complete IBL convolution, persistent probe resources, multi-probe lifecycle/blending policy, and non-backend capture paths remain incomplete.
+
 ## 2026-05-21 audit update: shader variant cache pressure observability
 
 Shader variant cache observability now distinguishes warmed-but-unused variants and variants missing backend modules.

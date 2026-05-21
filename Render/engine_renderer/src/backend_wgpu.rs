@@ -5,15 +5,18 @@ use graphics_wgpu::{
     wgpu, WgpuFrameReadback, WgpuGraphics, WgpuGraphicsOptions, WgpuSurface, WgpuSurfaceOptions,
 };
 use render_wgpu::{MeshRenderStats, MeshRenderer, WgpuPostProcessOptions, WgpuRenderScene};
+use render_wgpu::WgpuEnvironmentProbe;
 
 use crate::{
     AddressMode, BackendNativePassDrawStats, BackendPreference, BindingClass, BindingType,
-    CompareFunc, DepthFormat, DeviceStatus, FilterMode, FormatCaps, FrameStats, MaterialHandle,
-    MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
-    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig, RendererError,
-    RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc, SamplerHandle,
-    ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages, StorageTextureAccess,
-    TextureDimension, TextureFormat, TextureHandle, VSyncMode, WgpuRhiDevice,
+    CompareFunc, DepthFormat, DeviceStatus, EnvironmentProbeCapture,
+    EnvironmentProbeCaptureDesc, EnvironmentProbeCaptureMip, FilterMode, FormatCaps, FrameStats,
+    MaterialHandle, MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
+    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig,
+    RendererError, RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc,
+    SamplerHandle, ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages,
+    StorageTextureAccess, TextureDimension, TextureFormat, TextureHandle, VSyncMode,
+    WgpuRhiDevice,
 };
 
 #[derive(Clone, Debug)]
@@ -592,6 +595,98 @@ fn validate_surface_runtime_formats(
 
     pub fn render_scene(&mut self, scene: &RenderScene) -> Result<FrameStats, RendererError> {
         self.render_scene_with_post_process_options(scene, WgpuPostProcessOptions::default())
+    }
+
+    pub fn capture_environment_probe(
+        &mut self,
+        scene: &RenderScene,
+        desc: &EnvironmentProbeCaptureDesc,
+    ) -> Result<EnvironmentProbeCapture, RendererError> {
+        if desc.resolution == 0 {
+            return Err(RendererError::Validation(
+                "environment probe capture resolution must be non-zero".to_owned(),
+            ));
+        }
+        if !desc.near.is_finite()
+            || !desc.far.is_finite()
+            || desc.near <= 0.0
+            || desc.far <= desc.near
+        {
+            return Err(RendererError::Validation(
+                "environment probe capture near/far range is invalid".to_owned(),
+            ));
+        }
+        if desc.position.iter().any(|value| !value.is_finite()) {
+            return Err(RendererError::Validation(
+                "environment probe capture position must be finite".to_owned(),
+            ));
+        }
+        if self.renderer.is_none() {
+            let renderer = MeshRenderer::new_with_sample_count(
+                &self.graphics,
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu_depth_format(self.config.depth_format),
+                1,
+            )
+            .map_err(map_backend_error)?;
+            self.renderer = Some(renderer);
+        }
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("environment probe capture renderer was initialized");
+        let queue = RenderQueue::from_scene(scene);
+        match &mut self.scene {
+            Some(gpu_scene) => {
+                if let Err(error) = gpu_scene.sync(&self.graphics, renderer, scene, &queue, 1.0) {
+                    return Err(record_backend_error(&mut self.device_status, error));
+                }
+            }
+            None => match WgpuRenderScene::prepare(&self.graphics, renderer, scene, &queue, 1.0) {
+                Ok(scene) => self.scene = Some(scene),
+                Err(error) => return Err(record_backend_error(&mut self.device_status, error)),
+            },
+        }
+        let gpu_scene = self
+            .scene
+            .as_ref()
+            .expect("gpu scene was prepared before environment probe capture");
+        let mut probe = WgpuEnvironmentProbe::new(
+            &self.graphics,
+            desc.resolution,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu_depth_format(self.config.depth_format),
+        )
+        .map_err(map_backend_error)?;
+        let probe_desc = render_wgpu::EnvironmentProbeDesc {
+            position: desc.position,
+            near: desc.near,
+            far: desc.far,
+            clear_color: desc.clear_color,
+        };
+        gpu_scene
+            .capture_environment_probe(renderer, &self.graphics, &mut probe, &queue, probe_desc)
+            .map_err(map_backend_error)?;
+        let baked = probe
+            .bake(&self.graphics, probe_desc, None)
+            .map_err(map_backend_error)?;
+        Ok(EnvironmentProbeCapture {
+            label: desc.label.clone(),
+            position: baked.desc.position,
+            near: baked.desc.near,
+            far: baked.desc.far,
+            resolution: baked.size,
+            mip_levels: baked.mip_level_count,
+            format: TextureFormat::Rgba8Unorm,
+            mips: baked
+                .mips
+                .into_iter()
+                .map(|mip| EnvironmentProbeCaptureMip {
+                    size: mip.size,
+                    faces_rgba8: mip.faces,
+                })
+                .collect(),
+        })
     }
 
     pub fn render_scene_with_post_process_options(
@@ -1590,6 +1685,11 @@ fn validate_surface_runtime_formats(
         &self.material_external_resources
     }
 
+    pub fn material_texture_generated_mips(&self, handle: TextureHandle) -> Option<u32> {
+        self.material_external_resources
+            .texture_generated_mips(handle)
+    }
+
     pub fn material_external_resource_stats(&self) -> WgpuMaterialExternalResourceStats {
         self.material_external_resources.stats()
     }
@@ -2122,6 +2222,12 @@ impl WgpuMaterialExternalResourceRegistry {
 
     pub fn take_texture(&mut self, handle: TextureHandle) -> Option<WgpuMaterialTextureBinding> {
         self.textures.remove(&handle)
+    }
+
+    pub fn texture_generated_mips(&self, handle: TextureHandle) -> Option<u32> {
+        self.textures
+            .get(&handle)
+            .map(|binding| binding.generated_mips)
     }
 
     pub fn unregister_texture(&mut self, handle: TextureHandle) -> bool {
