@@ -3691,3 +3691,76 @@ Material backend support is now visible from frame and capture tooling surfaces,
 - API design documentation and the coverage matrix were updated. Validation was not run in this turn.
 
 Remaining gap: complete dynamic material-template backend pipeline-layout/bind-group integration remains outside this observability slice.
+
+## 2026-05-21 audit update: material reflection coverage diagnostics
+
+Material/schema reflection coverage is now visible as an aggregate renderer/frame/capture diagnostic instead of requiring tools to walk every material and template.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `MaterialReflectionCoverageStats` and `Renderer::material_reflection_coverage_stats()`.
+- Coverage contents: Ready template/material counts, pipeline-ready counts, shader-interface/template readiness, schema/material reflection coverage, incomplete reflection coverage counts, and missing reflected texture/sampler/buffer binding totals.
+- Propagation: `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` now carry `material_reflection_coverage` from the same query.
+- Test coverage added but not run in this slice: `material_template_schema_is_validated_against_shader_reflection` asserts full/partial aggregate counts; `frame_debug_report_summarizes_last_frame_for_editor` and `material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap` assert frame/debug/capture/resource-dump propagation.
+- Remaining gap: this improves Material API diagnostics but does not complete dynamic material-template native pipeline-layout/bind-group integration, so Material API remains Partial.
+
+## 2026-05-21 audit update: deformation support frame/capture observability
+
+Deformation capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `deformation_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::deformation_support()`.
+- Test coverage added but not run in this slice: `deformation_support_distinguishes_facade_outputs_from_backend_gpu_path` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes the facade/graph deformation boundary capture-visible, but backend GPU skinning/morph/motion-vector shader-buffer execution remains unimplemented, so Animation / skinning / morph / LOD remains Partial.
+
+## 2026-05-21 audit update: lighting support frame/capture observability
+
+Lighting/IBL capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `lighting_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::lighting_support()`.
+- Test coverage added but not run in this slice: `lighting_support_distinguishes_retained_lighting_from_backend_ibl_convolution` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes retained/graph-observable lighting boundaries capture-visible, but backend-real IBL convolution and runtime environment capture remain unimplemented, so Light / shadow / environment / IBL remains Partial.
+
+## 2026-05-21 audit update: resource lifecycle support frame/capture observability
+
+Resource lifecycle capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `resource_lifecycle_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::resource_lifecycle_support()`.
+- Test coverage added but not run in this slice: `resource_lifecycle_support_reports_per_class_lifecycle_and_backend_gaps` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes lifecycle/stale-handle/residency/backend-persistent boundaries capture-visible, but per-resource backend fence objects and independent persistent backend lifetime resources remain unimplemented, so Resource status/destroy remains Partial.
+
+## 2026-05-21 audit update: backend synchronization support frame/capture observability
+
+Backend synchronization capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `backend_synchronization_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::backend_synchronization_support()`.
+- Test coverage added but not run in this slice: `backend_synchronization_support_reports_polling_and_scheduler_limits` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes submission-boundary retirement, backend tombstone retirement, queue-empty fallback polling, true nonblocking polling, and background scheduler state capture-visible, but independent per-resource backend fence objects and tombstones for all remaining backend-owned resource classes remain incomplete.
+
+## 2026-05-21 audit update: post-process support frame/capture observability
+
+Post-process capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `post_process_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::post_process_support()`.
+- Test coverage added but not run in this slice: `post_process_support_distinguishes_backend_visible_from_production_ready` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes per-effect backend visibility and production-readiness boundaries capture-visible, but backend-visible sampled branches are still not production-grade post-process resource chains.
+
+## 2026-05-22 audit update: frame capture support frame/capture observability
+
+Frame capture capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `frame_capture_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::frame_capture_support()`.
+- Test coverage added but not run in this slice: `frame_capture_support_distinguishes_internal_hooks_and_native_sdk_blockers` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: this makes internal capture, external hook handoff, native SDK blockers, unavailable backends, and complete-native-integration state capture-visible, but built-in RenderDoc/external-debugger SDK loading and capture begin/end calls remain external-blocked.
+
+## 2026-05-22 audit update: debug tooling support frame/capture observability
+
+Debug/editor tooling capability support is now visible from frame and capture tooling surfaces, not only from the standalone renderer query.
+
+- Code change: `Render/engine_renderer/src/lib.rs` adds `debug_tooling_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
+- Source of truth: frame instrumentation and resource dumps fill the field from `Renderer::debug_tooling_support()`.
+- Test coverage added but not run in this slice: `debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit` now asserts query/frame/debug/capture/resource-dump consistency; `frame_debug_report_summarizes_last_frame_for_editor` asserts debug report and capture propagation.
+- Remaining gap: renderer-layer debug draw/editor tooling remains implemented; native frame debugger SDK capture is still represented as an external SDK blocker rather than a renderer-layer debug/editor gap.

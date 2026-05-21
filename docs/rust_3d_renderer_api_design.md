@@ -121,7 +121,7 @@ pub mod prelude {
         Handle, MeshHandle, TextureHandle, MaterialHandle,
         SceneHandle, ObjectHandle, CameraHandle, LightHandle,
         MeshDesc, TextureDesc, MaterialDesc, MaterialInfo,
-        MaterialTemplateInfo, StandardMaterialDesc,
+        MaterialTemplateInfo, MaterialReflectionCoverageStats, StandardMaterialDesc,
         SceneDesc, RenderObjectDesc, CameraDesc, LightDesc,
         ViewDesc, RenderTarget, FrameInput, FrameStats,
     };
@@ -272,6 +272,36 @@ impl Renderer {
 `pipeline_ready` 必须同时要求 template 自身为 `Ready` 且 shader 依赖为 `Ready`。shader 被销毁后，template 仍可查询，但 `shader_ready=false` 且 `pipeline_ready=false`；template 自身被销毁后，该 template handle 不再返回 `MaterialTemplateInfo`。
 
 当 shader 提供 `ShaderInterfaceDesc.resources` 时，material template 的 `parameter_schema.parameters` 必须引用 shader reflection 中已声明的 binding 名称。texture / sampler / uniform / storage buffer binding 必须保持 binding class 与 binding type 一致；不在 shader interface 中的 schema 参数必须在 `create_material_template` 阶段返回 `MaterialParameterMismatch`。`MaterialTemplateInfo` 必须暴露 shader interface layout hash、reflection binding 总数、texture/sampler/buffer binding 数量、schema 是否覆盖全部 reflected binding，以及未被 schema 覆盖的 reflected binding 总数和 texture/sampler/buffer 分类型数量。当 shader reflection 被禁用或 interface 为空时，template 可以继续使用手写 schema，以兼容无反射材质。
+
+```rust
+pub struct MaterialReflectionCoverageStats {
+    pub ready_material_templates: usize,
+    pub pipeline_ready_material_templates: usize,
+    pub reflected_material_templates: usize,
+    pub reflection_covered_material_templates: usize,
+    pub reflection_incomplete_material_templates: usize,
+    pub missing_template_reflected_bindings: usize,
+    pub missing_template_reflected_texture_bindings: usize,
+    pub missing_template_reflected_sampler_bindings: usize,
+    pub missing_template_reflected_buffer_bindings: usize,
+    pub ready_materials: usize,
+    pub template_ready_materials: usize,
+    pub pipeline_ready_materials: usize,
+    pub materials_with_shader_interface: usize,
+    pub reflection_covered_materials: usize,
+    pub reflection_incomplete_materials: usize,
+    pub missing_material_reflected_bindings: usize,
+    pub missing_material_reflected_texture_bindings: usize,
+    pub missing_material_reflected_sampler_bindings: usize,
+    pub missing_material_reflected_buffer_bindings: usize,
+}
+
+impl Renderer {
+    pub fn material_reflection_coverage_stats(&self) -> MaterialReflectionCoverageStats;
+}
+```
+
+`Renderer::material_reflection_coverage_stats()` 必须把 per-template/per-material reflection coverage 汇总成工具可直接消费的统计，包括 Ready template/material 数量、pipeline-ready 数量、shader-interface/material-template readiness、schema/material 覆盖 reflection 的数量、未覆盖 template/material 数量，以及缺失 reflected binding 的总数和 texture/sampler/buffer 分类型数量。该汇总必须与 `MaterialInfo` / `MaterialTemplateInfo` 的 per-resource 判断使用同一 source of truth，并传播到 `FrameStats`、`FrameDebugReport`、`FrameCapture` 和 `FrameCaptureResourceDump`，让 capture/debug artifact 能定位 material schema/reflection 缺口，而不必逐个遍历资源。
 
 WGSL auto reflection 必须解析 `@group/@binding` 资源声明，并区分 `var<uniform>` uniform buffer、`var<storage>` / `var<storage, read>` storage buffer、sampled texture、storage texture 和 sampler。storage buffer 即使使用 struct 类型而不是 `array<>` / `atomic<>`，也必须被报告为 `BindingClass::Storage` + `BindingType::Buffer`。`texture_storage_*` 必须报告为 `BindingClass::Storage` + `BindingType::StorageTexture { dimension, format, access }`，material 参数绑定仍通过 `TextureHandle` 验证，backend layout planning 可直接创建 wgpu storage texture binding。
 
@@ -2230,6 +2260,14 @@ pub struct FrameStats {
     pub material_switches: u32,
     pub pipeline_cache: PipelineCacheStats,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
+    pub deformation_support: DeformationSupport,
+    pub lighting_support: RendererLightingSupport,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
+    pub post_process_support: PostProcessSupport,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
     pub shader_variants_used_this_frame: usize,
@@ -2401,6 +2439,14 @@ pub struct FrameCapture {
     pub graph: RenderGraphStats,
     pub pipeline_cache: PipelineCacheStats,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
+    pub deformation_support: DeformationSupport,
+    pub lighting_support: RendererLightingSupport,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
+    pub post_process_support: PostProcessSupport,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub pipeline_shader_interface_layouts: usize,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub shader_variant_cache_entries: usize,
@@ -2424,6 +2470,14 @@ pub struct FrameCaptureResourceDump {
     pub generated_mip_textures: usize,
     pub samplers: usize,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
+    pub deformation_support: DeformationSupport,
+    pub lighting_support: RendererLightingSupport,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
+    pub post_process_support: PostProcessSupport,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub shader_variant_cache: ShaderVariantCacheStats,
     pub texture_configuration: TextureConfigurationStats,
     pub sampler_configuration: SamplerConfigurationStats,
@@ -4525,29 +4579,43 @@ Implementation refinement: the background retirement service starts a lightweigh
 
 `Renderer::post_process_support()` returns `PostProcessSupport`, which lists HDR, bloom, TAA, FXAA, SSAO, SSR, depth of field, motion blur, tonemap, and color grading support. The matrix distinguishes `FacadeOnly` from `BackendSampledMinimal`, exposes backend label tokens used for native coverage matching, and keeps production readiness separate from backend visibility.
 
+`PostProcessSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `post_process_support`. The renderer fills the field from `Renderer::post_process_support()` during frame instrumentation/resource-dump construction, so capture/debug artifacts preserve the same per-effect backend visibility and production-readiness gap as the standalone query.
+
 ### 2026-05-20 API note: deformation support matrix
 
 `Renderer::deformation_support()` returns `DeformationSupport`, covering skeletal animation, morph targets, LOD selection, motion vectors, and backend GPU deformation. Each entry exposes whether it is supported, whether the implementation is facade-semantic, graph-observable, or backend-GPU, and the remaining limitation when applicable.
+
+`DeformationSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `deformation_support`. The renderer fills the field from `Renderer::deformation_support()` during frame instrumentation/resource-dump construction, so tooling can see the supported facade/graph deformation semantics and the remaining backend GPU deformation gap directly from captures and editor frame reports.
 
 ### 2026-05-20 API note: lighting and IBL support matrix
 
 `Renderer::lighting_support()` returns `RendererLightingSupport`, covering retained lights, shadow mapping, environment IBL, backend IBL convolution, and environment capture. Each entry exposes whether it is supported, whether the implementation is facade-semantic, graph-observable, or backend-generated, and the remaining limitation when applicable.
 
+`RendererLightingSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `lighting_support`. The renderer fills the field from `Renderer::lighting_support()` during frame instrumentation/resource-dump construction, so editor/debug and capture tooling can distinguish retained/graph-observable lighting from the still-missing backend IBL convolution and runtime environment capture paths.
+
 ### 2026-05-20 API note: frame capture support matrix
 
 `Renderer::frame_capture_support()` returns `FrameCaptureSupport`, aggregating per-backend capture info into internal capture support, registered external hook backends, native-SDK blocked backends, unavailable backends, and `complete_native_sdk_integration`. It complements `frame_capture_backend_info()` / `frame_capture_backend_infos()` for tools that need one capture capability snapshot.
+
+`FrameCaptureSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `frame_capture_support`. The renderer fills the field from `Renderer::frame_capture_support()` during frame instrumentation/resource-dump construction, so capture/debug artifacts preserve the same internal capture, external hook, native SDK blocker, unavailable backend, and complete-native-integration snapshot as the standalone query.
 
 ### 2026-05-20 API note: debug tooling support matrix
 
 `Renderer::debug_tooling_support()` returns `DebugToolingSupport`, covering debug draw commands, picking readback, frame debug reports, frame capture, and native frame debugger capture. Each entry exposes support state, implementation level, and remaining limitation text.
 
+`DebugToolingSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `debug_tooling_support`. The renderer fills the field from `Renderer::debug_tooling_support()` during frame instrumentation/resource-dump construction, so debug/editor and capture artifacts preserve the same debug draw, picking, frame report, frame capture, and native debugger SDK blocker snapshot as the standalone query.
+
 ### 2026-05-20 API note: resource lifecycle support matrix
 
 `Renderer::resource_lifecycle_support()` returns `ResourceLifecycleSupport`, covering mesh, buffer, texture, sampler, shader, material, material template, scene, view, render target, camera, environment, graph extension, skeleton instance, morph weights, LOD group, and pipeline cache entries. Each class exposes lifecycle/stale-handle coverage, upload/readback applicability, residency, stats/capture/debug observability, backend residency level, and limitation text.
 
+`ResourceLifecycleSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `resource_lifecycle_support`. The renderer fills the field from `Renderer::resource_lifecycle_support()` during frame instrumentation/resource-dump construction, so lifecycle/stale-handle/residency/backend-persistent gaps are visible directly from editor frame reports and capture payloads.
+
 ### 2026-05-20 API note: backend synchronization support matrix
 
 `Renderer::backend_synchronization_support()` returns `BackendSynchronizationSupport`, covering submission-boundary retirement, backend tombstone retirement, queue-empty fallback polling, true nonblocking submission-index polling, and background retirement scheduling. Each entry exposes support state, implementation level, and limitation text; the aggregate also reports whether background retirement is currently active.
+
+`BackendSynchronizationSupport` is also included in `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump` as `backend_synchronization_support`. The renderer fills the field from `Renderer::backend_synchronization_support()` during frame instrumentation/resource-dump construction, so capture/debug artifacts preserve the same backend retirement, fallback polling, true-nonblocking polling, and scheduler-state boundary as the standalone query.
 
 ### 2026-05-20 API note: RenderGraph support matrix
 

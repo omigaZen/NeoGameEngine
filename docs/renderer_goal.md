@@ -1445,3 +1445,121 @@ Goal 仍未完成：`Shader API` 仍受 broader variant-to-native-pipeline/mater
 未运行验证。建议后续执行：`cargo test -p engine_renderer material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap -- --nocapture`。
 
 Goal 仍未完成：`Material API` 的完整动态 material-template backend pipeline-layout/bind-group integration 仍未实现，其他非外部 `Partial` 项仍需继续推进。
+
+## 2026-05-21 本轮进展：Material reflection coverage 进入 frame/capture 诊断
+
+本轮继续推进 `Material API` 可观测闭环，把 material/template reflection coverage 从逐资源查询提升为汇总诊断：
+
+- 新增 `MaterialReflectionCoverageStats` 和 `Renderer::material_reflection_coverage_stats()`，汇总 Ready material/template、pipeline-ready、shader-interface/template readiness、schema/material reflection 覆盖、未覆盖资源数量，以及缺失 reflected texture/sampler/buffer binding 的分类计数。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `material_reflection_coverage`，由同一个 renderer query 填充。
+- `material_template_schema_is_validated_against_shader_reflection` 扩展断言完整/部分 material template 与 partial material 的 aggregate coverage；`frame_debug_report_summarizes_last_frame_for_editor` 和 `material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap` 扩展 frame/debug/capture/resource dump 传播断言。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 public query 和 frame/capture payload 字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer material_template_schema_is_validated_against_shader_reflection -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`、`cargo test -p engine_renderer material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap -- --nocapture`。
+
+Goal 仍未完成：`Material API` 的完整动态 material-template backend pipeline-layout/bind-group integration 仍未实现；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-21 本轮进展：Deformation support 进入 frame/capture 诊断
+
+本轮推进 `Animation / skinning / morph / LOD` 的可观测闭环，把 deformation 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `DeformationSupport` 新增 `Default`，保持默认 headless/facade 语义下 backend GPU deformation 为未支持。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `deformation_support`。
+- frame instrumentation 从 `Renderer::deformation_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `deformation_support_distinguishes_facade_outputs_from_backend_gpu_path` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer deformation_support_distinguishes_facade_outputs_from_backend_gpu_path -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：backend GPU skinning/morph/motion-vector shader-buffer execution 仍未实现；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-21 本轮进展：Lighting support 进入 frame/capture 诊断
+
+本轮推进 `Light / shadow / environment / IBL` 的可观测闭环，把 lighting/IBL 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `RendererLightingSupport` 新增 `Default`，保持默认 headless/facade 语义下 backend IBL convolution 与 runtime environment capture 为未支持。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `lighting_support`。
+- frame instrumentation 从 `Renderer::lighting_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `lighting_support_distinguishes_retained_lighting_from_backend_ibl_convolution` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer lighting_support_distinguishes_retained_lighting_from_backend_ibl_convolution -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：backend-real IBL convolution 与 runtime environment capture 仍未实现；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-21 本轮进展：Resource lifecycle support 进入 frame/capture 诊断
+
+本轮推进 `Resource status/destroy` 的可观测闭环，把 resource lifecycle 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `ResourceLifecycleSupport` 新增 `Default`，保持默认 headless/facade 语义。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `resource_lifecycle_support`。
+- frame instrumentation 从 `Renderer::resource_lifecycle_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `resource_lifecycle_support_reports_per_class_lifecycle_and_backend_gaps` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer resource_lifecycle_support_reports_per_class_lifecycle_and_backend_gaps -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：per-resource backend fence objects 和独立 persistent backend lifetime objects 仍未实现；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-21 本轮进展：Backend synchronization support 进入 frame/capture 诊断
+
+本轮推进 `Resource status/destroy` 与 `GPU memory/upload/streaming` 的可观测闭环，把 backend synchronization 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `BackendSynchronizationSupport` 新增 `Default`，保持默认 headless/facade 语义。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `backend_synchronization_support`。
+- frame instrumentation 从 `Renderer::backend_synchronization_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `backend_synchronization_support_reports_polling_and_scheduler_limits` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer backend_synchronization_support_reports_polling_and_scheduler_limits -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：per-resource backend fence objects、独立 persistent backend lifetime objects，以及剩余 backend-owned resource tombstone 类别仍未完成；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-21 本轮进展：Post-process support 进入 frame/capture 诊断
+
+本轮推进 `Standard 3D graph` / post-process 的可观测闭环，把 post-process 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `PostProcessSupport` 新增 `Default`，保持默认 headless/facade 语义。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `post_process_support`。
+- frame instrumentation 从 `Renderer::post_process_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `post_process_support_distinguishes_backend_visible_from_production_ready` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer post_process_support_distinguishes_backend_visible_from_production_ready -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：backend-visible sampled post-process branches 仍不是 production-ready post-process resource chains；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-22 本轮进展：Frame capture support 进入 frame/capture 诊断
+
+本轮推进 `Frame API / stats / capture` 与 `Frame capture / RenderDoc hooks` 的可观测闭环，把 frame capture 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `FrameCaptureSupport` 新增 `Default`，默认表达 internal capture 可用、RenderDoc/external debugger 需要外部 hook/SDK。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `frame_capture_support`。
+- frame instrumentation 从 `Renderer::frame_capture_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `frame_capture_support_distinguishes_internal_hooks_and_native_sdk_blockers` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer frame_capture_support_distinguishes_internal_hooks_and_native_sdk_blockers -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：built-in RenderDoc/external debugger SDK loading 与 capture begin/end 调用仍是外部阻塞项；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。
+
+## 2026-05-22 本轮进展：Debug tooling support 进入 frame/capture 诊断
+
+本轮推进 `Debug draw/editor API` 与 frame/debug tooling 的可观测闭环，把 debug tooling 支持矩阵从独立 query 扩展到 frame/capture artifact：
+
+- `DebugToolingSupport` 新增 `Default`，默认表达 renderer-facade debug draw/picking/frame report/frame capture 可用、native debugger SDK capture 未集成。
+- `FrameStats`、`FrameDebugReport`、`FrameCapture`、`FrameCaptureResourceDump` 新增 `debug_tooling_support`。
+- frame instrumentation 从 `Renderer::debug_tooling_support()` 填充该字段，capture 和 resource dump 使用同一 source of truth。
+- `debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit` 扩展断言 query、frame stats、debug report、capture payload 和 resource dump 的支持矩阵一致性。
+- `frame_debug_report_summarizes_last_frame_for_editor` 扩展断言 debug report 和 capture payload 传播该支持矩阵。
+- `docs/rust_3d_renderer_api_design.md` 与覆盖矩阵同步记录该 frame/capture 诊断字段。
+
+未运行验证。建议后续执行：`cargo test -p engine_renderer debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit -- --nocapture`、`cargo test -p engine_renderer frame_debug_report_summarizes_last_frame_for_editor -- --nocapture`。
+
+Goal 仍未完成：该切片只巩固 debug tooling 的 frame/capture 可观测性；矩阵中仍存在其他非外部 `Partial` 项，需要继续逐项收敛。

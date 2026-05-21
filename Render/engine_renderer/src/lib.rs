@@ -2411,6 +2411,29 @@ pub struct MaterialTemplateInfo {
     pub status: ResourceStatus,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct MaterialReflectionCoverageStats {
+    pub ready_material_templates: usize,
+    pub pipeline_ready_material_templates: usize,
+    pub reflected_material_templates: usize,
+    pub reflection_covered_material_templates: usize,
+    pub reflection_incomplete_material_templates: usize,
+    pub missing_template_reflected_bindings: usize,
+    pub missing_template_reflected_texture_bindings: usize,
+    pub missing_template_reflected_sampler_bindings: usize,
+    pub missing_template_reflected_buffer_bindings: usize,
+    pub ready_materials: usize,
+    pub template_ready_materials: usize,
+    pub pipeline_ready_materials: usize,
+    pub materials_with_shader_interface: usize,
+    pub reflection_covered_materials: usize,
+    pub reflection_incomplete_materials: usize,
+    pub missing_material_reflected_bindings: usize,
+    pub missing_material_reflected_texture_bindings: usize,
+    pub missing_material_reflected_sampler_bindings: usize,
+    pub missing_material_reflected_buffer_bindings: usize,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RenderStateDesc {
     pub depth_write: bool,
@@ -3262,6 +3285,7 @@ pub struct FrameStats {
     pub debug_draw_outputs: Vec<FrameDebugDrawOutput>,
     pub picking_outputs: Vec<FramePickingOutput>,
     pub environment_outputs: Vec<FrameEnvironmentOutput>,
+    pub lighting_support: RendererLightingSupport,
     pub skinned_objects: u32,
     pub morphed_objects: u32,
     pub deformed_objects: u32,
@@ -3269,7 +3293,11 @@ pub struct FrameStats {
     pub motion_vector_objects: u32,
     pub motion_vector_views: u32,
     pub motion_vector_outputs: Vec<FrameMotionVectorOutput>,
+    pub deformation_support: DeformationSupport,
+    pub post_process_support: PostProcessSupport,
     pub post_process_outputs: Vec<FramePostProcessOutput>,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub public_frame_outputs: Vec<FramePublicFrameOutput>,
     pub unsupported_public_frame_outputs: Vec<FramePublicFrameOutputUnsupported>,
     pub pipeline_switches: u32,
@@ -3277,7 +3305,10 @@ pub struct FrameStats {
     pub pipeline_statistics: Option<FramePipelineStatistics>,
     pub pipeline_cache: PipelineCacheStats,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
     pub backend_material_resources: BackendMaterialResourceStats,
     pub graph_rhi_import_cache: RendererGraphRhiImportCacheStats,
     pub shader_variant_cache: ShaderVariantCacheStats,
@@ -4602,6 +4633,12 @@ impl DeformationSupport {
     }
 }
 
+impl Default for DeformationSupport {
+    fn default() -> Self {
+        Self::current(false)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RendererLightingFeature {
     RetainedLights,
@@ -4708,6 +4745,12 @@ impl RendererLightingSupport {
     pub fn backend_ibl_convolution_supported(&self) -> bool {
         self.support_for(RendererLightingFeature::BackendIblConvolution)
             .is_some_and(|support| support.supported)
+    }
+}
+
+impl Default for RendererLightingSupport {
+    fn default() -> Self {
+        Self::current(false)
     }
 }
 
@@ -4881,6 +4924,12 @@ impl PostProcessSupport {
 
     pub fn all_production_ready(&self) -> bool {
         self.effects.iter().all(|support| support.production_ready)
+    }
+}
+
+impl Default for PostProcessSupport {
+    fn default() -> Self {
+        Self::facade_only()
     }
 }
 
@@ -5145,9 +5194,14 @@ pub struct FrameDebugReport {
     pub debug_draw_outputs: Vec<FrameDebugDrawOutput>,
     pub picking_outputs: Vec<FramePickingOutput>,
     pub environment_outputs: Vec<FrameEnvironmentOutput>,
+    pub lighting_support: RendererLightingSupport,
     pub deformation_outputs: Vec<FrameDeformationOutput>,
     pub motion_vector_outputs: Vec<FrameMotionVectorOutput>,
+    pub deformation_support: DeformationSupport,
+    pub post_process_support: PostProcessSupport,
     pub post_process_outputs: Vec<FramePostProcessOutput>,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub public_frame_outputs: Vec<FramePublicFrameOutput>,
     pub unsupported_public_frame_outputs: Vec<FramePublicFrameOutputUnsupported>,
     pub capture_triggered: bool,
@@ -5176,7 +5230,10 @@ pub struct FrameDebugReport {
     pub pipeline_statistics: Option<FramePipelineStatistics>,
     pub pipeline_cache: PipelineCacheStats,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
     pub backend_material_resources: BackendMaterialResourceStats,
     pub graph_rhi_import_cache: RendererGraphRhiImportCacheStats,
     pub shader_variant_cache: ShaderVariantCacheStats,
@@ -5365,9 +5422,14 @@ impl FrameDebugReport {
             debug_draw_outputs: stats.debug_draw_outputs.clone(),
             picking_outputs: stats.picking_outputs.clone(),
             environment_outputs: stats.environment_outputs.clone(),
+            lighting_support: stats.lighting_support.clone(),
             deformation_outputs: stats.deformation_outputs.clone(),
             motion_vector_outputs: stats.motion_vector_outputs.clone(),
+            deformation_support: stats.deformation_support.clone(),
+            post_process_support: stats.post_process_support.clone(),
             post_process_outputs: stats.post_process_outputs.clone(),
+            frame_capture_support: stats.frame_capture_support.clone(),
+            debug_tooling_support: stats.debug_tooling_support.clone(),
             public_frame_outputs: stats.public_frame_outputs.clone(),
             unsupported_public_frame_outputs: stats.unsupported_public_frame_outputs.clone(),
             capture_triggered: stats.capture_triggered,
@@ -5444,7 +5506,10 @@ impl FrameDebugReport {
             pipeline_statistics: stats.pipeline_statistics.clone(),
             pipeline_cache: stats.pipeline_cache.clone(),
             pipeline_cache_backend_coverage: stats.pipeline_cache_backend_coverage.clone(),
+            resource_lifecycle_support: stats.resource_lifecycle_support.clone(),
+            backend_synchronization_support: stats.backend_synchronization_support.clone(),
             material_backend_support: stats.material_backend_support.clone(),
+            material_reflection_coverage: stats.material_reflection_coverage,
             backend_material_resources: stats.backend_material_resources,
             graph_rhi_import_cache: stats.graph_rhi_import_cache,
             texture_configuration: stats.texture_configuration,
@@ -5470,7 +5535,10 @@ pub struct FrameCaptureResourceDump {
     pub surface_graph_export: RendererSurfaceGraphExportSupport,
     pub render_graph_support: RendererRenderGraphSupport,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
     pub backend_material_resources: BackendMaterialResourceStats,
     pub graph_rhi_import_cache: RendererGraphRhiImportCacheStats,
     pub shader_variant_cache: ShaderVariantCacheStats,
@@ -5501,12 +5569,17 @@ pub struct FrameCaptureResourceDump {
     pub materials: usize,
     pub material_templates: usize,
     pub environments: usize,
+    pub lighting_support: RendererLightingSupport,
     pub render_targets: usize,
     pub lod_groups: usize,
     pub cameras: usize,
     pub graph_extensions: usize,
     pub skeleton_instances: usize,
     pub morph_weights: usize,
+    pub deformation_support: DeformationSupport,
+    pub post_process_support: PostProcessSupport,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub scenes: usize,
     pub views: usize,
     pub picking_results: usize,
@@ -5685,15 +5758,23 @@ pub struct FrameCapture {
     pub debug_draw_outputs: Vec<FrameDebugDrawOutput>,
     pub picking_outputs: Vec<FramePickingOutput>,
     pub environment_outputs: Vec<FrameEnvironmentOutput>,
+    pub lighting_support: RendererLightingSupport,
     pub deformation_outputs: Vec<FrameDeformationOutput>,
     pub motion_vector_outputs: Vec<FrameMotionVectorOutput>,
+    pub deformation_support: DeformationSupport,
+    pub post_process_support: PostProcessSupport,
     pub post_process_outputs: Vec<FramePostProcessOutput>,
+    pub frame_capture_support: FrameCaptureSupport,
+    pub debug_tooling_support: DebugToolingSupport,
     pub public_frame_outputs: Vec<FramePublicFrameOutput>,
     pub unsupported_public_frame_outputs: Vec<FramePublicFrameOutputUnsupported>,
     pub pipeline_statistics: Option<FramePipelineStatistics>,
     pub pipeline_cache: PipelineCacheStats,
     pub pipeline_cache_backend_coverage: PipelineCacheBackendCoverage,
+    pub resource_lifecycle_support: ResourceLifecycleSupport,
+    pub backend_synchronization_support: BackendSynchronizationSupport,
     pub material_backend_support: MaterialBackendSupport,
+    pub material_reflection_coverage: MaterialReflectionCoverageStats,
     pub backend_material_resources: BackendMaterialResourceStats,
     pub graph_rhi_import_cache: RendererGraphRhiImportCacheStats,
     pub texture_configuration: TextureConfigurationStats,
@@ -5933,6 +6014,43 @@ impl FrameCaptureSupport {
     }
 }
 
+impl Default for FrameCaptureSupport {
+    fn default() -> Self {
+        let backends = FrameCaptureBackend::all()
+            .iter()
+            .copied()
+            .map(|backend| {
+                let requires_external_hook = backend.requires_external_hook();
+                let available = !requires_external_hook;
+                FrameCaptureBackendInfo {
+                    backend,
+                    available,
+                    requires_external_hook,
+                    integration: if requires_external_hook {
+                        FrameCaptureIntegration::ExternalSdkRequired
+                    } else {
+                        FrameCaptureIntegration::Internal
+                    },
+                    sdk_name: backend.sdk_name(),
+                    registered_hook_label: None,
+                    registered_sdk_name: None,
+                    unavailable_reason: if available {
+                        None
+                    } else {
+                        backend.unavailable_reason()
+                    },
+                    status: if available {
+                        FrameCaptureStatus::Captured
+                    } else {
+                        FrameCaptureStatus::BackendUnavailable
+                    },
+                }
+            })
+            .collect();
+        Self::from_backend_infos(backends, &[])
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BackendMaterialResourceStats {
     pub backend_active: bool,
@@ -6034,6 +6152,12 @@ impl DebugToolingSupport {
 
     pub fn all_supported(&self) -> bool {
         self.features.iter().all(|support| support.supported)
+    }
+}
+
+impl Default for DebugToolingSupport {
+    fn default() -> Self {
+        Self::current(false)
     }
 }
 
@@ -6297,6 +6421,12 @@ impl ResourceLifecycleSupport {
     }
 }
 
+impl Default for ResourceLifecycleSupport {
+    fn default() -> Self {
+        Self::current(false)
+    }
+}
+
 fn lifecycle_support(
     class: ResourceLifecycleClass,
     create_update_destroy_supported: bool,
@@ -6428,6 +6558,12 @@ impl BackendSynchronizationSupport {
     pub fn true_nonblocking_poll_supported(&self) -> bool {
         self.support_for(BackendSynchronizationFeature::NonblockingSubmissionIndexPoll)
             .is_some_and(|support| support.supported)
+    }
+}
+
+impl Default for BackendSynchronizationSupport {
+    fn default() -> Self {
+        Self::current(false, false, false, false)
     }
 }
 
@@ -10832,6 +10968,82 @@ fn fs_main() -> @location(0) vec4<f32> {
         {
             MaterialBackendSupport::current(false)
         }
+    }
+
+    pub fn material_reflection_coverage_stats(&self) -> MaterialReflectionCoverageStats {
+        let mut stats = MaterialReflectionCoverageStats::default();
+
+        for (index, slot) in self.material_templates.resources.iter().enumerate() {
+            if slot.status != ResourceStatus::Ready || slot.value.is_none() {
+                continue;
+            }
+            let handle: MaterialTemplateHandle = make_handle(
+                ResourceKind::MaterialTemplate,
+                index as u32,
+                slot.generation,
+            );
+            let Some(info) = self.material_template_info(handle) else {
+                continue;
+            };
+
+            stats.ready_material_templates += 1;
+            if info.pipeline_ready {
+                stats.pipeline_ready_material_templates += 1;
+            }
+            if info.reflected_binding_count > 0 {
+                stats.reflected_material_templates += 1;
+            }
+            if info.schema_covers_reflection {
+                stats.reflection_covered_material_templates += 1;
+            }
+            if info.missing_reflected_bindings > 0 {
+                stats.reflection_incomplete_material_templates += 1;
+            }
+            stats.missing_template_reflected_bindings += info.missing_reflected_bindings;
+            stats.missing_template_reflected_texture_bindings +=
+                info.missing_reflected_texture_bindings;
+            stats.missing_template_reflected_sampler_bindings +=
+                info.missing_reflected_sampler_bindings;
+            stats.missing_template_reflected_buffer_bindings +=
+                info.missing_reflected_buffer_bindings;
+        }
+
+        for (index, slot) in self.materials.resources.iter().enumerate() {
+            if slot.status != ResourceStatus::Ready || slot.value.is_none() {
+                continue;
+            }
+            let handle: MaterialHandle =
+                make_handle(ResourceKind::Material, index as u32, slot.generation);
+            let Some(info) = self.material_info(handle) else {
+                continue;
+            };
+
+            stats.ready_materials += 1;
+            if info.template_ready {
+                stats.template_ready_materials += 1;
+            }
+            if info.pipeline_ready {
+                stats.pipeline_ready_materials += 1;
+            }
+            if info.shader_interface_layout_hash != 0 {
+                stats.materials_with_shader_interface += 1;
+            }
+            if info.material_covers_reflection {
+                stats.reflection_covered_materials += 1;
+            }
+            if info.missing_reflected_bindings > 0 {
+                stats.reflection_incomplete_materials += 1;
+            }
+            stats.missing_material_reflected_bindings += info.missing_reflected_bindings;
+            stats.missing_material_reflected_texture_bindings +=
+                info.missing_reflected_texture_bindings;
+            stats.missing_material_reflected_sampler_bindings +=
+                info.missing_reflected_sampler_bindings;
+            stats.missing_material_reflected_buffer_bindings +=
+                info.missing_reflected_buffer_bindings;
+        }
+
+        stats
     }
 
     pub fn material_info(&self, material: MaterialHandle) -> Option<MaterialInfo> {
@@ -16216,7 +16428,15 @@ fn fs_main() -> @location(0) vec4<f32> {
         stats.surface_graph_export = self.surface_graph_export_support();
         stats.render_graph_support = self.render_graph_support();
         stats.pipeline_cache_backend_coverage = self.pipeline_cache_backend_coverage();
+        stats.resource_lifecycle_support = self.resource_lifecycle_support();
+        stats.backend_synchronization_support = self.backend_synchronization_support();
         stats.material_backend_support = self.material_backend_support();
+        stats.material_reflection_coverage = self.material_reflection_coverage_stats();
+        stats.deformation_support = self.deformation_support();
+        stats.lighting_support = self.lighting_support();
+        stats.post_process_support = self.post_process_support();
+        stats.frame_capture_support = self.frame_capture_support();
+        stats.debug_tooling_support = self.debug_tooling_support();
         stats.backend_material_resources = self.backend_material_resource_stats();
         stats.graph_rhi_import_cache = self.graph_rhi_import_cache_stats();
         stats.texture_configuration = self.texture_configuration_stats();
@@ -16564,15 +16784,23 @@ fn fs_main() -> @location(0) vec4<f32> {
                 debug_draw_outputs: stats.debug_draw_outputs.clone(),
                 picking_outputs: stats.picking_outputs.clone(),
                 environment_outputs: stats.environment_outputs.clone(),
+                lighting_support: stats.lighting_support.clone(),
                 deformation_outputs: stats.deformation_outputs.clone(),
                 motion_vector_outputs: stats.motion_vector_outputs.clone(),
+                deformation_support: stats.deformation_support.clone(),
+                post_process_support: stats.post_process_support.clone(),
                 post_process_outputs: stats.post_process_outputs.clone(),
+                frame_capture_support: stats.frame_capture_support.clone(),
+                debug_tooling_support: stats.debug_tooling_support.clone(),
                 public_frame_outputs: stats.public_frame_outputs.clone(),
                 unsupported_public_frame_outputs: stats.unsupported_public_frame_outputs.clone(),
                 pipeline_statistics: stats.pipeline_statistics.clone(),
                 pipeline_cache: stats.pipeline_cache.clone(),
                 pipeline_cache_backend_coverage: stats.pipeline_cache_backend_coverage.clone(),
+                resource_lifecycle_support: stats.resource_lifecycle_support.clone(),
+                backend_synchronization_support: stats.backend_synchronization_support.clone(),
                 material_backend_support: stats.material_backend_support.clone(),
+                material_reflection_coverage: stats.material_reflection_coverage,
                 backend_material_resources: stats.backend_material_resources,
                 graph_rhi_import_cache: stats.graph_rhi_import_cache,
                 texture_configuration: stats.texture_configuration,
@@ -16662,6 +16890,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             .last_graph_execution
             .as_ref()
             .map(|execution| &execution.exports);
+        let material_reflection_coverage = self.material_reflection_coverage_stats();
         let texture_configuration = self.texture_configuration_stats();
         let sampler_configuration = self.sampler_configuration_stats();
         FrameCaptureResourceDump {
@@ -16672,7 +16901,10 @@ fn fs_main() -> @location(0) vec4<f32> {
             surface_graph_export: self.surface_graph_export_support(),
             render_graph_support: self.render_graph_support(),
             pipeline_cache_backend_coverage: self.pipeline_cache_backend_coverage(),
+            resource_lifecycle_support: self.resource_lifecycle_support(),
+            backend_synchronization_support: self.backend_synchronization_support(),
             material_backend_support: self.material_backend_support(),
+            material_reflection_coverage,
             backend_material_resources: self.backend_material_resource_stats(),
             graph_rhi_import_cache: self.graph_rhi_import_cache_stats(),
             shader_variant_cache: self.shader_variant_cache_stats(),
@@ -16793,12 +17025,17 @@ fn fs_main() -> @location(0) vec4<f32> {
             materials: count_ready(&self.materials),
             material_templates: count_ready(&self.material_templates),
             environments: count_ready(&self.environments),
+            lighting_support: self.lighting_support(),
             render_targets: count_ready(&self.render_targets),
             lod_groups: count_ready(&self.lod_groups),
             cameras: count_ready(&self.cameras),
             graph_extensions: count_ready(&self.graph_extensions),
             skeleton_instances: count_ready(&self.skeleton_instances),
             morph_weights: count_ready(&self.morph_weights),
+            deformation_support: self.deformation_support(),
+            post_process_support: self.post_process_support(),
+            frame_capture_support: self.frame_capture_support(),
+            debug_tooling_support: self.debug_tooling_support(),
             scenes: count_ready(&self.scenes),
             views: count_ready(&self.views),
             picking_results: count_ready(&self.picking),
@@ -34130,8 +34367,34 @@ mod tests {
             Some(Some("Depth Of Field"))
         );
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
-        assert!(!renderer.post_process_support().all_backend_visible());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.post_process_support();
+        assert_eq!(renderer_support, facade);
+        assert!(!renderer_support.all_backend_visible());
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.post_process_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.post_process_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("post_process_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.post_process_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .post_process_support,
+            renderer_support
+        );
     }
 
     #[test]
@@ -34168,8 +34431,34 @@ mod tests {
             Vec::<DeformationFeature>::new()
         );
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
-        assert!(!renderer.deformation_support().backend_gpu_supported());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.deformation_support();
+        assert_eq!(renderer_support, support);
+        assert!(!renderer_support.backend_gpu_supported());
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.deformation_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.deformation_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("deformation_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.deformation_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .deformation_support,
+            renderer_support
+        );
     }
 
     #[test]
@@ -34209,10 +34498,34 @@ mod tests {
             vec![RendererLightingFeature::EnvironmentCapture]
         );
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
-        assert!(!renderer
-            .lighting_support()
-            .backend_ibl_convolution_supported());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.lighting_support();
+        assert_eq!(renderer_support, support);
+        assert!(!renderer_support.backend_ibl_convolution_supported());
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.lighting_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.lighting_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("lighting_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.lighting_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .lighting_support,
+            renderer_support
+        );
     }
 
     #[test]
@@ -34318,6 +34631,30 @@ mod tests {
             vec![FrameCaptureBackend::RenderDoc]
         );
         assert!(!support.complete_native_sdk_integration);
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.frame_capture_support, support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.frame_capture_support, support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("frame_capture_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.frame_capture_support, support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .frame_capture_support,
+            support
+        );
     }
 
     #[test]
@@ -34352,10 +34689,36 @@ mod tests {
             Vec::<DebugToolingFeature>::new()
         );
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.debug_tooling_support();
+        assert_eq!(renderer_support, support);
         assert_eq!(
-            renderer.debug_tooling_support().unsupported_features(),
+            renderer_support.unsupported_features(),
             vec![DebugToolingFeature::NativeFrameDebuggerCapture]
+        );
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.debug_tooling_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.debug_tooling_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("debug_tooling_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.debug_tooling_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .debug_tooling_support,
+            renderer_support
         );
     }
 
@@ -34412,11 +34775,14 @@ mod tests {
         assert!(!support.all_supported());
         assert!(!support.reflected_backend_supported());
         assert!(!support.complete_dynamic_template_backend_supported());
+        let reflection_coverage = renderer.material_reflection_coverage_stats();
         let mut stats = FrameStats::default();
         renderer.apply_frame_instrumentation(&mut stats);
         assert_eq!(stats.material_backend_support, support);
+        assert_eq!(stats.material_reflection_coverage, reflection_coverage);
         let report = FrameDebugReport::from_stats(&stats);
         assert_eq!(report.material_backend_support, support);
+        assert_eq!(report.material_reflection_coverage, reflection_coverage);
         renderer
             .capture_next_frame(CaptureOptions {
                 label: Some("material_backend_support".to_owned()),
@@ -34428,6 +34794,7 @@ mod tests {
         renderer.apply_frame_instrumentation(&mut stats);
         let capture = stats.capture.as_ref().expect("capture is attached");
         assert_eq!(capture.material_backend_support, support);
+        assert_eq!(capture.material_reflection_coverage, reflection_coverage);
         assert_eq!(
             capture
                 .resource_dump
@@ -34435,6 +34802,14 @@ mod tests {
                 .expect("resource dump is attached")
                 .material_backend_support,
             support
+        );
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .material_reflection_coverage,
+            reflection_coverage
         );
         assert_eq!(
             support
@@ -34724,10 +35099,34 @@ mod tests {
             .and_then(|entry| entry.limitation)
             .is_some());
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
-        assert!(renderer
-            .resource_lifecycle_support()
-            .all_classes_have_lifecycle());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.resource_lifecycle_support();
+        assert_eq!(renderer_support, facade);
+        assert!(renderer_support.all_classes_have_lifecycle());
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.resource_lifecycle_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.resource_lifecycle_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("resource_lifecycle_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.resource_lifecycle_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .resource_lifecycle_support,
+            renderer_support
+        );
     }
 
     #[test]
@@ -34765,10 +35164,34 @@ mod tests {
             .and_then(|entry| entry.limitation)
             .is_some());
 
-        let renderer = Renderer::new_headless(RendererConfig::default());
-        assert!(!renderer
-            .backend_synchronization_support()
-            .true_nonblocking_poll_supported());
+        let mut renderer = Renderer::new_headless(RendererConfig::default());
+        let renderer_support = renderer.backend_synchronization_support();
+        assert_eq!(renderer_support, support);
+        assert!(!renderer_support.true_nonblocking_poll_supported());
+        let mut stats = FrameStats::default();
+        renderer.apply_frame_instrumentation(&mut stats);
+        assert_eq!(stats.backend_synchronization_support, renderer_support);
+        let report = FrameDebugReport::from_stats(&stats);
+        assert_eq!(report.backend_synchronization_support, renderer_support);
+        renderer
+            .capture_next_frame(CaptureOptions {
+                label: Some("backend_synchronization_support".to_owned()),
+                backend: FrameCaptureBackend::Internal,
+                include_resource_dump: true,
+                open_after_capture: false,
+            })
+            .unwrap();
+        renderer.apply_frame_instrumentation(&mut stats);
+        let capture = stats.capture.as_ref().expect("capture is attached");
+        assert_eq!(capture.backend_synchronization_support, renderer_support);
+        assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .backend_synchronization_support,
+            renderer_support
+        );
     }
 
     #[test]
@@ -38666,6 +39089,26 @@ mod tests {
         assert_eq!(partial_material_info.missing_reflected_texture_bindings, 1);
         assert_eq!(partial_material_info.missing_reflected_sampler_bindings, 1);
         assert_eq!(partial_material_info.missing_reflected_buffer_bindings, 1);
+        let coverage = renderer.material_reflection_coverage_stats();
+        assert_eq!(coverage.ready_material_templates, 2);
+        assert_eq!(coverage.pipeline_ready_material_templates, 2);
+        assert_eq!(coverage.reflected_material_templates, 2);
+        assert_eq!(coverage.reflection_covered_material_templates, 1);
+        assert_eq!(coverage.reflection_incomplete_material_templates, 1);
+        assert_eq!(coverage.missing_template_reflected_bindings, 3);
+        assert_eq!(coverage.missing_template_reflected_texture_bindings, 1);
+        assert_eq!(coverage.missing_template_reflected_sampler_bindings, 1);
+        assert_eq!(coverage.missing_template_reflected_buffer_bindings, 1);
+        assert_eq!(coverage.ready_materials, 1);
+        assert_eq!(coverage.template_ready_materials, 1);
+        assert_eq!(coverage.pipeline_ready_materials, 1);
+        assert_eq!(coverage.materials_with_shader_interface, 1);
+        assert_eq!(coverage.reflection_covered_materials, 0);
+        assert_eq!(coverage.reflection_incomplete_materials, 1);
+        assert_eq!(coverage.missing_material_reflected_bindings, 3);
+        assert_eq!(coverage.missing_material_reflected_texture_bindings, 1);
+        assert_eq!(coverage.missing_material_reflected_sampler_bindings, 1);
+        assert_eq!(coverage.missing_material_reflected_buffer_bindings, 1);
 
         assert_eq!(
             renderer
@@ -41169,6 +41612,23 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.texture_configuration, stats.texture_configuration);
         assert_eq!(report.sampler_configuration, stats.sampler_configuration);
         assert_eq!(
+            report.resource_lifecycle_support,
+            stats.resource_lifecycle_support
+        );
+        assert_eq!(
+            report.backend_synchronization_support,
+            stats.backend_synchronization_support
+        );
+        assert_eq!(report.frame_capture_support, stats.frame_capture_support);
+        assert_eq!(report.debug_tooling_support, stats.debug_tooling_support);
+        assert_eq!(report.material_backend_support, stats.material_backend_support);
+        assert_eq!(
+            report.material_reflection_coverage,
+            stats.material_reflection_coverage
+        );
+        assert_eq!(report.deformation_support, stats.deformation_support);
+        assert_eq!(report.lighting_support, stats.lighting_support);
+        assert_eq!(
             report.retired_submission_frame,
             stats.retired_submission_frame
         );
@@ -41222,6 +41682,7 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.environment_outputs, stats.environment_outputs);
         assert_eq!(report.deformation_outputs, stats.deformation_outputs);
         assert_eq!(report.motion_vector_outputs, stats.motion_vector_outputs);
+        assert_eq!(report.post_process_support, stats.post_process_support);
         assert_eq!(report.post_process_outputs, stats.post_process_outputs);
         assert_eq!(report.pipeline_cache, stats.pipeline_cache);
         assert_eq!(
@@ -41303,6 +41764,14 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.capture_external_hook_sdk_name, None);
         assert_eq!(report.capture_resource_dump, capture.resource_dump);
         assert_eq!(
+            capture
+                .resource_dump
+                .as_ref()
+                .expect("resource dump is attached")
+                .material_reflection_coverage,
+            stats.material_reflection_coverage
+        );
+        assert_eq!(
             capture.backend_integration,
             FrameCaptureIntegration::Internal
         );
@@ -41315,6 +41784,10 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(capture.external_hook_callback_failure, None);
         assert_eq!(capture.external_hook_label, None);
         assert_eq!(capture.external_hook_sdk_name, None);
+        assert_eq!(
+            capture.material_reflection_coverage,
+            stats.material_reflection_coverage
+        );
         assert_eq!(capture.pipeline_cache, stats.pipeline_cache);
         assert_eq!(
             capture
@@ -41990,9 +42463,22 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(capture.debug_draw_outputs, stats.debug_draw_outputs);
         assert_eq!(capture.picking_outputs, stats.picking_outputs);
         assert_eq!(capture.environment_outputs, stats.environment_outputs);
+        assert_eq!(
+            capture.resource_lifecycle_support,
+            stats.resource_lifecycle_support
+        );
+        assert_eq!(
+            capture.backend_synchronization_support,
+            stats.backend_synchronization_support
+        );
+        assert_eq!(capture.lighting_support, stats.lighting_support);
         assert_eq!(capture.deformation_outputs, stats.deformation_outputs);
         assert_eq!(capture.motion_vector_outputs, stats.motion_vector_outputs);
+        assert_eq!(capture.deformation_support, stats.deformation_support);
+        assert_eq!(capture.post_process_support, stats.post_process_support);
         assert_eq!(capture.post_process_outputs, stats.post_process_outputs);
+        assert_eq!(capture.frame_capture_support, stats.frame_capture_support);
+        assert_eq!(capture.debug_tooling_support, stats.debug_tooling_support);
         assert!(!capture.picking_outputs.is_empty());
         assert!(!capture.post_process_outputs.is_empty());
         assert_eq!(capture.pipeline_statistics, stats.pipeline_statistics);
@@ -42000,6 +42486,19 @@ fn fs_main() -> @location(0) vec4<f32> {
             .resource_dump
             .as_ref()
             .expect("resource dump is attached");
+        assert_eq!(
+            resource_dump.resource_lifecycle_support,
+            stats.resource_lifecycle_support
+        );
+        assert_eq!(
+            resource_dump.backend_synchronization_support,
+            stats.backend_synchronization_support
+        );
+        assert_eq!(resource_dump.lighting_support, stats.lighting_support);
+        assert_eq!(resource_dump.deformation_support, stats.deformation_support);
+        assert_eq!(resource_dump.post_process_support, stats.post_process_support);
+        assert_eq!(resource_dump.frame_capture_support, stats.frame_capture_support);
+        assert_eq!(resource_dump.debug_tooling_support, stats.debug_tooling_support);
         assert!(resource_dump.meshes >= 1);
         assert!(resource_dump.materials >= 1);
         assert!(resource_dump.scenes >= 1);
