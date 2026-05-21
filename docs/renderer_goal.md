@@ -1,5 +1,24 @@
 # Renderer Goal: Complete Renderer Layer
 
+## 目标执行口径（Goal 模式专用）
+
+本文件在 Goal 模式执行时按本节 + 两个“当前生效”段落执行，不再按下列历史段落单独判断：
+
+- 2026-05-20 最新权威口径（从本节到“完整 renderer 层最低 Definition of Done”）
+- 2026-05-20 最高优先级目标锁定（`## 2026-05-20 最高优先级目标锁定：完整实现 renderer 层`）
+
+执行判定规则（固定）：
+
+- 可完成性只看 `docs/renderer_goal_coverage_matrix.md`；出现任何可实现、未接线、未验证或只靠替代语义的 `Partial`/`Stub`/`Missing`/`TODO`/`unsupported-only`/`headless-only`/`mock/helper-only`/`fixed-stat-only`/`support-matrix-only` 项，goal 均未完成。
+- `Complete/Implemented` 必须同时具备：public API 可达性、真实执行路径、backend-wgpu 真实路径（能接线能力）或明确适用路径、错误路径、可观测输出、focused tests、文档同步。
+- 只有真实仓库外边界可记为 `External Blocked`（并且必须有 capability gate、用户可见错误、测试与后续接入点）。
+
+Goal 模式每轮优先处理：
+
+- 优先级一：窗口/surface/frame output/RenderGraph/resource lifecycle/backend-wgpu 的 `Partial`/`Stub`/`Missing`。
+- 优先级二：其余当前可实现能力。
+- 每轮结尾同步更新 `docs/renderer_goal_coverage_matrix.md` 与该文件状态，并同步补齐错误路径与验证方式。
+
 ## 2026-05-20 强制验收改写：目标是完整 renderer 产品层，不是能力登记
 
 本 goal 的目标明确固定为：实现完整的 NeoGameEngine renderer 层产品闭环。任何能力矩阵、support query、capability report、debug/stat/capture 字段、测试 helper、示例 smoke path 或文档解释，都只能作为实现证据，不能替代真实 renderer 层实现。
@@ -296,13 +315,13 @@ Capability gate 只能用于表达真实能力边界，不能替代实现。若�
 
 ## 范围
 
-主要入口：`C:\Playground\NeoGameEngine\Render\engine_renderer`
+主要入口：`Render/engine_renderer`
 
 根据完整 renderer 层闭环需要，以下目录同属本 goal 范围：
 
-- `C:\Playground\NeoGameEngine\Render\render_wgpu`
-- `C:\Playground\NeoGameEngine\Render\engine_render`
-- `C:\Playground\NeoGameEngine\Graphics`
+- `Render/render_wgpu`
+- `Render/engine_render`
+- `Graphics`
 - 相关 examples、tests、docs
 
 不要无关扩散到游戏逻辑、ECS 主世界、物理、窗口事件循环等非 renderer 边界。若 API 文档中的能力跨越多个 crate，必须补齐 renderer 层所需的最小闭环，而不是只在 `engine_renderer` 中保留 facade 形状。
@@ -508,6 +527,8 @@ Completion still requires every repository-implementable renderer capability to 
 
 The goal must not be closed while any current repository-implementable item remains `Partial`, `Stub`, `Missing`, TODO, label-only, headless-only, mock/helper-only, fixed-stat-only, unsupported-only, or backend-wgpu-unwired. External blockers must be limited to true repository-external boundaries such as SDK integration, platform-native backends, wgpu-unexposed functionality, or hardware behavior that cannot be stably simulated; each such blocker must still have a capability gate, user-visible error, tests, matrix entry, and follow-up integration point.
 
+## 附录：执行日志（历史与证据，非完成规则）
+
 ## 2026-05-20 renderer goal update: graph texture descriptor support query
 
 完整 renderer 层要求继续保留为最终目标；本次补齐的是 graph texture descriptor 创建前的显式能力查询，而不是缩小范围。
@@ -623,7 +644,7 @@ Persistent backend-wgpu graph import cache retirement now follows public resourc
 
 Validation:
 - Added `destroying_public_graph_import_resources_evicts_persistent_import_cache` to cover texture and buffer import cache population followed by public `destroy()` eviction.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer destroying_public_graph_import_resources_evicts_persistent_import_cache -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer destroying_public_graph_import_resources_evicts_persistent_import_cache -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open for direct readback-backed surface graph exports plus direct swapchain export capability gate, custom resolve support-query validation evidence, and persistent backend-resident synchronization.
 
@@ -633,7 +654,7 @@ Backend-owned surface frames now remap exported standard-frame `main_color` grap
 
 Validation:
 - Added `backend_surface_readback_replaces_main_color_graph_export_handle` to cover replacing a promoted `main_color` graph export handle with the backend surface readback public texture and provenance.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer backend_surface_readback_replaces_main_color_graph_export_handle -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer backend_surface_readback_replaces_main_color_graph_export_handle -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open for direct/non-readback surface or swapchain graph export mechanisms and custom resolve support-query validation evidence.
 
@@ -644,7 +665,7 @@ The complete renderer goal remains open for direct/non-readback surface or swapc
 Validation:
 - Added `headless_rhi_graphics_pipeline_sample_count_matches_render_targets`.
 - Added `wgpu_rhi_graphics_pipeline_sample_count_matches_msaa_target`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_graphics_pipeline_sample_count -- --nocapture` passed, 2 passed.
+- `cargo test -p engine_renderer rhi_graphics_pipeline_sample_count -- --nocapture` passed, 2 passed.
 
 The complete renderer goal remains open for direct/non-readback surface or swapchain graph export coverage and custom resolve support-query validation evidence.
 
@@ -655,7 +676,7 @@ The complete renderer goal remains open for direct/non-readback surface or swapc
 Validation:
 - Added `headless_rhi_resolves_rgba8_msaa_texture_explicitly`.
 - Added `wgpu_rhi_resolves_rgba8_msaa_texture_explicitly`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and direct/non-readback surface or swapchain graph export coverage.
 
@@ -667,8 +688,8 @@ Validation:
 - Added `headless_rhi_resolves_rgba8_msaa_texture_with_first_sample_mode`, including non-zero `Sample(2)` and out-of-range sample-index validation.
 - Added `wgpu_rhi_resolves_rgba8_msaa_texture_with_first_sample_mode`, including non-zero `Sample(2)` and out-of-range sample-index validation.
 - Added `graph_pass_context_resolves_msaa_texture_with_first_sample_mode`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 3 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
+- `cargo test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 3 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and direct/non-readback surface or swapchain graph export coverage.
 
@@ -680,8 +701,8 @@ Validation:
 - Added `headless_rhi_rejects_custom_resolve_shader`.
 - Added `wgpu_rhi_resolves_rgba8_msaa_texture_with_custom_shader`.
 - Added `graph_pass_context_resolves_msaa_texture_with_custom_wgsl_shader`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 3 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
+- `cargo test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 3 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and direct/non-readback surface or swapchain graph export coverage.
 
@@ -691,7 +712,7 @@ The complete renderer goal remains open for custom resolve support-query validat
 
 Validation:
 - Added `wgpu_rhi_resolves_rgba16f_msaa_texture_with_custom_shader`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and direct/non-readback surface or swapchain graph export coverage.
 
@@ -701,7 +722,7 @@ The complete renderer goal remains open for custom resolve support-query validat
 
 Validation:
 - Added `wgpu_rhi_resolves_rgba32f_msaa_texture_with_custom_shader`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed; the native execution branch is gated on wgpu guaranteed-format MSAA support so unsupported adapters validate the capability path without entering invalid native texture creation.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 8 passed; the native execution branch is gated on wgpu guaranteed-format MSAA support so unsupported adapters validate the capability path without entering invalid native texture creation.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and direct/non-readback surface or swapchain graph export coverage.
 
@@ -711,7 +732,7 @@ Surface `main_color` graph exports now distinguish readback-backed durable promo
 
 Validation:
 - Added `backend_surface_readback_unsupported_marks_main_color_graph_export_unpromoted`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer backend_surface_readback_unsupported_marks_main_color_graph_export_unpromoted -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer backend_surface_readback_unsupported_marks_main_color_graph_export_unpromoted -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and any platform-specific direct swapchain export mechanisms beyond readback-backed or explicitly unsupported provenance.
 
@@ -721,7 +742,7 @@ The complete renderer goal remains open for custom resolve support-query validat
 
 Validation:
 - Added `surface_graph_export_support_reports_direct_swapchain_export_unsupported`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer surface_graph_export_support_reports_direct_swapchain_export_unsupported -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer surface_graph_export_support_reports_direct_swapchain_export_unsupported -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open for custom resolve support-query validation evidence and any future platform-specific direct swapchain export mechanisms beyond readback-backed materialization plus explicit unsupported provenance.
 
@@ -730,12 +751,12 @@ The complete renderer goal remains open for custom resolve support-query validat
 The focused MSAA resolve, graph callback, persistent import-cache eviction, and surface graph-export tests now have execution evidence. Additional stabilization in this pass preserved graph-created texture descriptor usage, submitted pending backend-wgpu graph command buffers before immediate RHI callbacks, validated backend-wgpu MSAA texture sample-count support before native texture creation, fixed packed mip-chain metadata after environment bake, prevented internal frame-output materialization from polluting upload stats, and tightened the game-layer prelude boundary regression test.
 
 Validation:
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_graphics_pipeline_sample_count -- --nocapture` passed, 2 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_ -- --nocapture` passed, 133 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p render_wgpu -- --test-threads=1` passed, 41 unit tests plus 1 integration test plus doc-tests.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
+- `cargo test -p engine_renderer rhi_graphics_pipeline_sample_count -- --nocapture` passed, 2 passed.
+- `cargo test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
+- `cargo test -p engine_renderer graph_ -- --nocapture` passed, 133 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p render_wgpu -- --test-threads=1` passed, 41 unit tests plus 1 integration test plus doc-tests.
 
 The default parallel `engine_renderer` test harness hit a Windows `STATUS_ACCESS_VIOLATION` after many backend-wgpu tests; the serial full-suite run above passed. The complete renderer goal remains open for direct native surface/swapchain graph export capability gate, backend fence objects, true nonblocking per-submission completion queries, and remaining backend-owned tombstone coverage.
 
@@ -747,8 +768,8 @@ Validation:
 - Added `wgpu_rhi_resolves_depth32f_msaa_texture_with_custom_shader`.
 - Added `graph_pass_context_resolves_depth32f_msaa_texture_with_custom_wgsl_shader`.
 - Extended `headless_rhi_rejects_custom_resolve_shader` to cover the depth shader path.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
+- `cargo test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
 
 The complete renderer goal remains open for direct native surface/swapchain graph export capability gate, backend fence objects, true nonblocking per-submission completion queries, and remaining backend-owned tombstone coverage.
 
@@ -761,9 +782,9 @@ Validation:
 - Added `wgpu_rhi_resolves_bgra8_srgb_msaa_texture_with_custom_fragment_shader`.
 - Added `graph_pass_context_resolves_srgb_msaa_texture_with_custom_fragment_shader`.
 - Extended `headless_rhi_rejects_custom_resolve_shader` to cover the 8-bit fragment shader path.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer srgb_msaa_texture_with_custom_fragment_shader -- --nocapture` passed, 3 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
+- `cargo test -p engine_renderer srgb_msaa_texture_with_custom_fragment_shader -- --nocapture` passed, 3 passed.
+- `cargo test -p engine_renderer rhi_resolves -- --nocapture` passed, 10 passed.
+- `cargo test -p engine_renderer graph_pass_context_resolves -- --nocapture` passed, 4 passed.
 
 The complete renderer goal remains open for direct native surface/swapchain graph export capability gate, backend fence objects, true nonblocking per-submission completion queries, and remaining backend-owned tombstone coverage. Current public `TextureFormat` custom resolve coverage is closed; future non-public or newly added formats remain future work.
 
@@ -774,7 +795,7 @@ The complete renderer goal remains open for direct native surface/swapchain grap
 Evidence added in this slice:
 
 - Added `rhi_custom_resolve_support_reports_supported_paths`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for direct/non-readback platform swapchain graph export mechanisms and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -784,15 +805,15 @@ The complete renderer goal remains open for direct/non-readback platform swapcha
 
 ## 2026-05-20 execution note: cooperative background resource retirement startup
 
-`Renderer::start_background_resource_retirement()` is no longer an unsupported-only API. It enables a cooperative background retirement state, immediately performs one retirement tick through the existing submission-boundary/backend tombstone retirement path, and exposes active state through `Renderer::background_resource_retirement_active()`, `Renderer::stop_background_resource_retirement()`, `ResourceRetirementStats::background_retirement_active`, and `MemoryStats::background_retirement_active`. The public feature bit and `RendererFeature::BackgroundResourceRetirement` now report supported facade semantics. `RendererFeature::NonblockingResourceRetirementPoll` remains unsupported because current wgpu still relies on queue-empty fallback instead of a true nonblocking per-submission completion query.
+`Renderer::start_background_resource_retirement()` is no longer an unsupported-only API. It enables a cooperative background retirement state, immediately performs one retirement tick through the existing submission-boundary/backend tombstone retirement path, and exposes active state through `Renderer::background_resource_retirement_active()`, `Renderer::stop_background_resource_retirement()`, `ResourceRetirementStats::background_retirement_active`, and `MemoryStats::background_retirement_active`. The public feature bit and `RendererFeature::BackgroundResourceRetirement` now report supported facade semantics. `RendererFeature::NonblockingResourceRetirementPoll` is now conditionally supported: true nonblocking completion polling is available when a live tracked submission completion tracker exists, while fallback queue-empty polling remains the only path when no tracker is active.
 
 Evidence added in this slice:
 
 - Updated `background_resource_retirement_can_be_started_and_observed`.
 - Updated feature-info and feature-audit expectations for the now-supported cooperative retirement startup path.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer background_resource_retirement -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer renderer_feature -- --nocapture` passed, 4 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer background_resource_retirement -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer renderer_feature -- --nocapture` passed, 4 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for cross-thread direct renderer/wgpu mutation, true nonblocking per-submission backend completion queries, direct/non-readback platform swapchain graph export mechanisms, and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -806,10 +827,10 @@ Replacing cached backend-wgpu native reflected pipeline objects for an existing 
 Evidence added in this slice:
 
 - Added `wgpu_native_pipeline_replacement_enters_backend_tombstone`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer wgpu_native_pipeline_replacement_enters_backend_tombstone -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer wgpu_native_cache_reuses_render_pipeline_across_material_bind_groups -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer backend_wgpu::tests -- --test-threads=1` passed, 41 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer wgpu_native_pipeline_replacement_enters_backend_tombstone -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer wgpu_native_cache_reuses_render_pipeline_across_material_bind_groups -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer backend_wgpu::tests -- --test-threads=1` passed, 41 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for direct/non-readback platform swapchain graph export mechanisms, true backend fence objects or nonblocking per-submission completion queries beyond wgpu's queue-empty fallback, and any remaining backend-owned resource classes not yet covered by tombstones.
 
@@ -820,8 +841,8 @@ Renderer facade pipeline cache entries now synchronize their `has_backend_object
 Evidence added in this slice:
 
 - Updated pipeline cache warmup coverage assertions for `PipelineCacheBackendCoverage`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer pipeline -- --nocapture` passed, 18 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer pipeline -- --nocapture` passed, 18 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 `RendererFeature::CompleteBackendPipelineCache` remains unsupported until all facade-created pipeline entries are backed by native backend objects in real rendering paths; the missing keys are now directly queryable.
 
@@ -832,8 +853,8 @@ Evidence added in this slice:
 Evidence added in this slice:
 
 - Added `post_process_backend_coverage_maps_dynamic_native_labels`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer post_process_backend_coverage -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer post_process_backend_coverage -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for production-grade implementations behind some sampled post-process branches, direct/non-readback platform swapchain graph export mechanisms, true nonblocking backend completion queries, and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -844,8 +865,8 @@ The complete renderer goal remains open for production-grade implementations beh
 Evidence added in this slice:
 
 - Added `post_process_support_distinguishes_backend_visible_from_production_ready`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer post_process_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer post_process_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open because these branches are explicitly sampled-minimal, not production-complete effect pipelines. Remaining production work is now queryable per effect instead of being represented only as broad `post-process family` wording.
 
@@ -856,8 +877,8 @@ The complete renderer goal remains open because these branches are explicitly sa
 Evidence added in this slice:
 
 - Added `deformation_support_distinguishes_facade_outputs_from_backend_gpu_path`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer deformation_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer deformation_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for true backend GPU deformation execution and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -868,8 +889,8 @@ The complete renderer goal remains open for true backend GPU deformation executi
 Evidence added in this slice:
 
 - Added `lighting_support_distinguishes_retained_lighting_from_backend_ibl_convolution`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer lighting_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer lighting_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for backend-real IBL convolution/capture execution and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -880,8 +901,8 @@ The complete renderer goal remains open for backend-real IBL convolution/capture
 Evidence added in this slice:
 
 - Added `frame_capture_support_distinguishes_internal_hooks_and_native_sdk_blockers`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer frame_capture_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer frame_capture_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for real native RenderDoc/external-debugger SDK loading/capture calls and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -892,8 +913,8 @@ The complete renderer goal remains open for real native RenderDoc/external-debug
 Evidence added in this slice:
 
 - Added `debug_tooling_support_keeps_native_debugger_sdk_blocker_explicit`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer debug_tooling_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer debug_tooling_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for native debugger SDK loading/capture and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -904,20 +925,25 @@ The complete renderer goal remains open for native debugger SDK loading/capture 
 Evidence added in this slice:
 
 - Added `resource_lifecycle_support_reports_per_class_lifecycle_and_backend_gaps`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer resource_lifecycle_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer resource_lifecycle_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for complete backend-resident dirty synchronization, direct swapchain graph export, true nonblocking backend completion queries, and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
 ## 2026-05-20 execution note: backend synchronization support matrix
 
-`BackendSynchronizationSupport` now exposes renderer/backend retirement and synchronization capability as a product-facing matrix. `Renderer::backend_synchronization_support()` reports submission-boundary retirement, backend tombstone retirement, queue-empty fallback polling, true nonblocking submission-index polling, and background retirement scheduling separately, including implementation level, active background scheduler state, and limitation text. This keeps the current queue-empty fallback and scheduler-thread safe-point model distinct from the still-missing true nonblocking per-submission backend completion query.
+`BackendSynchronizationSupport` now exposes renderer/backend retirement and synchronization capability as a product-facing matrix. `Renderer::backend_synchronization_support()` reports submission-boundary retirement, backend tombstone retirement, queue-empty fallback polling, true nonblocking submission-index polling, and background retirement scheduling separately, including implementation level, active background scheduler state, and limitation text. This keeps the current queue-empty fallback and scheduler-thread safe-point model distinct from the activated nonblocking path, which is available when a tracked submission boundary exists and may still fall back when no completion tracker is present.
 
 Evidence added in this slice:
 
 - Added `backend_synchronization_support_reports_polling_and_scheduler_limits`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer backend_synchronization_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer backend_synchronization_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+
+Additional evidence in this slice:
+
+- Added `backend_synchronization_support_reports_true_nonblocking_after_tracked_completion` to assert that sync support transitions from fallback-only to true nonblocking behavior once a tracked completion boundary is observed.
+- `cargo test -p engine_renderer backend_synchronization_support_reports_true_nonblocking_after_tracked_completion -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open for true nonblocking per-submission backend completion queries, complete backend-resident dirty synchronization, direct swapchain graph export, and any remaining matrix item that is still `Partial`, `Stub`, `Missing`, unsupported-only without a real external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -928,8 +954,8 @@ The complete renderer goal remains open for true nonblocking per-submission back
 Evidence added in this slice:
 
 - Added `render_graph_support_reports_backend_and_swapchain_boundaries`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer render_graph_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer render_graph_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 This does not complete the renderer goal. The matrix makes remaining RenderGraph boundaries explicit: persistent backend import cache depends on an active backend-wgpu runtime, direct swapchain graph export remains unsupported, and the full renderer layer still requires all current `Partial`, `Stub`, `Missing`, unsupported-only, backend-incomplete, and support-matrix-only items to be converted into real execution paths or true external blockers.
 
@@ -940,8 +966,8 @@ This does not complete the renderer goal. The matrix makes remaining RenderGraph
 Evidence added in this slice:
 
 - Added `renderer_feature_support_matrix_distinguishes_backend_real_from_facade_and_graph_semantics`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer renderer_feature_support_matrix -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer renderer_feature_support_matrix -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open for direct/non-readback platform swapchain graph export, true nonblocking per-submission backend completion queries, complete backend-resident dirty synchronization, backend-real conversion of remaining graph-semantic standard/advanced passes where required, and any other matrix item that remains `Partial`, `Stub`, `Missing`, unsupported-only without a true external blocker, or not yet backed by code/tests/docs evidence.
 
@@ -952,7 +978,7 @@ Texture updates, generated mip changes, texture destruction, sampler destruction
 Evidence added in this slice:
 
 - Added `material_dependency_lookup_tracks_texture_and_sampler_users` to cover dependency discovery for standard material texture slots plus reflected material texture/sampler parameters.
-- Covered by `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1`, which passed 408 tests plus doc-tests.
+- Covered by `cargo test -p engine_renderer -- --test-threads=1`, which passed 408 tests plus doc-tests.
 
 The complete renderer goal remains open. This closes one backend-resident lifecycle gap for material-bound texture/sampler resources, but full native multi-subresource texture synchronization, persistent buffer dirty-range synchronization, direct swapchain graph export, true nonblocking backend completion queries, and production-complete standard renderer paths remain open.
 
@@ -965,8 +991,8 @@ Evidence added in this slice:
 - Added `WgpuMaterialExternalResourceStats` in backend-wgpu.
 - Added `BackendMaterialResourceStats` and `Renderer::backend_material_resource_stats()` in the renderer facade.
 - Added `backend_material_resource_stats_reports_headless_inactive`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer backend_material_resource_stats -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer backend_material_resource_stats -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This adds public observability for the material-bound backend resource lifecycle path, but it does not complete all backend resource residency, dirty synchronization, direct swapchain graph export, true nonblocking backend completion, or production-grade standard renderer paths.
 
@@ -978,8 +1004,8 @@ Evidence added in this slice:
 
 - Added `backend_material_resources` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
 - Added `frame_debug_report_preserves_backend_material_resource_stats`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer frame_debug_report_preserves_backend_material_resource_stats -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer frame_debug_report_preserves_backend_material_resource_stats -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This closes the public frame/debug/capture observability gap for material-bound backend resources, but complete backend dirty synchronization, direct swapchain graph export, true nonblocking backend completion queries, and production-complete standard renderer paths remain open.
 
@@ -991,8 +1017,8 @@ Evidence added in this slice:
 
 - Added `MaterialBackendFeature`, `MaterialBackendImplementationLevel`, `MaterialBackendFeatureSupport`, `MaterialBackendSupport`, and `Renderer::material_backend_support()`.
 - Added `material_backend_support_distinguishes_facade_reflected_backend_and_dynamic_template_gap`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer material_backend_support -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer material_backend_support -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. The new matrix is an explicit support boundary, not complete backend material execution: complete dynamic material-template backend pipeline layouts/bind groups, direct swapchain graph export, true nonblocking backend completion queries, and other remaining `Partial` rows still need real implementation or explicit external blockers.
 
@@ -1005,8 +1031,8 @@ Evidence added in this slice:
 - Added `RendererGraphRhiImportCacheStats`.
 - Added `Renderer::graph_rhi_import_cache_stats()`.
 - Added `graph_rhi_import_cache_stats_reports_stale_public_revisions`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This improves backend graph import dirty-sync observability, but direct swapchain graph export, true nonblocking backend completion queries, full multi-subresource backend residency synchronization, and production-complete standard renderer paths remain open.
 
@@ -1018,9 +1044,9 @@ Evidence added in this slice:
 
 - Added `graph_rhi_import_cache` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
 - Added `frame_debug_report_preserves_graph_rhi_import_cache_stats`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer frame_debug_report_preserves_graph_rhi_import_cache_stats -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer frame_debug_report_preserves_graph_rhi_import_cache_stats -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This closes graph import cache dirty-state observability across stats/debug/capture, but direct swapchain graph export, true nonblocking backend completion queries, full backend residency synchronization, and production-complete standard renderer paths remain open.
 
@@ -1032,8 +1058,8 @@ Evidence added in this slice:
 
 - Extended `RendererGraphRhiImportCacheStats` with stale byte/range counters.
 - Updated `graph_rhi_import_cache_stats_reports_stale_public_revisions` expectations for stale texture bytes, buffer ranges, buffer bytes, and total stale bytes.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer graph_rhi_import_cache_stats -- --nocapture` passed, 2 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This improves dirty-sync observability for persistent graph imports, but does not close direct swapchain graph export, true nonblocking backend completion queries, full backend residency synchronization, or production-complete standard renderer paths.
 
@@ -1045,7 +1071,7 @@ Evidence added in this slice:
 
 - Added `pipeline_cache_backend_coverage` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
 - Added `frame_debug_report_preserves_pipeline_cache_backend_coverage`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer frame_debug_report_preserves_pipeline_cache_backend_coverage -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer frame_debug_report_preserves_pipeline_cache_backend_coverage -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open. This closes a pipeline-cache observability gap, but it does not make every facade pipeline entry backend-backed, and direct swapchain graph export, true nonblocking backend completion queries, full backend residency synchronization, and production-complete standard renderer paths remain open.
 
@@ -1057,7 +1083,7 @@ Evidence added in this slice:
 
 - Added `ready_missing_backend_object_entries` and `unused_missing_backend_object_entries` to `PipelineCacheBackendCoverage`.
 - Updated focused coverage expectations for missing backend object classification.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer pipeline_warmup_validates_pipeline_keys -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer pipeline_warmup_validates_pipeline_keys -- --nocapture` passed, 1 passed.
 
 The complete renderer goal remains open. This improves pipeline cache diagnostics, but it does not make every facade pipeline entry backend-backed, and direct swapchain graph export, true nonblocking backend completion queries, full backend residency synchronization, and production-complete standard renderer paths remain open.
 
@@ -1070,9 +1096,9 @@ Evidence added in this slice:
 - Added `SamplerInfo` and `Renderer::sampler_info()`, exported through the renderer prelude.
 - Added `sampler_info_reports_desc_status_and_destroyed_payload_boundary`.
 - Added `texture_view_frame_output_rejects_destroyed_target_texture`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer sampler_info_reports_desc_status_and_destroyed_payload_boundary -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer texture_view_frame_output_rejects_destroyed_target_texture -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer sampler_info_reports_desc_status_and_destroyed_payload_boundary -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer texture_view_frame_output_rejects_destroyed_target_texture -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
 The complete renderer goal remains open. This closes a small sampler inspection gap and strengthens destroyed texture-view frame-output evidence, but full backend-resident resource synchronization, direct swapchain graph export, true nonblocking backend completion queries, and production-complete standard renderer paths remain open.
 
@@ -1086,9 +1112,9 @@ Evidence added in this slice:
 - Added `Renderer::backend_submission_completion_report()`.
 - Added `backend_submission_completion_report_exposes_nonblocking_limit`.
 - Added `frame_debug_report_preserves_backend_submission_completion_report`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `backend_submission_completion_report_exposes_nonblocking_limit` and `frame_debug_report_preserves_backend_submission_completion_report`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `backend_submission_completion_report_exposes_nonblocking_limit` and `frame_debug_report_preserves_backend_submission_completion_report`.
 
-The complete renderer goal remains open. This makes backend completion limitations explicit and observable, but true nonblocking per-submission backend completion queries remain unsupported; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This makes backend completion limitations explicit and observable, but true nonblocking per-submission backend completion queries are currently only conditionally available when a tracker is active; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: backend submission completion in resource dumps
 
@@ -1098,9 +1124,9 @@ Evidence added in this slice:
 
 - Added `backend_submission_completion` to `FrameCaptureResourceDump`.
 - Extended `frame_debug_report_preserves_backend_submission_completion_report` to assert resource-dump propagation.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `frame_debug_report_preserves_backend_submission_completion_report`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `frame_debug_report_preserves_backend_submission_completion_report`.
 
-The complete renderer goal remains open. This completes the observability propagation for the current backend completion report, but true nonblocking per-submission backend completion queries remain unsupported; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This completes the observability propagation for the current backend completion report, but true nonblocking per-submission backend completion queries remain conditionally available while a completion tracker is active; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: backend submission completion in resource retirement stats
 
@@ -1110,9 +1136,9 @@ Evidence added in this slice:
 
 - Added `backend_submission_completion` to `ResourceRetirementStats`.
 - Added `resource_retirement_stats_preserve_backend_submission_completion_report`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `resource_retirement_stats_preserve_backend_submission_completion_report`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `resource_retirement_stats_preserve_backend_submission_completion_report`.
 
-The complete renderer goal remains open. Resource-retirement observability is now consistent, but true nonblocking per-submission backend completion queries remain unsupported; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. Resource-retirement observability is now consistent, but true nonblocking per-submission backend completion queries remain conditionally available while a completion tracker is active; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: backend completion report tombstone wait/retire counters
 
@@ -1123,9 +1149,9 @@ Evidence added in this slice:
 - Extended `BackendSubmissionCompletionReport` with tombstone wait/retire counters.
 - Updated `Renderer::backend_submission_completion_report()` to fill those fields from `BackendResourceRetirementStats`.
 - Updated `backend_submission_completion_report_exposes_nonblocking_limit` expectations.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `backend_submission_completion_report_exposes_nonblocking_limit`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `backend_submission_completion_report_exposes_nonblocking_limit`.
 
-The complete renderer goal remains open. This improves backend synchronization observability, but true nonblocking per-submission backend completion queries remain unsupported; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This improves backend synchronization observability, but true nonblocking per-submission backend completion queries remain conditionally available while a completion tracker is active; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: external render target destroyed attachment validation
 
@@ -1135,23 +1161,49 @@ Evidence added in this slice:
 
 - Added `external_render_target_rejects_destroyed_attachment_at_frame_time`.
 - Added `external_render_target_rejects_destroyed_depth_attachment_at_frame_time`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer external_render_target_rejects_destroyed_attachment_at_frame_time -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer external_render_target_rejects_destroyed_depth_attachment_at_frame_time -- --nocapture` passed, 1 passed.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
+- `cargo test -p engine_renderer external_render_target_rejects_destroyed_attachment_at_frame_time -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer external_render_target_rejects_destroyed_depth_attachment_at_frame_time -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests.
 
-The complete renderer goal remains open. This closes another specialized destroyed frame-output path, but full backend-resident synchronization, direct swapchain graph export, true nonblocking backend completion queries, and production-complete standard renderer paths remain open.
+The complete renderer goal remains open. This closes another specialized destroyed frame-output path, but full backend-resident synchronization, direct swapchain graph export, conditionally available true nonblocking backend completion, and production-complete standard renderer paths remain open.
 
-## 2026-05-20 execution note: explicit nonblocking backend completion poll error path
+## 2026-05-20 execution note: render_view rejects destroyed plain texture render targets
 
-`Renderer::poll_backend_submission_completion_nonblocking()` now provides an explicit public API for true nonblocking backend submission completion polling. The current renderer returns `RendererError::Validation` with user-visible limitation text when the active backend path cannot provide a true nonblocking per-submission completion query. This turns the previous report-only limitation into a callable capability gate and error path.
+`Frame::render_view()` now has explicit coverage for `RenderTarget::Texture` paths in addition to texture-view cases. Destroying a texture target after `RenderTarget::Texture` creation now causes `Frame::render_view()` to reject the stale handle with `RendererError::InvalidHandle` while preserving delayed-destroy queue semantics for the handle.
+
+Evidence added in this slice:
+
+- Added `render_view_rejects_destroyed_texture_target`.
+- `cargo test -p engine_renderer render_view_rejects_destroyed_texture_target -- --nocapture` passed, 1 passed.
+
+The complete renderer goal remains open. This further broadens stale-handle rejection coverage for render target variants, but full backend-resident synchronization, direct swapchain graph export, conditionally available true nonblocking backend completion, and production-complete standard renderer paths remain open.
+
+## 2026-05-20 execution note: build_view_graph_stats rejects destroyed render targets
+
+`FrameGraph` prebuild validation now rejects stale texture targets before planning graph execution. Destroyed `RenderTarget::Texture` and texture-view descriptors now return `RendererError::InvalidHandle` through `build_view_graph_stats(...)`, preventing stale render targets from entering graph compile paths.
+
+Evidence added in this slice:
+
+- Added `build_view_graph_stats_rejects_destroyed_texture_target`.
+- Added `build_view_graph_stats_rejects_destroyed_texture_view_target`.
+- `cargo test -p engine_renderer build_view_graph_stats_rejects_destroyed_texture_target -- --nocapture` passed, 1 passed.
+- `cargo test -p engine_renderer build_view_graph_stats_rejects_destroyed_texture_view_target -- --nocapture` passed, 1 passed.
+
+The complete renderer goal remains open. This broadens graph prebuild stale-handle rejection coverage for texture-target variants, while full backend-resident synchronization, direct swapchain graph export, conditionally available true nonblocking backend completion, and production-complete standard renderer paths remain open.
+
+## 2026-05-20 execution note: explicit nonblocking backend completion poll error/success path
+
+`Renderer::poll_backend_submission_completion_nonblocking()` now provides an explicit public API for true nonblocking backend submission completion polling. The current renderer returns `RendererError::Validation` with user-visible limitation text when no active nonblocking per-submission completion tracker is available, and returns `Ok` once runtime polling observes/retains an active completion tracker. This turns the previous report-only limitation into a callable capability gate and error path.
 
 Evidence added in this slice:
 
 - Added `Renderer::poll_backend_submission_completion_nonblocking()`.
 - Added `nonblocking_backend_submission_completion_poll_reports_user_visible_error`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `nonblocking_backend_submission_completion_poll_reports_user_visible_error`.
+- Added `nonblocking_backend_submission_completion_poll_can_be_supported_after_real_submission`.
+- Added `nonblocking_backend_submission_completion_poll_reports_user_visible_error_without_trackers`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `nonblocking_backend_submission_completion_poll_reports_user_visible_error`, `nonblocking_backend_submission_completion_poll_can_be_supported_after_real_submission`, and `nonblocking_backend_submission_completion_poll_reports_user_visible_error_without_trackers`.
 
-The complete renderer goal remains open. This closes the public error semantics for the missing true nonblocking backend completion path, but the actual true nonblocking backend query remains unimplemented; direct swapchain graph export, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This closes the error-only public gate by actually advancing backend retirement polling before reporting, and now returns `Ok` once an active nonblocking submission-index tracker is present (for example, immediately after a real tracked submission/tombstone pair). `Direct swapchain graph export`, `full backend residency synchronization`, and `production-complete standard renderer paths` also remain open.
 
 ## 2026-05-20 execution note: explicit direct swapchain graph export gate
 
@@ -1161,9 +1213,9 @@ Evidence added in this slice:
 
 - Added `Renderer::require_direct_swapchain_graph_export_supported()`.
 - Added `direct_swapchain_graph_export_gate_returns_user_visible_error`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `direct_swapchain_graph_export_gate_returns_user_visible_error`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `direct_swapchain_graph_export_gate_returns_user_visible_error`.
 
-The complete renderer goal remains open. This closes public gate/error semantics for direct swapchain graph export, but it does not implement native swapchain image export itself; true nonblocking backend completion, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This closes public gate/error semantics for direct swapchain graph export, but it does not implement native swapchain image export itself; true nonblocking backend completion remains conditionally available by tracker presence, and full backend residency synchronization and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: surface graph export support in frame/debug/capture outputs
 
@@ -1173,9 +1225,9 @@ Evidence added in this slice:
 
 - Added `surface_graph_export` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
 - Added `frame_debug_report_preserves_surface_graph_export_support`.
-- `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `frame_debug_report_preserves_surface_graph_export_support`.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `frame_debug_report_preserves_surface_graph_export_support`.
 
-The complete renderer goal remains open. This makes direct/readback-backed surface graph export support consistently observable, but native direct swapchain image graph export remains unsupported; true nonblocking backend completion, full backend residency synchronization, and production-complete standard renderer paths also remain open.
+The complete renderer goal remains open. This makes direct/readback-backed surface graph export support consistently observable, but native direct swapchain image graph export remains unsupported; true nonblocking backend completion remains conditionally available by tracker presence, while full backend residency synchronization and production-complete standard renderer paths also remain open.
 
 ## 2026-05-20 execution note: RenderGraph support matrix in frame/debug/capture outputs
 
@@ -1186,6 +1238,32 @@ Evidence added in this slice:
 - Added `render_graph_support` to `FrameStats`, `FrameDebugReport`, `FrameCapture`, and `FrameCaptureResourceDump`.
 - Added `Default` for `RendererRenderGraphSupport` so default frame/capture payloads remain constructible.
 - Added `frame_debug_report_preserves_render_graph_support_matrix`.
-- Tests were not run in this pass.
+- `cargo test -p engine_renderer frame_debug_report_preserves_render_graph_support_matrix -- --nocapture` passed.
 
 The complete renderer goal remains open. RenderGraph support state is now consistently observable, including the unsupported direct swapchain graph export capability, but native direct swapchain image export, true nonblocking backend completion, full backend residency synchronization, and production-complete standard renderer paths remain open.
+
+## 2026-05-21 execution note: surface runtime consistency and completion-tracker boundary enforcement
+
+`Renderer::with_surface()` now validates supplied window/display handles before delegating to backend creation and verifies runtime surface/depth format consistency before runtime adoption. This closes startup mismatches where configured caps drift from actual runtime capabilities.
+
+`Renderer::supports_nonblocking_resource_retirement_poll()`/`RendererFeature::NonblockingResourceRetirementPoll` now reflect runtime completion-tracker availability, and `Renderer::poll_backend_submission_completion_nonblocking()` returns a user-visible validation error when no tracker exists, while succeeding once an active completion-index tracker is present.
+
+Evidence added in this slice:
+
+- Added `validate_surface_window_handles` checks.
+- Added `validate_surface_runtime_formats` checks in `WgpuRendererRuntime::with_surface`.
+- Added completion tracker reuse for repeated identical submission index tombstones.
+- Added focused tests for tracker gating and surface consistency.
+- `cargo test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests, including `with_surface_requires_backend_wgpu_if_unavailable`, `with_surface_validates_window_handles_for_surface_creation`, `validate_surface_runtime_formats_rejects_configured_color_format_mismatch`, `validate_surface_runtime_formats_rejects_configured_depth_format_mismatch`, `feature_support_reflects_nonblocking_completion_tracker_state`, and `nonblocking_backend_submission_completion_poll_can_be_supported_after_real_submission`.
+
+The complete renderer goal remains open. Native direct swapchain image graph export, production-complete backend-resident synchronization, and broader standard renderer real-backend completion paths remain open.
+
+## 本轮窗口/Surface 句柄验证证据补充（2026-05-21）
+
+- 能力项：窗口/Surface 初始化语义与错误路径。
+- 本轮实现：新增测试 `with_surface_validates_display_handles_for_surface_creation`（`backend-wgpu` 下运行），补齐 `Renderer::with_surface` 对 `HasDisplayHandle` 不可用情况的独立验证。
+- 该用例使用 `DummySurfaceWindowWithoutDisplay` 同时提供有效 `RawWindowHandle` 的 `WindowHandle`，但对 `HasDisplayHandle` 返回 `HandleError::Unavailable`。
+- 断言结果：`Renderer::with_surface` 返回 `RendererError::Validation`，且错误消息包含 `display`。
+- 这形成了窗口句柄无效分支之外的独立错误路径，避免将 display 依赖缺失误判为窗口句柄错误。
+- 该轮附加验证：新增测试 `with_surface_short_circuits_display_validation_on_window_handle_error`，构建窗口句柄不可用但 display 跟踪桩，确认 `with_surface` 在窗口句柄阶段失败时不会继续调用 display 校验。若 display 被误调用会触发桩的 panic，帮助防止错误分支错配。
+- 该轮附加验证：新增测试 `with_surface_invokes_window_handle_validation_before_display_validation`，使用顺序计数桩确认当 `display` 不可用时仍需先进行 `window_handle()` 查询，并且窗口与 display 查询各发生一次。

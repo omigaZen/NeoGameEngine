@@ -3284,6 +3284,7 @@ Validation: `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer lighting_s
 ## 2026-05-20 audit note: frame capture support matrix
 
 Prompt-to-artifact status for frame capture improved: `Renderer::frame_capture_support()` maps internal capture, external hook handoff, native SDK blockers, and unavailable backends into one public artifact. Native RenderDoc/external-debugger SDK integration remains an external blocker; registered hooks remain the current integration point.
+Frame-capture lifecycle now also surfaces a clearer execution outcome: successful external callback invocation now records `FrameCaptureStatus::Captured` in the finished `FrameCapture`, while panic callbacks remain `BackendHookFailed` and hook removal still resolves to `BackendUnavailable`.
 
 Validation: `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer frame_capture_support -- --nocapture` passed, 1 passed; `C:\Users\JM\.cargo\bin\cargo.exe test -p engine_renderer -- --test-threads=1` passed, 408 passed plus doc-tests. Residual risk: native SDK loading and begin/end capture calls remain open.
 
@@ -3507,3 +3508,29 @@ Current audit conclusion for this slice:
 - Implemented evidence: frame/debug/capture/resource dump fields added, default support matrix added, focused propagation test added.
 - Weak or incomplete evidence: tests were not run in this pass, and native direct swapchain graph export remains unsupported.
 - Goal status: still open.
+
+## 2026-05-21 execution note: surface runtime consistency checks and completion tracker boundaries
+
+The audit now records renderer-side consistency and runtime-boundary behavior for surface creation, plus explicit tracker-gated nonblocking completion semantics.
+
+Current audit conclusion for this slice:
+
+- Implemented evidence: window/display handle validation in `Renderer::with_surface`, runtime-format consistency validation for configured surface/depth formats, and completion-index tracker reuse for repeated submission indexes.
+- Validation behavior evidence: `Renderer::poll_backend_submission_completion_nonblocking()` now reports user-visible validation when no tracker exists and succeeds when a tracker-backed completion path is available.
+- Coverage evidence: tests added for `with_surface_validates_window_handles_for_surface_creation`, `with_surface_requires_backend_wgpu_if_unavailable`, `validate_surface_runtime_formats_rejects_configured_color_format_mismatch`, `validate_surface_runtime_formats_rejects_configured_depth_format_mismatch`, `nonblocking_backend_submission_completion_poll_can_be_supported_after_real_submission`, `nonblocking_backend_submission_completion_poll_reports_user_visible_error_without_trackers`, `feature_support_reflects_nonblocking_completion_tracker_state`, and `wgpu_submission_fence_reuses_tracker_for_repeated_same_submission_index`.
+- Residual gap: direct native swapchain image graph export, full backend residency synchronization, broader native direct texture/graph synchronization, and production-complete standard renderer paths remain open.
+- Goal status: still open.
+
+- `cargo test -p engine_renderer with_surface_validates_display_handles_for_surface_creation -- --nocapture`
+  - Result: passed, including display-handle validation for `Renderer::with_surface` through a `HasWindowHandle`-valid/`HasDisplayHandle`-unavailable window test stub, and asserting `RendererError::Validation` contains `display` when creating a surface with an unavailable display handle.
+
+### 本轮 Window/surface 错误语义补充
+
+- `Renderer::with_surface` 增加了独立的 display 句柄校验回归：窗口仅提供有效窗口句柄但缺少可用 display 时，应返回 validation 错误而不是继续尝试 surface 创建。
+- 该场景通过新增测试桩对象 `DummySurfaceWindowWithoutDisplay` 覆盖，避免了与现有窗口句柄缺失路径混淆。
+
+- `cargo test -p engine_renderer with_surface_invokes_window_handle_validation_before_display_validation -- --nocapture`
+  - Result: passed, including explicit ordering/count validation that `window_handle()` is called before `display_handle()` and both are invoked once when display validation fails after a successful window handle check.
+
+- `cargo test -p engine_renderer with_surface_short_circuits_display_validation_on_window_handle_error -- --nocapture`
+  - Result: passed, including a short-circuit regression ensuring `Renderer::with_surface` returns window-handle validation errors without querying display handles; display queries were tracked and confirmed not invoked when `HasWindowHandle::window_handle()` returns `HandleError::Unavailable`.

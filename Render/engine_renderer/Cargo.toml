@@ -9,6 +9,7 @@ engine_platform = { path = "../../Platform/engine_platform", optional = true }
 engine_render = { path = "../engine_render", optional = true }
 graphics_wgpu = { path = "../../Graphics/graphics_wgpu", optional = true }
 render_wgpu = { path = "../render_wgpu", optional = true }
+raw-window-handle = "0.6"
 
 [features]
 default = ["backend-wgpu", "pbr", "render-graph"]
