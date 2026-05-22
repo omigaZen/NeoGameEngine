@@ -1,0 +1,2024 @@
+use engine_asset::prelude::*;
+
+fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend(std::iter::repeat(value).take(width as usize * height as usize * 4));
+    bytes
+}
+
+fn content_hash(bytes: &[u8]) -> ContentHash {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    ContentHash(hash)
+}
+
+fn texture_bundle(path: &str, bytes: Vec<u8>) -> (AssetId, Vec<u8>) {
+    let id = AssetId::new();
+    let bundle = BundleWriter::build_bytes(
+        "textures",
+        CompressionKind::None,
+        vec![BundleAsset {
+            id,
+            asset_type: AssetTypeId::of::<Texture>(),
+            path: AssetPath::parse(path),
+            bytes,
+            dependencies: Vec::new(),
+        }],
+    )
+    .unwrap();
+    (id, bundle)
+}
+
+fn texture_bundle_io(name: &str, files: Vec<(&str, Vec<u8>)>) -> BundleAssetIo {
+    let assets = files
+        .into_iter()
+        .map(|(path, bytes)| BundleAsset {
+            id: AssetId::new(),
+            asset_type: AssetTypeId::of::<Texture>(),
+            path: AssetPath::parse(path),
+            bytes,
+            dependencies: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let bundle = BundleWriter::build_bytes(name, CompressionKind::None, assets).unwrap();
+    BundleAssetIo::from_bytes(&bundle).unwrap()
+}
+
+fn texture_package(
+    name: &str,
+    kind: AssetIoLayerKind,
+    priority: usize,
+    bundle_id: BundleId,
+    bundle_path: &str,
+    files: Vec<(&str, Vec<u8>)>,
+) -> (AssetPackageRecord, Vec<u8>, Vec<AssetId>) {
+    let mut ids = Vec::new();
+    let assets = files
+        .into_iter()
+        .map(|(path, bytes)| {
+            let id = AssetId::new();
+            ids.push(id);
+            BundleAsset {
+                id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse(path),
+                bytes,
+                dependencies: Vec::new(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let bundle = BundleWriter::build_bytes(name, CompressionKind::None, assets).unwrap();
+    let manifest = BundleReader::from_bytes(&bundle)
+        .unwrap()
+        .manifest()
+        .clone();
+    (
+        AssetPackageRecord::new(bundle_id, name, kind, priority, true, bundle_path, manifest),
+        bundle,
+        ids,
+    )
+}
+
+fn package_from_assets(
+    name: &str,
+    kind: AssetIoLayerKind,
+    priority: usize,
+    bundle_id: BundleId,
+    bundle_path: &str,
+    assets: Vec<BundleAsset>,
+) -> (AssetPackageRecord, Vec<u8>) {
+    let bundle = BundleWriter::build_bytes(name, CompressionKind::None, assets).unwrap();
+    let manifest = BundleReader::from_bytes(&bundle)
+        .unwrap()
+        .manifest()
+        .clone();
+    (
+        AssetPackageRecord::new(bundle_id, name, kind, priority, true, bundle_path, manifest),
+        bundle,
+    )
+}
+
+fn temp_file(name: &str, extension: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "engine_asset_{name}_{}.{}",
+        AssetId::new().raw(),
+        extension
+    ))
+}
+
+fn temp_dir(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("engine_asset_{name}_{}", AssetId::new().raw()))
+}
+
+#[test]
+fn bundle_writer_reader_round_trip_preserves_manifest_dependencies() {
+    let shader_id = AssetId::new();
+    let texture_id = AssetId::new();
+    let bytes = texture_bytes(1, 1, 44);
+    let bundle = BundleWriter::build_bytes(
+        "level_01",
+        CompressionKind::None,
+        vec![BundleAsset {
+            id: texture_id,
+            asset_type: AssetTypeId::of::<Texture>(),
+            path: AssetPath::parse("textures/albedo.texture"),
+            bytes: bytes.clone(),
+            dependencies: vec![shader_id],
+        }],
+    )
+    .unwrap();
+
+    let reader = BundleReader::from_bytes(&bundle).unwrap();
+    assert_eq!(reader.manifest().name, "level_01");
+    assert_eq!(
+        reader.manifest().dependencies(texture_id),
+        Some([shader_id].as_slice())
+    );
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("textures/albedo.texture"))
+            .unwrap(),
+        bytes
+    );
+    assert_eq!(reader.read_entry(texture_id).unwrap(), bytes);
+}
+
+#[test]
+fn bundle_manifest_exposes_v2_chunk_layout_metadata() {
+    let first_id = AssetId::new();
+    let second_id = AssetId::new();
+    let first = texture_bytes(1, 1, 11);
+    let second = texture_bytes(2, 1, 22);
+    let mut expected_data = Vec::new();
+    expected_data.extend_from_slice(&first);
+    expected_data.extend_from_slice(&second);
+
+    let bundle = BundleWriter::build_bytes(
+        "chunked_textures",
+        CompressionKind::None,
+        vec![
+            BundleAsset {
+                id: first_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/first.texture"),
+                bytes: first.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: second_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/second.texture"),
+                bytes: second.clone(),
+                dependencies: vec![first_id],
+            },
+        ],
+    )
+    .unwrap();
+    let marker = b"\nDATA\n";
+    let marker_index = bundle
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .unwrap();
+    let manifest_text = std::str::from_utf8(&bundle[..marker_index]).unwrap();
+    assert!(manifest_text.starts_with("NGA_BUNDLE_V2"));
+    assert!(manifest_text.contains("chunks=1"));
+
+    let reader = BundleReader::from_bytes(&bundle).unwrap();
+    let manifest = reader.manifest();
+    assert_eq!(
+        manifest.total_uncompressed_bytes(),
+        expected_data.len() as u64
+    );
+    assert_eq!(manifest.chunks.len(), 1);
+    assert_eq!(
+        manifest.chunks[0],
+        BundleChunk {
+            index: 0,
+            offset: 0,
+            compressed_length: expected_data.len() as u64,
+            uncompressed_length: expected_data.len() as u64,
+            compression: CompressionKind::None,
+            content_hash: content_hash(&expected_data),
+        }
+    );
+    let first_entry = manifest.entry(first_id).unwrap();
+    assert_eq!(first_entry.chunk_index, 0);
+    assert_eq!(first_entry.offset, 0);
+    assert_eq!(first_entry.length, first.len() as u64);
+    let second_entry = manifest.entry(second_id).unwrap();
+    assert_eq!(second_entry.chunk_index, 0);
+    assert_eq!(second_entry.offset, first.len() as u64);
+    assert_eq!(second_entry.length, second.len() as u64);
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("textures/first.texture"))
+            .unwrap(),
+        first
+    );
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("textures/second.texture"))
+            .unwrap(),
+        second
+    );
+}
+
+#[test]
+fn bundle_reader_accepts_legacy_v1_manifest_as_single_uncompressed_chunk() {
+    let id = AssetId::new();
+    let payload = b"legacy payload".to_vec();
+    let header = format!(
+        "NGA_BUNDLE_V1\nname=legacy\ncompression=none\nentries=1\nentry|{}|{}|legacy/payload.bin|0|{}|{}|\nDATA\n",
+        id.raw(),
+        AssetTypeId::of::<Texture>().raw(),
+        payload.len(),
+        content_hash(&payload).0,
+    );
+    let mut bundle = header.into_bytes();
+    bundle.extend_from_slice(&payload);
+
+    let reader = BundleReader::from_bytes(&bundle).unwrap();
+    assert_eq!(reader.manifest().name, "legacy");
+    assert_eq!(reader.manifest().chunks.len(), 1);
+    assert_eq!(
+        reader.manifest().chunks[0],
+        BundleChunk {
+            index: 0,
+            offset: 0,
+            compressed_length: payload.len() as u64,
+            uncompressed_length: payload.len() as u64,
+            compression: CompressionKind::None,
+            content_hash: content_hash(&payload),
+        }
+    );
+    assert_eq!(reader.manifest().entry(id).unwrap().chunk_index, 0);
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("legacy/payload.bin"))
+            .unwrap(),
+        payload
+    );
+}
+
+#[test]
+fn bundle_compression_codec_report_and_zstd_feature_diagnostics() {
+    assert_eq!(
+        BundleCompressionCodecReport::for_compression(CompressionKind::None),
+        BundleCompressionCodecReport {
+            compression: CompressionKind::None,
+            supported: true,
+            codec_name: "none",
+            reason: None,
+        }
+    );
+    assert_eq!(
+        BundleCompressionCodecReport::for_compression(CompressionKind::Rle),
+        BundleCompressionCodecReport {
+            compression: CompressionKind::Rle,
+            supported: true,
+            codec_name: "rle",
+            reason: None,
+        }
+    );
+    let zstd = BundleCompressionCodecReport::for_compression(CompressionKind::Zstd);
+    assert_eq!(zstd.codec_name, "zstd");
+    assert_eq!(zstd.supported, asset_feature_enabled(AssetFeature::Zstd));
+
+    #[cfg(feature = "zstd")]
+    {
+        assert!(zstd.reason.is_none());
+        let first_id = AssetId::new();
+        let second_id = AssetId::new();
+        let first = vec![7_u8; 4096];
+        let second = vec![13_u8; 2048];
+        let bundle = BundleWriter::build_bytes_with_options(
+            "zstd_textures",
+            BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
+                BundleChunkPartitionPolicy::MaxUncompressedBytes(first.len()),
+            ),
+            vec![
+                BundleAsset {
+                    id: first_id,
+                    asset_type: AssetTypeId::of::<Texture>(),
+                    path: AssetPath::parse("textures/zstd_a.texture"),
+                    bytes: first.clone(),
+                    dependencies: Vec::new(),
+                },
+                BundleAsset {
+                    id: second_id,
+                    asset_type: AssetTypeId::of::<Texture>(),
+                    path: AssetPath::parse("textures/zstd_b.texture"),
+                    bytes: second.clone(),
+                    dependencies: vec![first_id],
+                },
+            ],
+        )
+        .unwrap();
+        let reader = BundleReader::from_bytes_with_loading_policy(
+            &bundle,
+            BundleChunkLoadingPolicy::OnDemandCached,
+        )
+        .unwrap();
+        assert_eq!(reader.manifest().compression, CompressionKind::Zstd);
+        assert_eq!(reader.manifest().chunks.len(), 2);
+        let first_chunk = reader.manifest().chunk(0).unwrap();
+        assert_eq!(first_chunk.compression, CompressionKind::Zstd);
+        assert!(first_chunk.compressed_length < first_chunk.uncompressed_length);
+        assert_eq!(reader.chunk_cache_stats().decoded_chunks, 0);
+
+        let (range, report) = reader
+            .read_path_range_with_report(&AssetPath::parse("textures/zstd_b.texture"), 512, 64)
+            .unwrap();
+        assert_eq!(range, second[512..576]);
+        assert_eq!(report.entry, second_id);
+        assert_eq!(report.chunk_index, 1);
+        assert_eq!(report.chunk_compression, CompressionKind::Zstd);
+        assert_eq!(report.cache_status, BundleChunkCacheStatus::Miss);
+        assert_eq!(reader.chunk_cache_stats().cache_misses, 1);
+
+        let bundle_io = BundleAssetIo::from_bytes_with_loading_policy(
+            &bundle,
+            BundleChunkLoadingPolicy::OnDemandCached,
+        )
+        .unwrap();
+        assert_eq!(
+            bundle_io
+                .read_range("textures/zstd_a.texture", 4000, 128)
+                .unwrap(),
+            first[4000..4096]
+        );
+
+        let corrupted = b"NGA_BUNDLE_V2\nname=bad_zstd\ncompression=zstd\nchunks=1\nchunk|0|0|8|4|zstd|1\nentries=0\nDATA\nnotzstd!";
+        assert!(matches!(
+            BundleReader::from_bytes(corrupted),
+            Err(AssetError::Bundle { message })
+                if message.contains("zstd bundle chunk 0")
+                    && message.contains("decode")
+        ));
+    }
+
+    #[cfg(not(feature = "zstd"))]
+    {
+        assert!(zstd.reason.as_deref().unwrap().contains("zstd feature"));
+        let bundle = b"NGA_BUNDLE_V2\nname=compressed\ncompression=none\nchunks=1\nchunk|3|0|4|4|zstd|1\nentries=0\nDATA\nabcd";
+        assert!(matches!(
+            BundleReader::from_bytes(bundle),
+            Err(AssetError::Bundle { message })
+                if message.contains("chunk 3")
+                    && message.contains("codec `zstd`")
+                    && message.contains("disabled")
+        ));
+    }
+}
+
+#[test]
+fn bundle_rle_compression_round_trip_exposes_chunk_reports_and_ranges() {
+    let first_id = AssetId::new();
+    let second_id = AssetId::new();
+    let first = texture_bytes(8, 8, 55);
+    let second = vec![9_u8; 300];
+    let mut expected_data = Vec::new();
+    expected_data.extend_from_slice(&first);
+    expected_data.extend_from_slice(&second);
+
+    let bundle = BundleWriter::build_bytes(
+        "rle_textures",
+        CompressionKind::Rle,
+        vec![
+            BundleAsset {
+                id: first_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/rle.texture"),
+                bytes: first.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: second_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/repeated.texture"),
+                bytes: second.clone(),
+                dependencies: vec![first_id],
+            },
+        ],
+    )
+    .unwrap();
+
+    let reader = BundleReader::from_bytes(&bundle).unwrap();
+    let chunk = &reader.manifest().chunks[0];
+    assert_eq!(reader.manifest().compression, CompressionKind::Rle);
+    assert_eq!(chunk.compression, CompressionKind::Rle);
+    assert_eq!(chunk.uncompressed_length, expected_data.len() as u64);
+    assert!(chunk.compressed_length < chunk.uncompressed_length);
+    assert_eq!(chunk.content_hash, content_hash(&expected_data));
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("textures/rle.texture"))
+            .unwrap(),
+        first
+    );
+    assert_eq!(
+        reader.read_entry_range(second_id, 250, 80).unwrap(),
+        second[250..300]
+    );
+
+    let (range, report) = reader
+        .read_path_range_with_report(&AssetPath::parse("textures/repeated.texture"), 10, 24)
+        .unwrap();
+    assert_eq!(range, second[10..34]);
+    assert_eq!(report.entry, second_id);
+    assert_eq!(
+        report.path,
+        Some(AssetPath::parse("textures/repeated.texture"))
+    );
+    assert_eq!(report.chunk_compression, CompressionKind::Rle);
+    assert_eq!(report.chunk_compressed_length, chunk.compressed_length);
+    assert_eq!(report.chunk_uncompressed_length, chunk.uncompressed_length);
+    assert_eq!(report.range_offset, 10);
+    assert_eq!(report.range_length, 24);
+    assert_eq!(report.bytes_returned, 24);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    assert_eq!(
+        bundle_io
+            .read_range("textures/repeated.texture", 296, 20)
+            .unwrap(),
+        second[296..300]
+    );
+    assert_eq!(
+        bundle_io
+            .metadata("textures/repeated.texture")
+            .unwrap()
+            .hash,
+        Some(content_hash(&second))
+    );
+}
+
+#[test]
+fn bundle_chunk_partition_policy_and_on_demand_cache_are_observable() {
+    let first_id = AssetId::new();
+    let second_id = AssetId::new();
+    let third_id = AssetId::new();
+    let first = texture_bytes(1, 1, 1);
+    let second = texture_bytes(2, 1, 2);
+    let third = texture_bytes(1, 1, 3);
+    assert!(matches!(
+        BundleWriter::build_bytes_with_options(
+            "bad_policy",
+            BundleBuildOptions::new(CompressionKind::None)
+                .with_chunk_policy(BundleChunkPartitionPolicy::MaxUncompressedBytes(0)),
+            Vec::new(),
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("max chunk size")
+    ));
+    let bundle = BundleWriter::build_bytes_with_options(
+        "partitioned_textures",
+        BundleBuildOptions::new(CompressionKind::Rle).with_chunk_policy(
+            BundleChunkPartitionPolicy::MaxUncompressedBytes(first.len() + 1),
+        ),
+        vec![
+            BundleAsset {
+                id: first_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/first.texture"),
+                bytes: first.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: second_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/second.texture"),
+                bytes: second.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: third_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/third.texture"),
+                bytes: third.clone(),
+                dependencies: Vec::new(),
+            },
+        ],
+    )
+    .unwrap();
+
+    let reader = BundleReader::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCached,
+    )
+    .unwrap();
+    assert_eq!(reader.manifest().chunks.len(), 3);
+    assert_eq!(reader.manifest().entry(first_id).unwrap().chunk_index, 0);
+    assert_eq!(reader.manifest().entry(second_id).unwrap().chunk_index, 1);
+    assert_eq!(reader.manifest().entry(third_id).unwrap().chunk_index, 2);
+    assert_eq!(
+        reader.chunk_cache_stats(),
+        BundleChunkCacheStats {
+            policy: BundleChunkLoadingPolicy::OnDemandCached,
+            chunks_total: 3,
+            max_decoded_chunks: None,
+            decoded_chunks: 0,
+            cache_hits: 0,
+            cache_misses: 0,
+            cache_evictions: 0,
+            prefetched_chunks: 0,
+            decoded_bytes: 0,
+        }
+    );
+
+    let (bytes, first_report) = reader
+        .read_path_with_report(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(bytes, first);
+    assert_eq!(first_report.chunk_index, 0);
+    assert_eq!(first_report.cache_status, BundleChunkCacheStatus::Miss);
+    assert_eq!(reader.chunk_cache_stats().decoded_chunks, 1);
+    assert_eq!(reader.chunk_cache_stats().cache_misses, 1);
+
+    let (_, first_again_report) = reader
+        .read_path_with_report(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(first_again_report.cache_status, BundleChunkCacheStatus::Hit);
+    assert_eq!(reader.chunk_cache_stats().cache_hits, 1);
+
+    let (second_range, second_report) = reader
+        .read_path_range_with_report(&AssetPath::parse("textures/second.texture"), 8, 4)
+        .unwrap();
+    assert_eq!(second_range, second[8..12]);
+    assert_eq!(second_report.chunk_index, 1);
+    assert_eq!(second_report.cache_status, BundleChunkCacheStatus::Miss);
+    assert_eq!(reader.chunk_cache_stats().decoded_chunks, 2);
+
+    let bundle_io = BundleAssetIo::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCached,
+    )
+    .unwrap();
+    let (_, io_report) = bundle_io
+        .read_range_with_report("textures/third.texture", 8, 4)
+        .unwrap();
+    assert_eq!(io_report.chunk_index, 2);
+    assert_eq!(io_report.cache_status, BundleChunkCacheStatus::Miss);
+    assert_eq!(bundle_io.chunk_cache_stats().decoded_chunks, 1);
+}
+
+#[test]
+fn bundle_limited_chunk_cache_prefetches_and_evicts_lru_chunks() {
+    let first = texture_bytes(1, 1, 11);
+    let second = texture_bytes(1, 1, 12);
+    let third = texture_bytes(1, 1, 13);
+    let bundle = BundleWriter::build_bytes_with_options(
+        "limited_cache_textures",
+        BundleBuildOptions::new(CompressionKind::Rle).with_chunk_policy(
+            BundleChunkPartitionPolicy::MaxUncompressedBytes(first.len()),
+        ),
+        vec![
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/first.texture"),
+                bytes: first.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/second.texture"),
+                bytes: second.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/third.texture"),
+                bytes: third.clone(),
+                dependencies: Vec::new(),
+            },
+        ],
+    )
+    .unwrap();
+
+    assert!(matches!(
+        BundleReader::from_bytes_with_loading_policy(
+            &bundle,
+            BundleChunkLoadingPolicy::OnDemandCachedLimited {
+                max_decoded_chunks: 0,
+            },
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("max decoded chunks")
+    ));
+
+    let reader = BundleReader::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(reader.chunk_cache_stats().max_decoded_chunks, Some(1));
+
+    let first_prefetch = reader
+        .prefetch_path(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(first_prefetch.decoded_chunks, vec![0]);
+    assert!(first_prefetch.evicted_chunks.is_empty());
+    assert_eq!(reader.chunk_cache_stats().decoded_chunks, 1);
+    assert_eq!(reader.chunk_cache_stats().prefetched_chunks, 1);
+
+    let second_prefetch = reader.prefetch_chunk(1).unwrap();
+    assert_eq!(second_prefetch.decoded_chunks, vec![1]);
+    assert_eq!(second_prefetch.evicted_chunks, vec![0]);
+    let stats = reader.chunk_cache_stats();
+    assert_eq!(stats.decoded_chunks, 1);
+    assert_eq!(stats.cache_misses, 2);
+    assert_eq!(stats.cache_evictions, 1);
+    assert_eq!(stats.prefetched_chunks, 2);
+
+    let (_, first_report) = reader
+        .read_path_with_report(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(first_report.cache_status, BundleChunkCacheStatus::Miss);
+    assert_eq!(reader.chunk_cache_stats().cache_evictions, 2);
+    let (_, first_again_report) = reader
+        .read_path_with_report(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(first_again_report.cache_status, BundleChunkCacheStatus::Hit);
+    assert_eq!(reader.chunk_cache_stats().decoded_chunks, 1);
+
+    let bundle_io = BundleAssetIo::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 2,
+        },
+    )
+    .unwrap();
+    let prefetch = bundle_io
+        .prefetch_paths(&["textures/first.texture", "textures/second.texture"])
+        .unwrap();
+    assert_eq!(prefetch.cache_misses, 2);
+    assert_eq!(prefetch.decoded_chunks, vec![0, 1]);
+    assert!(prefetch.evicted_chunks.is_empty());
+    let third_prefetch = bundle_io.prefetch_path("textures/third.texture").unwrap();
+    assert_eq!(third_prefetch.decoded_chunks, vec![2]);
+    assert_eq!(third_prefetch.evicted_chunks, vec![0]);
+    let stats = bundle_io.chunk_cache_stats();
+    assert_eq!(stats.decoded_chunks, 2);
+    assert_eq!(stats.cache_evictions, 1);
+    assert_eq!(stats.prefetched_chunks, 3);
+}
+
+#[test]
+fn bundle_reader_reports_corrupted_rle_chunks() {
+    let bundle =
+        b"NGA_BUNDLE_V2\nname=bad_rle\ncompression=rle\nchunks=1\nchunk|0|0|1|4|rle|1\nentries=0\nDATA\nx";
+
+    assert!(matches!(
+        BundleReader::from_bytes(bundle),
+        Err(AssetError::Bundle { message })
+            if message.contains("rle bundle chunk 0")
+                && message.contains("truncated run")
+    ));
+}
+
+#[test]
+fn bundle_writer_writes_file_and_returns_manifest() {
+    let path = temp_file("bundle_write_file", "bundle");
+    let _ = std::fs::remove_file(&path);
+    let shader_id = AssetId::new();
+    let texture_id = AssetId::new();
+    let bytes = texture_bytes(2, 2, 13);
+
+    let manifest = BundleWriter::write_file(
+        &path,
+        "persisted_textures",
+        CompressionKind::None,
+        vec![BundleAsset {
+            id: texture_id,
+            asset_type: AssetTypeId::of::<Texture>(),
+            path: AssetPath::parse("textures/persisted.texture"),
+            bytes: bytes.clone(),
+            dependencies: vec![shader_id],
+        }],
+    )
+    .unwrap();
+
+    assert_eq!(manifest.name, "persisted_textures");
+    assert_eq!(
+        manifest.dependencies(texture_id),
+        Some([shader_id].as_slice())
+    );
+    let file_bytes = std::fs::read(&path).unwrap();
+    let reader = BundleReader::from_bytes(&file_bytes).unwrap();
+    assert_eq!(
+        reader
+            .read_path(&AssetPath::parse("textures/persisted.texture"))
+            .unwrap(),
+        bytes
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn bundle_asset_io_supports_read_range_metadata_list_and_missing_entry_errors() {
+    let bytes = texture_bytes(1, 1, 12);
+    let (_id, bundle) = texture_bundle("textures/albedo.texture", bytes.clone());
+    let io = BundleAssetIo::from_bytes(&bundle).unwrap();
+
+    assert!(io.exists("textures/albedo.texture"));
+    assert_eq!(io.read("textures/albedo.texture").unwrap(), bytes);
+    assert_eq!(
+        io.read_range("textures/albedo.texture", 0, 4).unwrap(),
+        bytes[0..4]
+    );
+    let metadata = io.metadata("textures/albedo.texture").unwrap();
+    assert_eq!(metadata.size, bytes.len() as u64);
+    assert!(metadata.hash.is_some());
+    assert_eq!(
+        io.list("textures").unwrap(),
+        vec!["textures/albedo.texture"]
+    );
+    let missing_error = io.read("textures/missing.texture").unwrap_err();
+    assert!(matches!(missing_error, AssetIoError::NotFound { .. }));
+    assert_eq!(missing_error.path(), "textures/missing.texture");
+    assert_eq!(missing_error.action(), AssetIoAction::Read);
+}
+
+#[test]
+fn composite_asset_io_uses_first_matching_layer_as_override() {
+    let base_bytes = texture_bytes(1, 1, 1);
+    let override_bytes = texture_bytes(1, 1, 9);
+    let (_id, bundle) = texture_bundle("textures/albedo.texture", base_bytes);
+    let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    let source_io = MemoryAssetIo::new()
+        .with_file("textures/albedo.texture", override_bytes.clone())
+        .with_file("textures/source_only.texture", texture_bytes(1, 1, 2));
+    let composite = CompositeAssetIo::new()
+        .with_layer(source_io)
+        .with_layer(bundle_io);
+
+    assert_eq!(
+        composite.read("textures/albedo.texture").unwrap(),
+        override_bytes
+    );
+    assert!(composite.exists("textures/source_only.texture"));
+    assert_eq!(
+        composite.layers(),
+        vec![
+            AssetIoLayerInfo::new("layer_0", AssetIoLayerKind::Custom, 0),
+            AssetIoLayerInfo::new("layer_1", AssetIoLayerKind::Custom, 1),
+        ]
+    );
+    let list = composite.list("textures").unwrap();
+    assert_eq!(
+        list,
+        vec!["textures/albedo.texture", "textures/source_only.texture"]
+    );
+}
+
+#[test]
+fn composite_asset_io_reports_named_source_mod_patch_bundle_precedence() {
+    let source_bytes = texture_bytes(1, 1, 10);
+    let mod_bytes = texture_bytes(1, 1, 20);
+    let mod_only_bytes = texture_bytes(1, 1, 21);
+    let patch_bytes = texture_bytes(1, 1, 30);
+    let base_only_bytes = texture_bytes(1, 1, 40);
+    let base_bundle = texture_bundle_io(
+        "base_textures",
+        vec![
+            ("textures/albedo.texture", texture_bytes(1, 1, 1)),
+            ("textures/base_only.texture", base_only_bytes.clone()),
+        ],
+    );
+    let patch_io = MemoryAssetIo::new()
+        .with_file("textures/albedo.texture", patch_bytes.clone())
+        .with_file("textures/patch_only.texture", texture_bytes(1, 1, 31));
+    let mod_io = MemoryAssetIo::new()
+        .with_file("textures/albedo.texture", mod_bytes.clone())
+        .with_file("textures/mod_only.texture", mod_only_bytes.clone());
+    let source_io = MemoryAssetIo::new().with_file("textures/albedo.texture", source_bytes.clone());
+    let composite = CompositeAssetIo::new()
+        .with_named_layer("source", AssetIoLayerKind::Source, source_io)
+        .with_named_layer("mod:hires", AssetIoLayerKind::Mod, mod_io)
+        .with_named_layer("patch:day0", AssetIoLayerKind::Patch, patch_io)
+        .with_named_layer("base_bundle", AssetIoLayerKind::BaseBundle, base_bundle);
+
+    let (bytes, resolution) = composite
+        .read_with_diagnostics("textures/albedo.texture")
+        .unwrap();
+    assert_eq!(bytes, source_bytes);
+    assert_eq!(
+        resolution.layer,
+        AssetIoLayerInfo::new("source", AssetIoLayerKind::Source, 0)
+    );
+
+    let (bytes, resolution) = composite
+        .read_with_diagnostics("textures/mod_only.texture")
+        .unwrap();
+    assert_eq!(bytes, mod_only_bytes);
+    assert_eq!(resolution.layer.name, "mod:hires");
+    assert_eq!(resolution.layer.kind, AssetIoLayerKind::Mod);
+
+    let (metadata, resolution) = composite
+        .metadata_with_diagnostics("textures/base_only.texture")
+        .unwrap();
+    assert_eq!(metadata.size, base_only_bytes.len() as u64);
+    assert_eq!(resolution.layer.name, "base_bundle");
+    assert_eq!(resolution.layer.kind, AssetIoLayerKind::BaseBundle);
+
+    let resolution = composite.resolve("textures/patch_only.texture").unwrap();
+    assert_eq!(resolution.layer.name, "patch:day0");
+    assert_eq!(resolution.layer.priority, 2);
+    assert!(composite.resolve("textures/missing.texture").is_none());
+}
+
+#[test]
+fn composite_asset_io_list_diagnostics_deduplicate_shadowed_paths_across_layers() {
+    let base_bundle = texture_bundle_io(
+        "base_textures",
+        vec![
+            ("textures/albedo.texture", texture_bytes(1, 1, 1)),
+            ("textures/base_only.texture", texture_bytes(1, 1, 2)),
+            ("textures/patch_only.texture", texture_bytes(1, 1, 3)),
+        ],
+    );
+    let patch_io = MemoryAssetIo::new()
+        .with_file("textures/albedo.texture", texture_bytes(1, 1, 30))
+        .with_file("textures/patch_only.texture", texture_bytes(1, 1, 31));
+    let mod_io = MemoryAssetIo::new()
+        .with_file("textures/patch_only.texture", texture_bytes(1, 1, 20))
+        .with_file("textures/mod_only.texture", texture_bytes(1, 1, 21));
+    let source_io =
+        MemoryAssetIo::new().with_file("textures/source_only.texture", texture_bytes(1, 1, 10));
+    let composite = CompositeAssetIo::new()
+        .with_named_layer("source", AssetIoLayerKind::Source, source_io)
+        .with_named_layer("mod", AssetIoLayerKind::Mod, mod_io)
+        .with_named_layer("patch", AssetIoLayerKind::Patch, patch_io)
+        .with_named_layer("base_bundle", AssetIoLayerKind::BaseBundle, base_bundle);
+
+    let entries = composite.list_with_diagnostics("textures").unwrap();
+    let served_by = entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.path.as_str(),
+                entry.layer.name.as_str(),
+                entry.layer.kind,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        served_by,
+        vec![
+            ("textures/albedo.texture", "patch", AssetIoLayerKind::Patch,),
+            (
+                "textures/base_only.texture",
+                "base_bundle",
+                AssetIoLayerKind::BaseBundle,
+            ),
+            ("textures/mod_only.texture", "mod", AssetIoLayerKind::Mod),
+            ("textures/patch_only.texture", "mod", AssetIoLayerKind::Mod),
+            (
+                "textures/source_only.texture",
+                "source",
+                AssetIoLayerKind::Source,
+            ),
+        ]
+    );
+    assert_eq!(
+        composite.list("textures").unwrap(),
+        served_by
+            .iter()
+            .map(|(path, _, _)| (*path).to_owned())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn asset_package_registry_persists_order_enabled_state_and_reports_conflicts() {
+    let base_albedo = texture_bytes(1, 1, 1);
+    let patch_albedo = texture_bytes(1, 1, 2);
+    let mod_albedo = texture_bytes(1, 1, 3);
+    let mod_only = texture_bytes(1, 1, 4);
+    let disabled_albedo = texture_bytes(1, 1, 99);
+
+    let (base, base_bundle, _) = texture_package(
+        "base",
+        AssetIoLayerKind::BaseBundle,
+        30,
+        BundleId(30),
+        "packages/base.nga_bundle",
+        vec![
+            ("textures/albedo.texture", base_albedo),
+            ("textures/base_only.texture", texture_bytes(1, 1, 10)),
+        ],
+    );
+    let (patch, patch_bundle, _) = texture_package(
+        "patch_day0",
+        AssetIoLayerKind::Patch,
+        20,
+        BundleId(20),
+        "packages/patch_day0.nga_bundle",
+        vec![
+            ("textures/albedo.texture", patch_albedo),
+            ("textures/patch_only.texture", texture_bytes(1, 1, 20)),
+        ],
+    );
+    let (package_mod, mod_bundle, _) = texture_package(
+        "mod_hires",
+        AssetIoLayerKind::Mod,
+        10,
+        BundleId(10),
+        "packages/mod_hires.nga_bundle",
+        vec![
+            ("textures/albedo.texture", mod_albedo.clone()),
+            ("textures/mod_only.texture", mod_only.clone()),
+        ],
+    );
+    let (mut disabled, _disabled_bundle, _) = texture_package(
+        "disabled_mod",
+        AssetIoLayerKind::Mod,
+        0,
+        BundleId(40),
+        "packages/disabled.nga_bundle",
+        vec![("textures/albedo.texture", disabled_albedo)],
+    );
+    disabled.enabled = false;
+
+    let registry = AssetPackageRegistry::new(vec![
+        base.clone(),
+        disabled.clone(),
+        patch.clone(),
+        package_mod,
+    ])
+    .unwrap();
+    assert_eq!(
+        registry
+            .packages()
+            .iter()
+            .map(|package| package.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["disabled_mod", "mod_hires", "patch_day0", "base"]
+    );
+    assert_eq!(registry.enabled_packages().count(), 3);
+
+    let text = registry.to_text();
+    let restored = AssetPackageRegistry::from_text(&text).unwrap();
+    assert_eq!(restored, registry);
+
+    let report = restored.conflict_report();
+    assert!(report.has_conflicts());
+    assert_eq!(report.conflicts.len(), 1);
+    let conflict = &report.conflicts[0];
+    assert_eq!(conflict.path, AssetPath::parse("textures/albedo.texture"));
+    assert_eq!(conflict.winner.name, "mod_hires");
+    assert_eq!(conflict.winner.kind, AssetIoLayerKind::Mod);
+    assert_eq!(
+        conflict
+            .shadowed
+            .iter()
+            .map(|layer| (layer.name.as_str(), layer.kind))
+            .collect::<Vec<_>>(),
+        vec![
+            ("patch_day0", AssetIoLayerKind::Patch),
+            ("base", AssetIoLayerKind::BaseBundle),
+        ]
+    );
+
+    let bundles = std::collections::HashMap::from([
+        ("packages/base.nga_bundle".to_owned(), base_bundle),
+        ("packages/patch_day0.nga_bundle".to_owned(), patch_bundle),
+        ("packages/mod_hires.nga_bundle".to_owned(), mod_bundle),
+    ]);
+    let composite = restored
+        .build_composite_io(|package| {
+            bundles
+                .get(&package.bundle_path)
+                .cloned()
+                .ok_or_else(|| AssetError::Bundle {
+                    message: format!("missing package payload `{}`", package.bundle_path),
+                })
+        })
+        .unwrap();
+
+    let (bytes, resolution) = composite
+        .read_with_diagnostics("textures/albedo.texture")
+        .unwrap();
+    assert_eq!(bytes, mod_albedo);
+    assert_eq!(resolution.layer.name, "mod_hires");
+    assert_eq!(resolution.layer.kind, AssetIoLayerKind::Mod);
+    assert_eq!(
+        composite
+            .read_with_diagnostics("textures/mod_only.texture")
+            .unwrap()
+            .0,
+        mod_only
+    );
+    assert!(composite
+        .resolve("textures/disabled_only.texture")
+        .is_none());
+}
+
+#[test]
+fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
+    assert!(matches!(
+        AssetPackageRegistry::from_text("not a package registry"),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package registry header")
+    ));
+    assert!(matches!(
+        AssetPackageRegistry::from_text(
+            "NGA_ASSET_PACKAGE_REGISTRY_V1\npackages=1\npackage|1|0|true|patch|patch|packages/patch.nga_bundle|2\nNGA_BUNDLE_V2"
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("manifest is truncated")
+    ));
+
+    let (valid, _valid_bundle, _) = texture_package(
+        "valid",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(1),
+        "packages/valid.nga_bundle",
+        vec![("textures/valid.texture", texture_bytes(1, 1, 1))],
+    );
+    let (mut duplicate_name, _duplicate_bundle, _) = texture_package(
+        "valid",
+        AssetIoLayerKind::Mod,
+        1,
+        BundleId(2),
+        "packages/duplicate.nga_bundle",
+        vec![("textures/other.texture", texture_bytes(1, 1, 2))],
+    );
+    duplicate_name.name = valid.name.clone();
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![valid.clone(), duplicate_name]),
+        Err(AssetError::Bundle { message }) if message.contains("duplicate asset package name")
+    ));
+    let mut duplicate_id = valid.clone();
+    duplicate_id.name = "duplicate_id".to_owned();
+    duplicate_id.priority = 1;
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![valid.clone(), duplicate_id]),
+        Err(AssetError::Bundle { message }) if message.contains("duplicate asset package bundle id")
+    ));
+    let mut duplicate_priority = valid.clone();
+    duplicate_priority.name = "duplicate_priority".to_owned();
+    duplicate_priority.bundle_id = BundleId(22);
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![valid.clone(), duplicate_priority]),
+        Err(AssetError::Bundle { message }) if message.contains("duplicate asset package priority")
+    ));
+    let mut empty_path = valid.clone();
+    empty_path.name = "empty_path".to_owned();
+    empty_path.bundle_id = BundleId(23);
+    empty_path.priority = 23;
+    empty_path.bundle_path.clear();
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![empty_path]),
+        Err(AssetError::Bundle { message }) if message.contains("bundle path cannot be empty")
+    ));
+    let mut duplicate_manifest = valid.manifest.clone();
+    duplicate_manifest
+        .entries
+        .push(duplicate_manifest.entries[0].clone());
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![AssetPackageRecord::new(
+            BundleId(24),
+            "duplicate_manifest",
+            AssetIoLayerKind::Patch,
+            24,
+            true,
+            "packages/duplicate_manifest.nga_bundle",
+            duplicate_manifest,
+        )]),
+        Err(AssetError::Bundle { message }) if message.contains("manifest has duplicate path")
+    ));
+    let invalid_kind_text = AssetPackageRegistry::new(vec![valid.clone()])
+        .unwrap()
+        .to_text()
+        .replace("|patch|", "|invalid_kind|");
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_kind_text),
+        Err(AssetError::Bundle { message }) if message.contains("unknown asset package layer kind")
+    ));
+
+    let (other, other_bundle, _) = texture_package(
+        "other",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(3),
+        "packages/other.nga_bundle",
+        vec![("textures/other.texture", texture_bytes(1, 1, 3))],
+    );
+    let registry = AssetPackageRegistry::new(vec![valid]).unwrap();
+    assert!(matches!(
+        registry.build_composite_io(|_| Ok(other_bundle.clone())),
+        Err(AssetError::Bundle { message }) if message.contains("payload manifest does not match")
+    ));
+
+    let missing_registry = AssetPackageRegistry::new(vec![other]).unwrap();
+    assert!(matches!(
+        missing_registry.build_composite_io(|package| Err(AssetError::Bundle {
+            message: format!("missing package payload `{}`", package.bundle_path),
+        })),
+        Err(AssetError::Bundle { message }) if message.contains("missing package payload")
+    ));
+}
+
+#[test]
+fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
+    let root = temp_dir("package_artifacts");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+    let base_albedo = texture_bytes(1, 1, 3);
+    let patch_albedo = texture_bytes(1, 1, 9);
+    let (_base_record, base_bundle, _) = texture_package(
+        "artifact_base",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(10),
+        "unused/base.bundle",
+        vec![
+            ("textures/albedo.texture", base_albedo),
+            ("textures/base_only.texture", texture_bytes(1, 1, 4)),
+        ],
+    );
+    let (_patch_record, patch_bundle, _) = texture_package(
+        "artifact_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(11),
+        "unused/patch.bundle",
+        vec![
+            ("textures/albedo.texture", patch_albedo.clone()),
+            ("textures/patch_only.texture", texture_bytes(1, 1, 10)),
+        ],
+    );
+
+    let base_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(10),
+                "artifact_base",
+                AssetIoLayerKind::BaseBundle,
+                10,
+                "base/artifact_base.bundle",
+            )
+            .with_package_version(2),
+            &base_bundle,
+        )
+        .unwrap();
+    assert!(base_install.artifact_path.exists());
+    assert_eq!(base_install.payload_size, base_bundle.len() as u64);
+    assert_eq!(base_install.payload_hash, content_hash(&base_bundle));
+    assert!(base_install.replaced.is_none());
+
+    let patch_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(11),
+                "artifact_patch",
+                AssetIoLayerKind::Patch,
+                0,
+                "patches/artifact_patch.bundle",
+            ),
+            &patch_bundle,
+        )
+        .unwrap();
+    assert!(patch_install.conflicts.has_conflicts());
+    assert_eq!(
+        registry
+            .packages()
+            .iter()
+            .map(|package| package.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["artifact_patch", "artifact_base"]
+    );
+
+    let report = store.verify_registry(&registry).unwrap();
+    assert!(report.all_available());
+    assert_eq!(report.packages.len(), 2);
+    assert!(report
+        .packages
+        .iter()
+        .all(|status| status.manifest_matches == Some(true)));
+
+    let composite = store.build_composite_io(&registry).unwrap();
+    assert_eq!(
+        composite.read("textures/albedo.texture").unwrap(),
+        patch_albedo
+    );
+    let registry_path = root.join("packages.txt");
+    registry.save_to_file(&registry_path).unwrap();
+    assert_eq!(
+        AssetPackageRegistry::load_from_file(&registry_path).unwrap(),
+        registry
+    );
+
+    let removed = store
+        .remove_package(&mut registry, "artifact_patch", true)
+        .unwrap();
+    assert_eq!(removed.removed.name, "artifact_patch");
+    assert!(removed.artifact_removed);
+    assert!(!removed.artifact_path.exists());
+    assert!(!removed.conflicts.has_conflicts());
+    assert_eq!(registry.packages().len(), 1);
+    assert!(store.verify_registry(&registry).unwrap().all_available());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payloads() {
+    let root = temp_dir("package_artifact_activation");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+    let (base_record_seed, base_bundle, base_ids) = texture_package(
+        "artifact_runtime_base",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(20),
+        "unused/runtime_base.bundle",
+        vec![("textures/runtime_artifact.texture", texture_bytes(1, 1, 5))],
+    );
+    let (patch_record, patch_bundle, _) = texture_package(
+        "artifact_runtime_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(21),
+        "patches/runtime_patch.bundle",
+        vec![("textures/runtime_artifact.texture", texture_bytes(1, 1, 8))],
+    );
+    let base_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                base_record_seed.bundle_id,
+                "artifact_runtime_base",
+                AssetIoLayerKind::BaseBundle,
+                10,
+                "base/runtime_base.bundle",
+            ),
+            &base_bundle,
+        )
+        .unwrap();
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(store.build_composite_io(&registry).unwrap());
+    server.register_builtin_loaders();
+    let activation = server
+        .activate_asset_package_registry_from_artifacts(
+            registry.clone(),
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        )
+        .unwrap();
+    let group = server.preload_bundle(&activation.mounted_bundles[0]);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(51))),
+    );
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let handle = Handle::<Texture>::strong(base_ids[0]);
+    assert!(server.is_ready(&handle));
+
+    let missing_patch = AssetPackageRecord::new(
+        patch_record.bundle_id,
+        "artifact_runtime_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        true,
+        "patches/runtime_patch.bundle",
+        patch_record.manifest.clone(),
+    );
+    let missing_registry =
+        AssetPackageRegistry::new(vec![missing_patch.clone(), base_install.record.clone()])
+            .unwrap();
+    let missing_report = server
+        .verify_asset_package_artifacts(&missing_registry, &root)
+        .unwrap();
+    assert!(!missing_report.all_available());
+    assert!(missing_report
+        .packages
+        .iter()
+        .any(|status| status.package == "artifact_runtime_patch"
+            && status.message.as_deref() == Some("artifact file is missing")));
+    assert!(matches!(
+        server.activate_asset_package_registry_from_artifacts(
+            missing_registry.clone(),
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("artifact_runtime_patch")
+    ));
+    assert!(server.mounted_bundle(patch_record.bundle_id).is_none());
+    assert_eq!(server.asset_package_registry().packages().len(), 1);
+    assert!(server.is_ready(&handle));
+
+    let patch_artifact = store.artifact_path_for_record(&missing_patch).unwrap();
+    std::fs::create_dir_all(patch_artifact.parent().unwrap()).unwrap();
+    std::fs::write(&patch_artifact, &base_bundle).unwrap();
+    let mismatch_report = store.verify_registry(&missing_registry).unwrap();
+    let patch_status = mismatch_report
+        .packages
+        .iter()
+        .find(|status| status.package == "artifact_runtime_patch")
+        .unwrap();
+    assert_eq!(patch_status.manifest_matches, Some(false));
+    assert!(matches!(
+        mismatch_report.require_available(),
+        Err(AssetError::Bundle { message }) if message.contains("manifest")
+    ));
+    assert!(matches!(
+        server.activate_asset_package_registry_from_artifacts(
+            missing_registry,
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("manifest")
+    ));
+    assert!(server.mounted_bundle(patch_record.bundle_id).is_none());
+    assert!(server.is_ready(&handle));
+
+    std::fs::write(&patch_artifact, &patch_bundle).unwrap();
+    assert!(store
+        .verify_registry(
+            &AssetPackageRegistry::new(vec![missing_patch, base_install.record]).unwrap()
+        )
+        .unwrap()
+        .all_available());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn asset_package_update_policy_reports_version_changes_and_v1_compatibility() {
+    let (current_base, _base_bundle, _) = texture_package(
+        "base_versioned",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(10),
+        "packages/base_versioned.nga_bundle",
+        vec![("textures/base_versioned.texture", texture_bytes(1, 1, 1))],
+    );
+    let current_base = current_base.with_package_version(2);
+    let current = AssetPackageRegistry::new(vec![current_base.clone()]).unwrap();
+
+    let downgraded_base = current_base.clone().with_package_version(1);
+    let (future_patch, _future_bundle, _) = texture_package(
+        "future_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(11),
+        "packages/future_patch.nga_bundle",
+        vec![("textures/future.texture", texture_bytes(1, 1, 2))],
+    );
+    let future_patch = future_patch.with_minimum_runtime_version(2);
+    let next = AssetPackageRegistry::new(vec![future_patch.clone(), downgraded_base]).unwrap();
+
+    let report = current
+        .update_report(&next, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(!report.is_compatible());
+    assert_eq!(report.added[0].name, "future_patch");
+    assert_eq!(report.updated[0].name, "base_versioned");
+    assert_eq!(
+        report
+            .compatibility_issues
+            .iter()
+            .map(|issue| issue.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            AssetPackageCompatibilityIssueKind::RuntimeTooOld,
+            AssetPackageCompatibilityIssueKind::VersionDowngrade,
+        ]
+    );
+    assert!(matches!(
+        report.require_compatible(),
+        Err(AssetError::Bundle { message }) if message.contains("runtime") || message.contains("downgrade")
+    ));
+
+    let compatible = current
+        .update_report(
+            &next,
+            AssetPackageUpdatePolicy::new(2).with_version_downgrade_allowed(true),
+        )
+        .unwrap();
+    assert!(compatible.is_compatible());
+
+    let v2_text = current.to_text();
+    let v2_lines = v2_text.lines().collect::<Vec<_>>();
+    let v2_package_fields = v2_lines[2].split('|').collect::<Vec<_>>();
+    let manifest_line_count = v2_package_fields[10];
+    let mut v1_lines = vec![
+        "NGA_ASSET_PACKAGE_REGISTRY_V1".to_owned(),
+        "packages=1".to_owned(),
+        format!(
+            "package|{}|{}|{}|{}|{}|{}|{}",
+            current_base.bundle_id.0,
+            current_base.priority,
+            current_base.enabled,
+            "base_bundle",
+            current_base.name,
+            current_base.bundle_path,
+            manifest_line_count
+        ),
+    ];
+    v1_lines.extend(v2_lines[3..].iter().map(|line| (*line).to_owned()));
+    let v1 = AssetPackageRegistry::from_text(&v1_lines.join("\n")).unwrap();
+    assert_eq!(v1.packages()[0].package_version, 1);
+    assert_eq!(v1.packages()[0].minimum_runtime_version, 1);
+}
+
+#[test]
+fn asset_package_dependency_compatibility_reports_missing_and_version_bounds() {
+    let (base, _base_bundle, _) = texture_package(
+        "base_dependency",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(30),
+        "packages/base_dependency.bundle",
+        vec![("textures/base_dependency.texture", texture_bytes(1, 1, 1))],
+    );
+    let base = base.with_package_version(2);
+    let (toolkit, _toolkit_bundle, _) = texture_package(
+        "toolkit_dependency",
+        AssetIoLayerKind::BaseBundle,
+        20,
+        BundleId(31),
+        "packages/toolkit_dependency.bundle",
+        vec![(
+            "textures/toolkit_dependency.texture",
+            texture_bytes(1, 1, 2),
+        )],
+    );
+    let toolkit = toolkit.with_package_version(5);
+    let (patch, _patch_bundle, _) = texture_package(
+        "patch_dependency",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(32),
+        "packages/patch_dependency.bundle",
+        vec![("textures/patch_dependency.texture", texture_bytes(1, 1, 3))],
+    );
+    let patch = patch
+        .with_package_dependency(AssetPackageDependency::new("base_dependency", 3))
+        .with_package_dependency(AssetPackageDependency::new("missing_dependency", 1))
+        .with_package_dependency(
+            AssetPackageDependency::new("toolkit_dependency", 1).with_max_version(4),
+        );
+
+    let current = AssetPackageRegistry::new(vec![base.clone(), toolkit.clone()]).unwrap();
+    let next =
+        AssetPackageRegistry::new(vec![patch.clone(), base.clone(), toolkit.clone()]).unwrap();
+    assert!(next.to_text().starts_with("NGA_ASSET_PACKAGE_REGISTRY_V3"));
+    let restored = AssetPackageRegistry::from_text(&next.to_text()).unwrap();
+    assert_eq!(
+        restored.packages()[0].package_dependencies,
+        patch.package_dependencies
+    );
+
+    let report = current
+        .update_report(&next, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(!report.is_compatible());
+    assert_eq!(
+        report
+            .compatibility_issues
+            .iter()
+            .map(|issue| (&issue.kind, issue.dependency.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                &AssetPackageCompatibilityIssueKind::PackageDependencyTooOld,
+                Some("base_dependency"),
+            ),
+            (
+                &AssetPackageCompatibilityIssueKind::MissingPackageDependency,
+                Some("missing_dependency"),
+            ),
+            (
+                &AssetPackageCompatibilityIssueKind::PackageDependencyTooNew,
+                Some("toolkit_dependency"),
+            ),
+        ]
+    );
+    let old_issue = &report.compatibility_issues[0];
+    assert_eq!(old_issue.dependency_version, Some(2));
+    assert_eq!(old_issue.required_min_version, Some(3));
+    let new_issue = &report.compatibility_issues[2];
+    assert_eq!(new_issue.dependency_version, Some(5));
+    assert_eq!(new_issue.required_max_version, Some(4));
+    assert!(matches!(
+        report.require_compatible(),
+        Err(AssetError::Bundle { message }) if message.contains("base_dependency")
+    ));
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server
+        .activate_asset_package_registry(current.clone(), AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(matches!(
+        server.activate_asset_package_registry(next.clone(), AssetPackageUpdatePolicy::default()),
+        Err(AssetError::Bundle { message }) if message.contains("base_dependency")
+    ));
+    assert_eq!(server.asset_package_registry(), &current);
+
+    let satisfied_patch = patch.clone().with_package_dependencies(vec![
+        AssetPackageDependency::new("base_dependency", 2),
+        AssetPackageDependency::new("toolkit_dependency", 1).with_max_version(5),
+    ]);
+    let satisfied =
+        AssetPackageRegistry::new(vec![satisfied_patch, base.with_package_version(3), toolkit])
+            .unwrap();
+    assert!(current
+        .update_report(&satisfied, AssetPackageUpdatePolicy::default())
+        .unwrap()
+        .is_compatible());
+
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![patch.clone().with_package_dependency(
+            AssetPackageDependency::new("patch_dependency", 1)
+        )]),
+        Err(AssetError::Bundle { message }) if message.contains("cannot depend on itself")
+    ));
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![patch.with_package_dependencies(vec![
+            AssetPackageDependency::new("base_dependency", 4).with_max_version(3)
+        ])]),
+        Err(AssetError::Bundle { message }) if message.contains("max version is lower")
+    ));
+}
+
+#[test]
+fn asset_package_asset_override_report_tracks_semantic_policy_issues() {
+    let base_dependency = AssetId::new();
+    let base_material = AssetId::new();
+    let patch_dependency = AssetId::new();
+    let patch_material = AssetId::new();
+    let material_path = AssetPath::parse("materials/hero.material");
+    let base_material_bytes = b"shader=shaders/base.shader\ntexture.albedo=textures/base.texture\n";
+    let patch_material_bytes =
+        b"shader=shaders/patch.shader\ntexture.albedo=textures/patch.texture\n";
+
+    let (base, _base_bundle) = package_from_assets(
+        "semantic_base",
+        AssetIoLayerKind::BaseBundle,
+        20,
+        BundleId(40),
+        "packages/semantic_base.bundle",
+        vec![
+            BundleAsset {
+                id: base_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/base.texture"),
+                bytes: texture_bytes(1, 1, 4),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: base_material,
+                asset_type: AssetTypeId::of::<Material>(),
+                path: material_path.clone(),
+                bytes: base_material_bytes.to_vec(),
+                dependencies: vec![base_dependency],
+            },
+        ],
+    );
+    let (patch, _patch_bundle) = package_from_assets(
+        "semantic_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(41),
+        "packages/semantic_patch.bundle",
+        vec![
+            BundleAsset {
+                id: patch_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/patch.texture"),
+                bytes: texture_bytes(1, 1, 8),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: patch_material,
+                asset_type: AssetTypeId::of::<Material>(),
+                path: material_path.clone(),
+                bytes: patch_material_bytes.to_vec(),
+                dependencies: vec![patch_dependency],
+            },
+        ],
+    );
+    let current = AssetPackageRegistry::new(vec![base.clone()]).unwrap();
+    let next = AssetPackageRegistry::new(vec![patch.clone(), base.clone()]).unwrap();
+
+    let override_report = next.asset_override_report();
+    assert!(override_report.has_overrides());
+    assert!(override_report.has_issues());
+    assert_eq!(override_report.overrides.len(), 1);
+    let asset_override = &override_report.overrides[0];
+    assert_eq!(asset_override.path, material_path);
+    assert_eq!(asset_override.winner.name, "semantic_patch");
+    assert_eq!(asset_override.shadowed.name, "semantic_base");
+    assert_eq!(asset_override.winner_asset.id, patch_material);
+    assert_eq!(asset_override.shadowed_asset.id, base_material);
+    assert_eq!(
+        asset_override.winner_asset.asset_type,
+        AssetTypeId::of::<Material>()
+    );
+    assert_eq!(
+        asset_override.shadowed_asset.asset_type,
+        AssetTypeId::of::<Material>()
+    );
+    assert_eq!(
+        asset_override.issues,
+        vec![
+            AssetPackageAssetOverrideIssueKind::AssetIdChanged,
+            AssetPackageAssetOverrideIssueKind::ContentHashChanged,
+            AssetPackageAssetOverrideIssueKind::DependenciesChanged,
+            AssetPackageAssetOverrideIssueKind::DependencyProvidersChanged,
+        ]
+    );
+    assert_eq!(
+        asset_override.winner_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_patch")
+    );
+    assert_eq!(
+        asset_override.shadowed_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_base")
+    );
+
+    let default_report = current
+        .update_report(&next, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(default_report.is_compatible());
+    assert_eq!(default_report.asset_overrides, override_report);
+
+    let strict_policy = AssetPackageUpdatePolicy::default()
+        .with_asset_compatibility(AssetPackageAssetCompatibilityPolicy::strict());
+    let strict_report = current.update_report(&next, strict_policy).unwrap();
+    assert!(!strict_report.is_compatible());
+    assert_eq!(
+        strict_report
+            .compatibility_issues
+            .iter()
+            .map(|issue| issue.kind)
+            .collect::<Vec<_>>(),
+        vec![
+            AssetPackageCompatibilityIssueKind::AssetIdChanged,
+            AssetPackageCompatibilityIssueKind::AssetContentHashChanged,
+            AssetPackageCompatibilityIssueKind::AssetDependenciesChanged,
+            AssetPackageCompatibilityIssueKind::AssetDependencyProvidersChanged,
+        ]
+    );
+    assert_eq!(
+        strict_report.compatibility_issues[0]
+            .asset_override
+            .as_ref()
+            .unwrap()
+            .winner_asset
+            .id,
+        patch_material
+    );
+    assert!(matches!(
+        strict_report.require_compatible(),
+        Err(AssetError::Bundle { message })
+            if message.contains("semantic_patch") && message.contains("asset id")
+    ));
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server
+        .activate_asset_package_registry(current.clone(), AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(matches!(
+        server.activate_asset_package_registry(next.clone(), strict_policy),
+        Err(AssetError::Bundle { message })
+            if message.contains("semantic_patch") && message.contains("asset id")
+    ));
+    assert_eq!(server.asset_package_registry(), &current);
+
+    let wrong_type_id = AssetId::new();
+    let (wrong_type_patch, _wrong_type_bundle) = package_from_assets(
+        "semantic_wrong_type_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(42),
+        "packages/semantic_wrong_type_patch.bundle",
+        vec![BundleAsset {
+            id: wrong_type_id,
+            asset_type: AssetTypeId::of::<Shader>(),
+            path: AssetPath::parse("materials/hero.material"),
+            bytes: b"#vertex\n".to_vec(),
+            dependencies: Vec::new(),
+        }],
+    );
+    let wrong_type_next = AssetPackageRegistry::new(vec![wrong_type_patch, base.clone()]).unwrap();
+    let wrong_type_report = current
+        .update_report(&wrong_type_next, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(!wrong_type_report.is_compatible());
+    assert_eq!(
+        wrong_type_report.compatibility_issues[0].kind,
+        AssetPackageCompatibilityIssueKind::AssetTypeChanged
+    );
+    assert!(matches!(
+        server.activate_asset_package_registry(
+            wrong_type_next,
+            AssetPackageUpdatePolicy::default(),
+        ),
+        Err(AssetError::Bundle { message })
+            if message.contains("semantic_wrong_type_patch")
+                && message.contains("asset type")
+    ));
+}
+
+#[test]
+fn asset_server_rejects_incompatible_package_activation_transactionally() {
+    let (base, base_bundle, base_ids) = texture_package(
+        "base_transaction",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(10),
+        "packages/base_transaction.nga_bundle",
+        vec![("textures/transaction.texture", texture_bytes(1, 1, 7))],
+    );
+    let base = base.with_package_version(2);
+    let (patch, _patch_bundle, _) = texture_package(
+        "patch_transaction",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(11),
+        "packages/patch_transaction.nga_bundle",
+        vec![("textures/transaction.texture", texture_bytes(1, 1, 9))],
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    server.register_builtin_loaders();
+    let current = AssetPackageRegistry::new(vec![base.clone()]).unwrap();
+    let mounted = server
+        .activate_asset_package_registry(current, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    let group = server.preload_bundle(&mounted.mounted_bundles[0]);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(41))),
+    );
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let handle = Handle::<Texture>::strong(base_ids[0]);
+    assert!(server.is_ready(&handle));
+
+    let downgraded = base.clone().with_package_version(1);
+    let invalid = AssetPackageRegistry::new(vec![downgraded, patch.clone()]).unwrap();
+    let preview = server
+        .preview_asset_package_update(&invalid, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(!preview.is_compatible());
+    assert!(matches!(
+        server.activate_asset_package_registry(invalid, AssetPackageUpdatePolicy::default()),
+        Err(AssetError::Bundle { message }) if message.contains("incompatible")
+    ));
+    assert_eq!(
+        server.asset_package_registry().packages()[0].name,
+        "base_transaction"
+    );
+    assert_eq!(
+        server.asset_package_registry().packages()[0].package_version,
+        2
+    );
+    assert!(server.mounted_bundle(patch.bundle_id).is_none());
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert!(server.is_ready(&handle));
+
+    let valid = AssetPackageRegistry::new(vec![patch.clone(), base.clone()]).unwrap();
+    let activation = server
+        .activate_asset_package_registry(valid, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(activation.report.is_compatible());
+    assert!(activation.report.conflicts.has_conflicts());
+    assert_eq!(activation.mounted_bundles.len(), 2);
+    assert!(server.mounted_bundle(patch.bundle_id).is_some());
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+}
+
+#[test]
+fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
+    let ready_bytes = texture_bytes(1, 1, 7);
+    let (base, base_bundle, base_ids) = texture_package(
+        "base_runtime",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(10),
+        "packages/base_runtime.nga_bundle",
+        vec![("textures/runtime.texture", ready_bytes.clone())],
+    );
+    let (patch, _patch_bundle, _) = texture_package(
+        "patch_runtime",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(11),
+        "packages/patch_runtime.nga_bundle",
+        vec![("textures/runtime.texture", texture_bytes(1, 1, 9))],
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    server.register_builtin_loaders();
+    let initial = server
+        .restore_asset_package_registry(AssetPackageRegistry::new(vec![base.clone()]).unwrap())
+        .unwrap();
+    let group = server.preload_bundle(&initial[0]);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(31))),
+    );
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let handle = Handle::<Texture>::strong(base_ids[0]);
+    assert!(server.is_ready(&handle));
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+
+    let registry = AssetPackageRegistry::new(vec![patch.clone(), base.clone()]).unwrap();
+    let mounted = server.restore_asset_package_registry(registry).unwrap();
+    assert_eq!(mounted.len(), 2);
+    assert_eq!(server.asset_package_registry().packages().len(), 2);
+    assert!(server.mounted_bundle(patch.bundle_id).is_some());
+    assert!(server.mounted_bundle(base.bundle_id).is_some());
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert_eq!(server.get(&handle).unwrap().width, 1);
+
+    let mut disabled_patch = patch.clone();
+    disabled_patch.enabled = false;
+    let reloaded = AssetPackageRegistry::new(vec![disabled_patch, base.clone()]).unwrap();
+    let remounted = server.restore_asset_package_registry(reloaded).unwrap();
+    assert_eq!(remounted.len(), 1);
+    assert!(server.mounted_bundle(patch.bundle_id).is_none());
+    assert!(server.mounted_bundle(base.bundle_id).is_some());
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+}
+
+#[test]
+fn asset_server_loads_texture_from_bundle_io() {
+    let (id, bundle) = texture_bundle("textures/albedo.texture", texture_bytes(2, 1, 5));
+    let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    assert_eq!(
+        bundle_io
+            .manifest()
+            .entry_by_path(&AssetPath::parse("textures/albedo.texture"))
+            .unwrap()
+            .id,
+        id
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let texture: Handle<Texture> = server.load("textures/albedo.texture");
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(1))),
+    );
+
+    assert!(server.is_ready(&texture));
+    assert_eq!(server.get(&texture).unwrap().width, 2);
+}
+
+#[test]
+fn asset_server_mounts_preloads_and_unmounts_bundle_manifest() {
+    let (id, bundle) = texture_bundle("textures/preload.texture", texture_bytes(1, 2, 8));
+    let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle).unwrap();
+    assert_eq!(server.mounted_bundle(mounted.id).unwrap().name, "textures");
+
+    let group = server.preload_bundle(&mounted);
+    assert_eq!(group.assets.len(), 1);
+    assert_eq!(group.assets[0].id(), id);
+    assert_eq!(
+        server.path_from_id(id),
+        Some(&AssetPath::parse("textures/preload.texture"))
+    );
+
+    server.update_loading();
+    assert_eq!(server.state_by_id(id), AssetLoadState::UploadingGpu);
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(11))),
+    );
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+
+    let removed = server.unmount_bundle(mounted.id).unwrap();
+    assert_eq!(removed.id, mounted.id);
+    assert!(server.mounted_bundle(mounted.id).is_none());
+    assert_eq!(server.state_by_id(id), AssetLoadState::Ready);
+}
+
+#[test]
+fn mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount() {
+    let path = temp_file("mounted_bundle_registry", "txt");
+    let _ = std::fs::remove_file(&path);
+    let shader_id = AssetId::new();
+    let texture_id = AssetId::new();
+    let bundle = BundleWriter::build_bytes(
+        "registry_textures",
+        CompressionKind::None,
+        vec![BundleAsset {
+            id: texture_id,
+            asset_type: AssetTypeId::of::<Texture>(),
+            path: AssetPath::parse("textures/registry.texture"),
+            bytes: texture_bytes(1, 1, 17),
+            dependencies: vec![shader_id],
+        }],
+    )
+    .unwrap();
+    let entry_hash = BundleReader::from_bytes(&bundle)
+        .unwrap()
+        .manifest()
+        .entry(texture_id)
+        .unwrap()
+        .content_hash;
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    let mounted = server.mount_bundle_bytes(&bundle).unwrap();
+    server.save_mounted_bundle_registry(&path).unwrap();
+
+    let snapshot = MountedBundleRegistry::load_from_file(&path).unwrap();
+    assert_eq!(snapshot.bundles().len(), 1);
+    let snapshot_bundle = &snapshot.bundles()[0];
+    assert_eq!(snapshot_bundle.id, mounted.id);
+    assert_eq!(snapshot_bundle.name, "registry_textures");
+    let snapshot_entry = snapshot_bundle.manifest.entry(texture_id).unwrap();
+    assert_eq!(
+        snapshot_entry.path,
+        Some(AssetPath::parse("textures/registry.texture"))
+    );
+    assert_eq!(snapshot_entry.content_hash, entry_hash);
+    assert_eq!(snapshot_entry.dependencies, vec![shader_id]);
+
+    let mut restored_server = AssetServer::new(AssetServerConfig::default());
+    restored_server.set_io(BundleAssetIo::from_bytes(&bundle).unwrap());
+    restored_server.register_builtin_loaders();
+    let restored = restored_server.load_mounted_bundle_registry(&path).unwrap();
+    assert_eq!(restored, snapshot.bundles());
+    assert!(restored_server.mounted_bundle(mounted.id).is_some());
+
+    let remounted = restored_server.mounted_bundle(mounted.id).unwrap().clone();
+    let group = restored_server.preload_bundle(&remounted);
+    let metadata = restored_server.metadata(texture_id).unwrap();
+    assert_eq!(
+        metadata.path,
+        Some(AssetPath::parse("textures/registry.texture"))
+    );
+    assert_eq!(metadata.cooked_hash, Some(entry_hash));
+    assert_eq!(metadata.dependencies, vec![shader_id]);
+
+    restored_server.update_loading();
+    let uploads = restored_server.drain_gpu_uploads().collect::<Vec<_>>();
+    restored_server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(21))),
+    );
+    assert_eq!(restored_server.group_state(&group), AssetLoadState::Ready);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn asset_server_reports_invalid_bundle_mount_errors() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    let error = server.mount_bundle_bytes(b"not a bundle").unwrap_err();
+
+    assert!(matches!(error, AssetError::Bundle { .. }));
+    assert!(matches!(
+        server.unmount_bundle(BundleId(999)),
+        Err(AssetError::Bundle { .. })
+    ));
+}

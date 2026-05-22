@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "Asset/engine_asset",
     "Physics/engine_physics",
     "Graphics/engine_graphics",
     "Graphics/graphics_wgpu",
@@ -16,5 +17,6 @@ members = [
     "examples/render_feature_showcase",
     "examples/physics_showcase",
     "examples/physics_render_window",
+    "examples/asset_smoke",
 ]
 resolver = "2"

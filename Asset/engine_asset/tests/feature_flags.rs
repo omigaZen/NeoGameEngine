@@ -1,0 +1,498 @@
+use engine_asset::prelude::*;
+
+fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend(std::iter::repeat(value).take(width as usize * height as usize * 4));
+    bytes
+}
+
+fn database_config(name: &str) -> AssetDatabaseConfig {
+    let root = std::env::temp_dir()
+        .join("engine_asset_feature_flags")
+        .join(name);
+    AssetDatabaseConfig {
+        source_root: root.join("source"),
+        imported_root: root.join("imported"),
+        cooked_root: root.join("cooked"),
+        registry_path: root.join("asset_registry.txt"),
+    }
+}
+
+#[cfg(not(feature = "async_loading"))]
+#[test]
+fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    assert!(!asset_feature_status(AssetFeature::AsyncLoading).enabled);
+    assert_eq!(
+        server.set_async_loading_enabled(true),
+        Err(AssetError::Unsupported(
+            "asset async_loading feature is disabled"
+        ))
+    );
+
+    server.config_mut().enable_async_loading = true;
+    let report = server.loading_policy_report();
+    assert_eq!(report.mode, AssetLoadingExecutionMode::Synchronous);
+    assert_eq!(report.effective_worker_threads, 0);
+    assert_eq!(
+        report.first_error(),
+        Some(&AssetError::Unsupported(
+            "asset async_loading feature is disabled"
+        ))
+    );
+    assert_eq!(
+        server.validate_loading_policy(),
+        Err(AssetError::Unsupported(
+            "asset async_loading feature is disabled"
+        ))
+    );
+}
+
+#[cfg(feature = "async_loading")]
+#[test]
+fn enabled_async_loading_config_reports_worker_execution_mode() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_async_loading_enabled(true).unwrap();
+
+    let report = server.loading_policy_report();
+    assert!(report.async_loading_feature.enabled);
+    assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
+    assert!(report.first_error().is_none());
+    assert!(server.validate_loading_policy().is_ok());
+}
+
+#[cfg(not(feature = "parallel"))]
+#[test]
+fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    assert!(!asset_feature_status(AssetFeature::Parallel).enabled);
+    assert_eq!(
+        server.set_parallel_worker_threads(2),
+        Err(AssetError::Unsupported(
+            "asset parallel feature is disabled"
+        ))
+    );
+
+    server.config_mut().worker_threads = 2;
+    let report = server.loading_policy_report();
+    assert_eq!(report.requested_worker_threads, 2);
+    assert_eq!(report.effective_worker_threads, 0);
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        diagnostic.feature == AssetFeature::Parallel
+            && diagnostic.error
+                == Some(AssetError::Unsupported(
+                    "asset parallel feature is disabled",
+                ))
+    }));
+    assert_eq!(
+        report.require_supported(),
+        Err(AssetError::Unsupported(
+            "asset parallel feature is disabled"
+        ))
+    );
+}
+
+#[cfg(feature = "parallel")]
+#[test]
+fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_parallel_worker_threads(4).unwrap();
+
+    let report = server.loading_policy_report();
+    assert!(report.parallel_feature.enabled);
+    assert_eq!(report.requested_worker_threads, 4);
+    assert_eq!(report.effective_worker_threads, 0);
+    assert!(report.first_error().is_none());
+    assert_eq!(report.mode, AssetLoadingExecutionMode::Synchronous);
+}
+
+#[cfg(all(feature = "async_loading", feature = "parallel"))]
+#[test]
+fn enabled_async_parallel_config_reports_effective_worker_count() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_async_loading_enabled(true).unwrap();
+    server.set_parallel_worker_threads(4).unwrap();
+
+    let report = server.loading_policy_report();
+    assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
+    assert_eq!(report.requested_worker_threads, 4);
+    assert_eq!(report.effective_worker_threads, 4);
+    assert!(report.first_error().is_none());
+}
+
+#[test]
+fn zstd_feature_status_matches_bundle_codec_report() {
+    let status = asset_feature_status(AssetFeature::Zstd);
+    let report = BundleCompressionCodecReport::for_compression(CompressionKind::Zstd);
+    assert_eq!(status.name, "zstd");
+    assert_eq!(status.enabled, report.supported);
+    if status.enabled {
+        assert!(report.reason.is_none());
+        assert!(require_asset_feature(AssetFeature::Zstd).is_ok());
+    } else {
+        assert_eq!(
+            require_asset_feature(AssetFeature::Zstd),
+            Err(AssetError::Unsupported("asset zstd feature is disabled"))
+        );
+        assert!(report.reason.as_deref().unwrap().contains("zstd feature"));
+    }
+}
+
+#[test]
+fn filesystem_feature_gate_matches_filesystem_io_behavior() {
+    let io = FileSystemAssetIo::new(std::env::temp_dir());
+    assert_eq!(
+        asset_feature_status(AssetFeature::Filesystem).enabled,
+        asset_feature_enabled(AssetFeature::Filesystem)
+    );
+
+    if asset_feature_enabled(AssetFeature::Filesystem) {
+        let error = io.read("engine_asset_missing_file.texture").unwrap_err();
+        assert!(matches!(error, AssetIoError::NotFound { .. }));
+        assert_eq!(error.action(), AssetIoAction::Read);
+    } else {
+        assert!(!io.exists("engine_asset_missing_file.texture"));
+        let error = io.read("engine_asset_missing_file.texture").unwrap_err();
+        assert!(matches!(error, AssetIoError::ReadFailed { .. }));
+        assert_eq!(error.action(), AssetIoAction::Read);
+        assert_eq!(error.path(), "engine_asset_missing_file.texture");
+        assert!(error
+            .message()
+            .is_some_and(|message| message.contains("filesystem feature is disabled")));
+
+        let mut server = AssetServer::new(AssetServerConfig::default());
+        server.register_builtin_loaders();
+        let handle: Handle<Texture> = server.load("engine_asset_missing_file.texture");
+        server.update_loading();
+        assert_eq!(server.state(&handle), AssetLoadState::Failed);
+        assert!(matches!(
+            server.error_by_id(handle.id()),
+            Some(AssetError::Io { message })
+                if message.contains("filesystem feature is disabled")
+        ));
+    }
+}
+
+#[test]
+fn importer_feature_gates_match_registration_paths() {
+    let mut database = AssetDatabase::new(database_config("importer_feature_gates"));
+    database
+        .set_io(MemoryAssetIo::new().with_file("textures/albedo.texture", texture_bytes(1, 1, 7)));
+
+    if asset_feature_enabled(AssetFeature::Importers) {
+        database.try_register_builtin_importers().unwrap();
+    } else {
+        assert_eq!(
+            database.try_register_builtin_importers(),
+            Err(AssetError::Unsupported(
+                "asset importers feature is disabled"
+            ))
+        );
+        database.register_builtin_importers();
+    }
+
+    if asset_feature_enabled(AssetFeature::TextureImporter) {
+        let id = database
+            .import_asset_path_with_settings(
+                &AssetPath::parse("textures/albedo.texture"),
+                &ImporterSettings::default(),
+            )
+            .unwrap();
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
+    } else {
+        assert!(matches!(
+            database.import_asset_path_with_settings(
+                &AssetPath::parse("textures/albedo.texture"),
+                &ImporterSettings::default(),
+            ),
+            Err(AssetError::Import { message }) if message.contains("no importer registered")
+        ));
+    }
+}
+
+#[test]
+fn cooker_feature_gates_match_registration_paths() {
+    let mut database = AssetDatabase::new(database_config("cooker_feature_gates"));
+    database
+        .set_io(MemoryAssetIo::new().with_file("textures/albedo.texture", texture_bytes(1, 1, 7)));
+
+    if asset_feature_enabled(AssetFeature::Cookers) {
+        database.try_register_builtin_cookers().unwrap();
+    } else {
+        assert_eq!(
+            database.try_register_builtin_cookers(),
+            Err(AssetError::Unsupported("asset cookers feature is disabled"))
+        );
+        database.register_builtin_cookers();
+    }
+
+    let id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f001);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        id,
+        AssetPath::parse("textures/albedo.texture"),
+        Texture::TYPE_ID,
+    ));
+
+    if asset_feature_enabled(AssetFeature::TextureCooker) {
+        let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+        assert_eq!(output.id, id);
+        assert_eq!(output.bytes, texture_bytes(1, 1, 7));
+    } else {
+        assert!(matches!(
+            database.cook_asset(id, TargetPlatform::Windows),
+            Err(AssetError::Cook { message }) if message.contains("no cooker registered")
+        ));
+    }
+}
+
+#[test]
+fn bundle_feature_entry_points_match_gate() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    let database = AssetDatabase::new(database_config("disabled_bundle_build"));
+    let bundle_build = AssetDatabaseBundleBuild::new("empty", Vec::new());
+    let bundle_registry_path = database_config("disabled_bundle_registry").registry_path;
+
+    if asset_feature_enabled(AssetFeature::Bundle) {
+        assert!(matches!(
+            server.mount_bundle_bytes(b"not a bundle"),
+            Err(AssetError::Bundle { .. })
+        ));
+        assert!(database.build_bundle(&bundle_build).is_ok());
+        assert!(database.build_bundle_bytes(&bundle_build).is_ok());
+    } else {
+        assert_eq!(
+            server.mount_bundle_bytes(b"not a bundle"),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            database.build_bundle(&bundle_build),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            database.build_bundle_bytes(&bundle_build),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.save_mounted_bundle_registry(&bundle_registry_path),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.load_mounted_bundle_registry(&bundle_registry_path),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.restore_asset_package_registry(AssetPackageRegistry::default()),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.preview_asset_package_update(
+                &AssetPackageRegistry::default(),
+                AssetPackageUpdatePolicy::default(),
+            ),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.activate_asset_package_registry(
+                AssetPackageRegistry::default(),
+                AssetPackageUpdatePolicy::default(),
+            ),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.verify_asset_package_artifacts(
+                &AssetPackageRegistry::default(),
+                &bundle_registry_path
+            ),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.activate_asset_package_registry_from_artifacts(
+                AssetPackageRegistry::default(),
+                AssetPackageUpdatePolicy::default(),
+                &bundle_registry_path,
+            ),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.save_asset_package_registry(&bundle_registry_path),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.load_asset_package_registry(&bundle_registry_path),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+        assert_eq!(
+            server.unmount_bundle(BundleId(1)),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
+    }
+}
+
+#[test]
+fn hot_reload_feature_entry_points_match_gate() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    if asset_feature_enabled(AssetFeature::HotReload) {
+        assert!(matches!(
+            server.queue_hot_reload_id(AssetId::new()),
+            Err(AssetError::AssetNotFound { .. })
+        ));
+        assert!(matches!(
+            server.hot_reload_dependency_plan_by_id(
+                AssetId::new(),
+                HotReloadDependencyPolicy::Direct,
+            ),
+            Err(AssetError::AssetNotFound { .. })
+        ));
+    } else {
+        assert_eq!(
+            server.queue_hot_reload_id(AssetId::new()),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.try_queue_hot_reload_path("textures/albedo.texture"),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.watch_hot_reload_path("textures/albedo.texture"),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.watch_hot_reload_path_with_backend(
+                "textures/albedo.texture",
+                HotReloadWatchBackend::AsyncNotification,
+            ),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.start_hot_reload_async_watch_backend(),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.stop_hot_reload_async_watch_backend(),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.notify_hot_reload_async_watch_change("textures/albedo.texture"),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.poll_hot_reload_watches(),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+        assert_eq!(server.hot_reload_watches().count(), 0);
+        assert!(server
+            .hot_reload_watch(&AssetPath::parse("textures/albedo.texture"))
+            .is_none());
+        let hot_reload_report = server.hot_reload_policy_report();
+        assert_eq!(hot_reload_report.watched_paths(), 0);
+        assert_eq!(hot_reload_report.queued_changes(), 0);
+        assert_eq!(
+            hot_reload_report.async_watch.lifecycle,
+            HotReloadAsyncWatchLifecycle::Stopped
+        );
+        assert_eq!(
+            server.hot_reload_async_watch_report(),
+            HotReloadAsyncWatchReport::default()
+        );
+        assert_eq!(
+            server.hot_reload_dependency_plan_by_id(
+                AssetId::new(),
+                HotReloadDependencyPolicy::Direct,
+            ),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
+    }
+}
+
+#[test]
+fn streaming_feature_entry_points_match_gate() {
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    let missing_region = StreamingRegionId(42);
+
+    if asset_feature_enabled(AssetFeature::Streaming) {
+        assert!(server
+            .register_streaming_region_paths("empty", LoadPriority::Low, &[])
+            .is_ok());
+    } else {
+        assert_eq!(
+            server.register_streaming_region_paths("empty", LoadPriority::Low, &[]),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.register_streaming_region_bundle("empty", LoadPriority::Low, BundleId(1)),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.register_streaming_region_bundle_subset(
+                "empty",
+                LoadPriority::Low,
+                BundleId(1),
+                &[]
+            ),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.set_streaming_region_resident(missing_region, true),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert!(matches!(
+            server.preload_streaming_region(missing_region),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        ));
+        assert_eq!(
+            server.unload_streaming_region(missing_region),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.streaming_region_progress(missing_region),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.streaming_region_state(missing_region),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+        assert_eq!(
+            server.remove_streaming_region(missing_region),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
+    }
+}

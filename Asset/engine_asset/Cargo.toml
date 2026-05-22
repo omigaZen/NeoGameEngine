@@ -1,0 +1,58 @@
+[package]
+name = "engine_asset"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = [
+    "filesystem",
+    "serde",
+    "bundle",
+    "hot_reload",
+    "streaming",
+    "editor",
+    "importers",
+    "cookers",
+    "zstd",
+]
+filesystem = []
+bundle = []
+hot_reload = []
+streaming = []
+serde = ["dep:serde"]
+async_loading = []
+editor = ["importers", "cookers"]
+importers = [
+    "texture_importer",
+    "model_importer",
+    "material_importer",
+    "audio_importer",
+    "shader_importer",
+]
+cookers = [
+    "texture_cooker",
+    "model_cooker",
+    "material_cooker",
+    "audio_cooker",
+    "shader_cooker",
+]
+texture_importer = []
+model_importer = []
+material_importer = []
+audio_importer = []
+shader_importer = []
+texture_cooker = []
+model_cooker = []
+material_cooker = []
+audio_cooker = []
+shader_cooker = []
+parallel = []
+zstd = ["dep:ruzstd"]
+
+[dependencies]
+ruzstd = { version = "0.8", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1.0"
