@@ -5,15 +5,18 @@ use graphics_wgpu::{
     wgpu, WgpuFrameReadback, WgpuGraphics, WgpuGraphicsOptions, WgpuSurface, WgpuSurfaceOptions,
 };
 use render_wgpu::{MeshRenderStats, MeshRenderer, WgpuPostProcessOptions, WgpuRenderScene};
+use render_wgpu::WgpuEnvironmentProbe;
 
 use crate::{
     AddressMode, BackendNativePassDrawStats, BackendPreference, BindingClass, BindingType,
-    CompareFunc, DepthFormat, DeviceStatus, FilterMode, FormatCaps, FrameStats, MaterialHandle,
-    MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
-    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig, RendererError,
-    RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc, SamplerHandle,
-    ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages, StorageTextureAccess,
-    TextureDimension, TextureFormat, TextureHandle, VSyncMode, WgpuRhiDevice,
+    CompareFunc, DepthFormat, DeviceStatus, EnvironmentProbeCapture,
+    EnvironmentProbeCaptureDesc, EnvironmentProbeCaptureMip, FilterMode, FormatCaps, FrameStats,
+    MaterialHandle, MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
+    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig,
+    RendererError, RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc,
+    SamplerHandle, ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages,
+    StorageTextureAccess, TextureDimension, TextureFormat, TextureHandle, VSyncMode,
+    WgpuRhiDevice,
 };
 
 #[derive(Clone, Debug)]
@@ -285,6 +288,12 @@ impl WgpuBackendResourceTombstone {
     }
 }
 
+#[derive(Debug)]
+struct WgpuBackendSubmissionCompletion {
+    max_tombstone_submission_order: u64,
+    completion_receiver: std::sync::mpsc::Receiver<()>,
+}
+
 struct WgpuBackendPostPassBufferTombstone {
     vertex_buffers: Vec<WgpuNativePipelinePostPassVertexBuffer>,
     index_buffer: Option<WgpuNativePipelinePostPassIndexBuffer>,
@@ -377,11 +386,15 @@ pub struct WgpuRendererRuntime {
         std::collections::HashMap<PipelineKey, std::sync::Arc<wgpu::RenderPipeline>>,
     backend_resource_tombstones: Vec<WgpuBackendResourceTombstone>,
     backend_resource_retirement_stats: WgpuBackendResourceRetirementStats,
+    backend_submission_completions: Vec<WgpuBackendSubmissionCompletion>,
     material_external_resources: WgpuMaterialExternalResourceRegistry,
     queued_native_pipeline_draws: Vec<WgpuQueuedNativePipelineDraw>,
     last_stats: Option<FrameStats>,
     last_submission_index: Option<wgpu::SubmissionIndex>,
+    last_submission_fence_index: Option<wgpu::SubmissionIndex>,
+    last_submission_fence_order: Option<u64>,
     next_backend_submission_order: u64,
+    latest_completed_submission_order: Option<u64>,
     device_status: DeviceStatus,
     frame_index: u64,
 }
@@ -404,11 +417,15 @@ impl WgpuRendererRuntime {
             native_render_pipeline_objects: std::collections::HashMap::new(),
             backend_resource_tombstones: Vec::new(),
             backend_resource_retirement_stats: WgpuBackendResourceRetirementStats::default(),
+            backend_submission_completions: Vec::new(),
             material_external_resources: WgpuMaterialExternalResourceRegistry::default(),
             queued_native_pipeline_draws: Vec::new(),
             last_stats: None,
             last_submission_index: None,
+            last_submission_fence_index: None,
+            last_submission_fence_order: None,
             next_backend_submission_order: 1,
+            latest_completed_submission_order: None,
             device_status: DeviceStatus::Ok,
             frame_index: 0,
         })
@@ -440,6 +457,13 @@ impl WgpuRendererRuntime {
                 .set_sample_count(config.msaa_samples)
                 .map_err(map_backend_error)?;
         }
+        let runtime_caps = wgpu_renderer_caps(&config, &graphics);
+        validate_surface_runtime_formats(
+            &config,
+            surface.format(),
+            surface.depth_format(),
+            &runtime_caps,
+        )?;
         let renderer = MeshRenderer::new_with_sample_count(
             &graphics,
             surface.format(),
@@ -461,15 +485,68 @@ impl WgpuRendererRuntime {
             native_render_pipeline_objects: std::collections::HashMap::new(),
             backend_resource_tombstones: Vec::new(),
             backend_resource_retirement_stats: WgpuBackendResourceRetirementStats::default(),
+            backend_submission_completions: Vec::new(),
             material_external_resources: WgpuMaterialExternalResourceRegistry::default(),
             queued_native_pipeline_draws: Vec::new(),
             last_stats: None,
             last_submission_index: None,
+            last_submission_fence_index: None,
+            last_submission_fence_order: None,
             next_backend_submission_order: 1,
+            latest_completed_submission_order: None,
             device_status: DeviceStatus::Ok,
             frame_index: 0,
         })
     }
+
+fn validate_surface_runtime_formats(
+    config: &RendererConfig,
+    surface_format: wgpu::TextureFormat,
+    depth_format: Option<wgpu::TextureFormat>,
+    caps: &RendererCaps,
+) -> Result<(), RendererError> {
+    if let Some(requested_surface_format) = config.surface_format {
+        let requested = wgpu_surface_format(requested_surface_format);
+        if requested != surface_format {
+            return Err(RendererError::Validation(format!(
+                "renderer surface_format {:?} does not match runtime surface format {:?}",
+                requested_surface_format, surface_format
+            )));
+        }
+        if !caps.formats.color.contains(&requested_surface_format) {
+            return Err(RendererError::Validation(
+                "renderer surface_format is not supported by runtime capabilities".to_owned(),
+            ));
+        }
+    } else if !caps.formats.color.is_empty() {
+        let actual_surface_format = texture_format_from_wgpu_surface(surface_format)
+            .ok_or_else(|| RendererError::Validation("runtime surface format is unsupported".to_owned()))?;
+        if !caps.formats.color.contains(&actual_surface_format) {
+            return Err(RendererError::Validation(
+                "runtime surface format is not supported by runtime capabilities".to_owned(),
+            ));
+        }
+    }
+
+    let requested_depth_format = wgpu_depth_format(config.depth_format);
+    if depth_format != Some(requested_depth_format) {
+        return Err(RendererError::Validation(format!(
+            "renderer depth_format {:?} does not match runtime depth format {:?}",
+            config.depth_format, depth_format
+        )));
+    }
+    let Some(runtime_depth_format) = depth_format.and_then(depth_format_from_wgpu) else {
+        return Err(RendererError::Validation(
+            "runtime surface depth format is unsupported".to_owned(),
+        ));
+    };
+    if !caps.formats.depth.contains(&runtime_depth_format) {
+        return Err(RendererError::Validation(
+            "renderer depth_format is not supported by runtime capabilities".to_owned(),
+        ));
+    }
+    Ok(())
+}
 
     pub fn graphics(&self) -> &WgpuGraphics {
         &self.graphics
@@ -518,6 +595,98 @@ impl WgpuRendererRuntime {
 
     pub fn render_scene(&mut self, scene: &RenderScene) -> Result<FrameStats, RendererError> {
         self.render_scene_with_post_process_options(scene, WgpuPostProcessOptions::default())
+    }
+
+    pub fn capture_environment_probe(
+        &mut self,
+        scene: &RenderScene,
+        desc: &EnvironmentProbeCaptureDesc,
+    ) -> Result<EnvironmentProbeCapture, RendererError> {
+        if desc.resolution == 0 {
+            return Err(RendererError::Validation(
+                "environment probe capture resolution must be non-zero".to_owned(),
+            ));
+        }
+        if !desc.near.is_finite()
+            || !desc.far.is_finite()
+            || desc.near <= 0.0
+            || desc.far <= desc.near
+        {
+            return Err(RendererError::Validation(
+                "environment probe capture near/far range is invalid".to_owned(),
+            ));
+        }
+        if desc.position.iter().any(|value| !value.is_finite()) {
+            return Err(RendererError::Validation(
+                "environment probe capture position must be finite".to_owned(),
+            ));
+        }
+        if self.renderer.is_none() {
+            let renderer = MeshRenderer::new_with_sample_count(
+                &self.graphics,
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu_depth_format(self.config.depth_format),
+                1,
+            )
+            .map_err(map_backend_error)?;
+            self.renderer = Some(renderer);
+        }
+        let renderer = self
+            .renderer
+            .as_mut()
+            .expect("environment probe capture renderer was initialized");
+        let queue = RenderQueue::from_scene(scene);
+        match &mut self.scene {
+            Some(gpu_scene) => {
+                if let Err(error) = gpu_scene.sync(&self.graphics, renderer, scene, &queue, 1.0) {
+                    return Err(record_backend_error(&mut self.device_status, error));
+                }
+            }
+            None => match WgpuRenderScene::prepare(&self.graphics, renderer, scene, &queue, 1.0) {
+                Ok(scene) => self.scene = Some(scene),
+                Err(error) => return Err(record_backend_error(&mut self.device_status, error)),
+            },
+        }
+        let gpu_scene = self
+            .scene
+            .as_ref()
+            .expect("gpu scene was prepared before environment probe capture");
+        let mut probe = WgpuEnvironmentProbe::new(
+            &self.graphics,
+            desc.resolution,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu_depth_format(self.config.depth_format),
+        )
+        .map_err(map_backend_error)?;
+        let probe_desc = render_wgpu::EnvironmentProbeDesc {
+            position: desc.position,
+            near: desc.near,
+            far: desc.far,
+            clear_color: desc.clear_color,
+        };
+        gpu_scene
+            .capture_environment_probe(renderer, &self.graphics, &mut probe, &queue, probe_desc)
+            .map_err(map_backend_error)?;
+        let baked = probe
+            .bake(&self.graphics, probe_desc, None)
+            .map_err(map_backend_error)?;
+        Ok(EnvironmentProbeCapture {
+            label: desc.label.clone(),
+            position: baked.desc.position,
+            near: baked.desc.near,
+            far: baked.desc.far,
+            resolution: baked.size,
+            mip_levels: baked.mip_level_count,
+            format: TextureFormat::Rgba8Unorm,
+            mips: baked
+                .mips
+                .into_iter()
+                .map(|mip| EnvironmentProbeCaptureMip {
+                    size: mip.size,
+                    faces_rgba8: mip.faces,
+                })
+                .collect(),
+        })
     }
 
     pub fn render_scene_with_post_process_options(
@@ -800,19 +969,32 @@ impl WgpuRendererRuntime {
     pub fn poll_backend_resource_retirements(&mut self) -> WgpuBackendResourceRetirementStats {
         self.clear_backend_retired_this_poll();
         let queue_empty = self.poll_submissions();
+        let mut completed_submission_order = self.latest_completed_submission_order;
+        let (completed_from_trackers, has_active_completion_trackers) =
+            self.poll_submission_completions();
+        if let Some(order) = completed_from_trackers {
+            completed_submission_order = Some(completed_submission_order.unwrap_or(0).max(order));
+        }
+        if queue_empty {
+            if let Some(latest_submission_order) = self.latest_backend_tombstone_submission_order() {
+                completed_submission_order = Some(
+                    completed_submission_order
+                        .unwrap_or(0)
+                        .max(latest_submission_order),
+                );
+            }
+        }
+        self.latest_completed_submission_order = completed_submission_order;
         self.backend_resource_retirement_stats
-            .nonblocking_submission_index_poll_supported = false;
+            .nonblocking_submission_index_poll_supported = has_active_completion_trackers;
         self.backend_resource_retirement_stats
             .queue_empty_poll_fallback = true;
         self.backend_resource_retirement_stats
-            .last_poll_used_queue_empty_fallback = true;
-        let completed_submission_order = queue_empty
-            .then(|| self.latest_backend_tombstone_submission_order())
-            .flatten();
+            .last_poll_used_queue_empty_fallback = queue_empty;
         self.backend_resource_retirement_stats.last_poll_queue_empty = queue_empty;
         self.backend_resource_retirement_stats
-            .last_poll_completed_submission_index_recorded =
-            queue_empty && self.last_submission_index.is_some();
+            .last_poll_completed_submission_index_recorded = completed_submission_order.is_some()
+            || (queue_empty && self.last_submission_index.is_some());
         if queue_empty || completed_submission_order.is_some() {
             self.retire_backend_resource_tombstones(completed_submission_order, queue_empty);
         }
@@ -1052,14 +1234,76 @@ impl WgpuRendererRuntime {
             .last_poll_used_queue_empty_fallback = false;
     }
 
+    fn poll_submission_completions(&mut self) -> (Option<u64>, bool) {
+        let mut completed_submission_order = None;
+        let mut has_active_completion_trackers = false;
+        let mut pending_completions = Vec::new();
+        for completion in std::mem::take(&mut self.backend_submission_completions) {
+            match completion.completion_receiver.try_recv() {
+                Ok(()) => {
+                    completed_submission_order = Some(
+                        completed_submission_order
+                            .unwrap_or(0)
+                            .max(completion.max_tombstone_submission_order),
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    has_active_completion_trackers = true;
+                    pending_completions.push(completion);
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    completed_submission_order = Some(
+                        completed_submission_order
+                            .unwrap_or(0)
+                            .max(completion.max_tombstone_submission_order),
+                    );
+                }
+            }
+        }
+        self.backend_submission_completions = pending_completions;
+        (completed_submission_order, has_active_completion_trackers)
+    }
+
+    fn register_submission_completion_tracker(
+        &mut self,
+        submission_index: wgpu::SubmissionIndex,
+        submission_order: u64,
+    ) {
+        let device = self.graphics.device_handle();
+        let (completion_sender, completion_receiver) = std::sync::mpsc::channel();
+        let wait_index = submission_index.clone();
+        std::thread::spawn(move || {
+            let _ = device.poll(wgpu::Maintain::WaitForSubmissionIndex(wait_index));
+            let _ = completion_sender.send(());
+        });
+        self.backend_submission_completions.push(WgpuBackendSubmissionCompletion {
+            max_tombstone_submission_order: submission_order,
+            completion_receiver,
+        });
+        self.backend_resource_retirement_stats.nonblocking_submission_index_poll_supported = true;
+    }
+
+    fn ensure_submission_fence_order_for_index(&mut self, submission_index: &wgpu::SubmissionIndex) -> u64 {
+        if let Some(last_fence_index) = self.last_submission_fence_index.as_ref() {
+            if last_fence_index == submission_index {
+                if let Some(last_fence_order) = self.last_submission_fence_order {
+                    return last_fence_order;
+                }
+            }
+        }
+        let order = self.next_backend_submission_order;
+        self.next_backend_submission_order = self.next_backend_submission_order.saturating_add(1);
+        self.register_submission_completion_tracker(submission_index.clone(), order);
+        self.last_submission_fence_index = Some(submission_index.clone());
+        self.last_submission_fence_order = Some(order);
+        order
+    }
+
     fn current_backend_fence(&mut self) -> WgpuBackendFence {
         let submission_index = self.last_submission_index.clone();
-        let submission_order = submission_index.as_ref().map(|_| {
-            let order = self.next_backend_submission_order;
-            self.next_backend_submission_order =
-                self.next_backend_submission_order.saturating_add(1);
-            order
-        });
+        let submission_order = submission_index
+            .as_ref()
+            .map(|submission_index| self.ensure_submission_fence_order_for_index(submission_index));
         WgpuBackendFence {
             submission_index,
             submission_order,
@@ -1307,7 +1551,8 @@ impl WgpuRendererRuntime {
             tombstones: self.backend_resource_tombstones.len(),
             ..retired
         };
-        stats.nonblocking_submission_index_poll_supported = false;
+        stats.nonblocking_submission_index_poll_supported =
+            self.backend_resource_retirement_stats.nonblocking_submission_index_poll_supported;
         stats.queue_empty_poll_fallback = true;
         for tombstone in &self.backend_resource_tombstones {
             accumulate_backend_tombstone_stats(tombstone, &mut stats, false);
@@ -1438,6 +1683,11 @@ impl WgpuRendererRuntime {
 
     pub fn material_external_resources(&self) -> &WgpuMaterialExternalResourceRegistry {
         &self.material_external_resources
+    }
+
+    pub fn material_texture_generated_mips(&self, handle: TextureHandle) -> Option<u32> {
+        self.material_external_resources
+            .texture_generated_mips(handle)
     }
 
     pub fn material_external_resource_stats(&self) -> WgpuMaterialExternalResourceStats {
@@ -1974,6 +2224,12 @@ impl WgpuMaterialExternalResourceRegistry {
         self.textures.remove(&handle)
     }
 
+    pub fn texture_generated_mips(&self, handle: TextureHandle) -> Option<u32> {
+        self.textures
+            .get(&handle)
+            .map(|binding| binding.generated_mips)
+    }
+
     pub fn unregister_texture(&mut self, handle: TextureHandle) -> bool {
         self.take_texture(handle).is_some()
     }
@@ -2495,9 +2751,11 @@ fn validate_wgpu_material_texture_gpu_mip_generation_desc(
     if !matches!(
         desc.format,
         TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::Bgra8UnormSrgb
+            | TextureFormat::Rgba16Float
+            | TextureFormat::Rgba32Float
     ) {
         return Err(RendererError::Validation(
-            "wgpu material GPU mip generation currently supports only filterable 8-bit color formats"
+            "wgpu material GPU mip generation currently supports only filterable 8-bit and float color formats"
                 .to_owned(),
         ));
     }
@@ -3633,6 +3891,16 @@ fn wgpu_depth_format(format: DepthFormat) -> wgpu::TextureFormat {
         DepthFormat::D24Plus => wgpu::TextureFormat::Depth24Plus,
         DepthFormat::D24PlusStencil8 => wgpu::TextureFormat::Depth24PlusStencil8,
         DepthFormat::D32Float => wgpu::TextureFormat::Depth32Float,
+    }
+}
+
+fn depth_format_from_wgpu(format: wgpu::TextureFormat) -> Option<DepthFormat> {
+    match format {
+        wgpu::TextureFormat::Depth16Unorm => Some(DepthFormat::D16Unorm),
+        wgpu::TextureFormat::Depth24Plus => Some(DepthFormat::D24Plus),
+        wgpu::TextureFormat::Depth24PlusStencil8 => Some(DepthFormat::D24PlusStencil8),
+        wgpu::TextureFormat::Depth32Float => Some(DepthFormat::D32Float),
+        _ => None,
     }
 }
 
@@ -4901,7 +5169,7 @@ mod tests {
 
         let pending = runtime.backend_resource_retirement_stats();
         assert_eq!(pending.tombstones, 2);
-        assert!(!pending.nonblocking_submission_index_poll_supported);
+        assert!(pending.nonblocking_submission_index_poll_supported);
         assert!(pending.queue_empty_poll_fallback);
         assert!(!pending.last_poll_used_queue_empty_fallback);
         assert_eq!(pending.tombstones_with_submission_index, 2);
@@ -4948,6 +5216,79 @@ mod tests {
         assert_eq!(second_retire.retired_fence_submission_indices_this_poll, 1);
 
         runtime.wait_for_gpu();
+    }
+
+    #[test]
+    fn wgpu_submission_fence_reuses_tracker_for_repeated_same_submission_index() {
+        let mut runtime = match WgpuRendererRuntime::new(RendererConfig::default()) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!(
+                    "skipping wgpu repeated-submission-index tracker reuse test: {error}"
+                );
+                return;
+            }
+        };
+        let create_module = |runtime: &WgpuRendererRuntime, label| {
+            runtime
+                .graphics()
+                .device()
+                .create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some(label),
+                    source: wgpu::ShaderSource::Wgsl(
+                        "@compute @workgroup_size(1) fn cs_main() {}".into(),
+                    ),
+                })
+        };
+
+        let encoder =
+            runtime
+                .graphics()
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Neo reused tracker same submission encoder"),
+                });
+        runtime.last_submission_index =
+            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+
+        runtime.queue_shader_variant_module_tombstone(vec![create_module(
+            &runtime,
+            "Neo repeated-submission index tracker module 1",
+        )]);
+        let first_pending = runtime.backend_submission_completions.len();
+        let first_tombstone_order = runtime.backend_resource_tombstones[0]
+            .fence
+            .as_ref()
+            .and_then(|fence| fence.submission_order)
+            .expect("first tombstone should capture submission order");
+
+        runtime.queue_shader_variant_module_tombstone(vec![create_module(
+            &runtime,
+            "Neo repeated-submission index tracker module 2",
+        )]);
+        let second_pending = runtime.backend_submission_completions.len();
+        let second_tombstone_order = runtime.backend_resource_tombstones[1]
+            .fence
+            .as_ref()
+            .and_then(|fence| fence.submission_order)
+            .expect("second tombstone should capture submission order");
+
+        assert_eq!(runtime.backend_resource_retirement_stats().tombstones, 2);
+        assert_eq!(
+            runtime.backend_resource_retirement_stats().tombstone_submission_index_coverage,
+            WgpuTombstoneSubmissionIndexCoverage::All
+        );
+        assert_eq!(first_pending, 1);
+        assert_eq!(second_pending, 1);
+        assert_eq!(first_tombstone_order, second_tombstone_order);
+
+        runtime.wait_for_gpu();
+        let retired = runtime.poll_backend_resource_retirements();
+        assert_eq!(retired.retired_tombstones_this_poll, 2);
+        assert!(!runtime
+            .backend_resource_retirement_stats
+            .nonblocking_submission_index_poll_supported);
+        assert_eq!(runtime.backend_submission_completions.len(), 0);
     }
 
     #[test]
@@ -5008,6 +5349,52 @@ mod tests {
         )
         .unwrap();
         assert_eq!(binding.generated_mips, 2);
+        runtime.wait_for_gpu();
+    }
+
+    #[test]
+    fn wgpu_material_texture_binding_generates_float_mips_on_gpu() {
+        let runtime = match WgpuRendererRuntime::new(RendererConfig::default()) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!(
+                    "skipping wgpu material float texture GPU mip generation test: {error}"
+                );
+                return;
+            }
+        };
+        for format in [TextureFormat::Rgba16Float, TextureFormat::Rgba32Float] {
+            let bytes_per_pixel = wgpu_material_texture_format_bytes_per_pixel(format);
+            let desc = WgpuMaterialTextureUploadDesc {
+                label: Some(format!("Neo GPU Generated Float Mip Texture ({format:?})").to_owned()),
+                dimension: TextureDimension::D2,
+                width: 4,
+                height: 4,
+                depth_or_layers: 1,
+                mip_level_count: 3,
+                sample_count: 1,
+                format,
+                sampled_binding: true,
+                storage_binding: false,
+                generate_mips_from_base: true,
+                uploads: vec![WgpuMaterialTextureUpload {
+                    mip_level: 0,
+                    origin: [0, 0, 0],
+                    extent: [4, 4, 1],
+                    bytes_per_row: 4 * bytes_per_pixel,
+                    rows_per_image: 4,
+                    bytes: vec![0xFF; 4 * 4 * 1 * bytes_per_pixel as usize],
+                }],
+            };
+
+            let binding = create_wgpu_material_texture_binding(
+                runtime.graphics.device(),
+                runtime.graphics.queue(),
+                &desc,
+            )
+            .unwrap();
+            assert_eq!(binding.generated_mips, 2);
+        }
         runtime.wait_for_gpu();
     }
 
@@ -5814,6 +6201,54 @@ mod tests {
             Some(wgpu::TextureFormat::Bgra8UnormSrgb)
         );
         assert_eq!(options.depth_format, wgpu::TextureFormat::Depth24Plus);
+    }
+
+    #[test]
+    fn validate_surface_runtime_formats_rejects_configured_color_format_mismatch() {
+        let mut caps = RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
+        caps.formats = FormatCaps {
+            color: vec![TextureFormat::Rgba8Unorm],
+            depth: vec![DepthFormat::D32Float],
+        };
+        let config = RendererConfig {
+            surface_format: Some(TextureFormat::Rgba8Unorm),
+            depth_format: DepthFormat::D32Float,
+            ..RendererConfig::default()
+        };
+
+        assert!(matches!(
+            validate_surface_runtime_formats(
+                &config,
+                wgpu::TextureFormat::Bgra8UnormSrgb,
+                Some(wgpu::TextureFormat::Depth32Float),
+                &caps
+            ),
+            Err(RendererError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn validate_surface_runtime_formats_rejects_configured_depth_format_mismatch() {
+        let mut caps = RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
+        caps.formats = FormatCaps {
+            color: vec![TextureFormat::Rgba8Unorm],
+            depth: vec![DepthFormat::D24Plus],
+        };
+        let config = RendererConfig {
+            surface_format: Some(TextureFormat::Rgba8Unorm),
+            depth_format: DepthFormat::D32Float,
+            ..RendererConfig::default()
+        };
+
+        assert!(matches!(
+            validate_surface_runtime_formats(
+                &config,
+                wgpu::TextureFormat::Rgba8Unorm,
+                Some(wgpu::TextureFormat::Depth24Plus),
+                &caps
+            ),
+            Err(RendererError::Validation(_))
+        ));
     }
 
     #[test]

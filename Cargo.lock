@@ -517,6 +517,7 @@ dependencies = [
  "engine_platform",
  "engine_render",
  "graphics_wgpu",
+ "raw-window-handle",
  "render_wgpu",
 ]
 
