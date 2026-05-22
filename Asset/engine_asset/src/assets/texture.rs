@@ -122,3 +122,125 @@ fn decode_texture(bytes: &[u8]) -> Result<Texture, AssetError> {
         gpu: None,
     })
 }
+
+pub fn canonical_texture_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    let texture = decode_texture(bytes)?;
+    encode_texture_runtime_bytes(&texture)
+}
+
+pub fn encode_texture_runtime_bytes(texture: &Texture) -> Result<Vec<u8>, AssetError> {
+    let mut bytes = Vec::with_capacity(8 + texture.data.len());
+    bytes.extend_from_slice(&texture.width.to_le_bytes());
+    bytes.extend_from_slice(&texture.height.to_le_bytes());
+    bytes.extend_from_slice(&texture.data);
+    Ok(bytes)
+}
+
+pub fn canonical_texture_source_document(source_text: &str) -> Result<Vec<u8>, AssetError> {
+    let mut lines = source_text.lines();
+    if lines.next().unwrap_or("").trim() != "NGA_TEXTURE_SOURCE_V1" {
+        return Err(AssetError::Import {
+            message: "texture source must start with NGA_TEXTURE_SOURCE_V1".to_owned(),
+        });
+    }
+    let mut width = None;
+    let mut height = None;
+    let mut pixels = None;
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(AssetError::Import {
+                message: format!("invalid texture source line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "width" => width = Some(parse_texture_dimension(value, "width", line_number)?),
+            "height" => height = Some(parse_texture_dimension(value, "height", line_number)?),
+            "size" => {
+                let Some((width_value, height_value)) = value.split_once('x') else {
+                    return Err(AssetError::Import {
+                        message: format!("texture source size on line {line_number} must be WxH"),
+                    });
+                };
+                width = Some(parse_texture_dimension(
+                    width_value.trim(),
+                    "width",
+                    line_number,
+                )?);
+                height = Some(parse_texture_dimension(
+                    height_value.trim(),
+                    "height",
+                    line_number,
+                )?);
+            }
+            "rgba" | "pixels" => pixels = Some(parse_texture_pixels(value, line_number)?),
+            other => {
+                return Err(AssetError::Import {
+                    message: format!("unknown texture source key `{other}` on line {line_number}"),
+                })
+            }
+        }
+    }
+    let width = width.ok_or_else(|| AssetError::Import {
+        message: "texture source missing width or size".to_owned(),
+    })?;
+    let height = height.ok_or_else(|| AssetError::Import {
+        message: "texture source missing height or size".to_owned(),
+    })?;
+    let pixels = pixels.ok_or_else(|| AssetError::Import {
+        message: "texture source missing rgba pixels".to_owned(),
+    })?;
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| AssetError::Import {
+            message: "texture source dimensions overflow pixel count".to_owned(),
+        })?;
+    if pixels.len() != expected {
+        return Err(AssetError::Import {
+            message: format!(
+                "texture source rgba byte count {} did not match expected {expected}",
+                pixels.len()
+            ),
+        });
+    }
+    let mut bytes = Vec::with_capacity(8 + pixels.len());
+    bytes.extend_from_slice(&width.to_le_bytes());
+    bytes.extend_from_slice(&height.to_le_bytes());
+    bytes.extend_from_slice(&pixels);
+    Ok(bytes)
+}
+
+fn parse_texture_dimension(value: &str, name: &str, line_number: usize) -> Result<u32, AssetError> {
+    let dimension = value.parse::<u32>().map_err(|error| AssetError::Import {
+        message: format!("invalid texture source {name} on line {line_number}: {error}"),
+    })?;
+    if dimension == 0 {
+        return Err(AssetError::Import {
+            message: format!("texture source {name} on line {line_number} must be non-zero"),
+        });
+    }
+    Ok(dimension)
+}
+
+fn parse_texture_pixels(value: &str, line_number: usize) -> Result<Vec<u8>, AssetError> {
+    value
+        .replace(';', ",")
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<u8>().map_err(|error| AssetError::Import {
+                message: format!(
+                    "invalid texture source rgba byte `{part}` on line {line_number}: {error}"
+                ),
+            })
+        })
+        .collect()
+}

@@ -1,4 +1,4 @@
-use crate::assets::{AudioClip, Material, Mesh, PhysicsMesh, SceneAsset, Skeleton};
+use crate::assets::{AudioClip, Material, Mesh, PhysicsMesh, Prefab, SceneAsset, Skeleton};
 use crate::handle::{Handle, UntypedHandle};
 use crate::id::AssetId;
 use crate::server::AssetServer;
@@ -101,6 +101,22 @@ impl SceneInstanceComponent {
         let scene = assets.get(&self.scene)?;
         Some(SceneInstantiationPlan::from_scene(self.scene.id(), scene))
     }
+
+    pub fn instantiation_commands(
+        &self,
+        assets: &AssetServer,
+    ) -> Option<Vec<SceneInstantiationCommand>> {
+        if !self.can_instantiate(assets) {
+            return None;
+        }
+        let scene = assets.get(&self.scene)?;
+        Some(SceneInstantiationPlan::from_scene(self.scene.id(), scene).commands(scene))
+    }
+}
+
+pub trait InstantiationSink {
+    fn spawn_entity(&mut self, entity_index: usize, name: Option<&str>, parent: Option<u64>);
+    fn attach_component(&mut self, entity_index: usize, type_name: &str, data: &[u8]);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +139,269 @@ impl SceneInstantiationPlan {
                 .sum(),
             dependency_count: asset.dependencies.len(),
         }
+    }
+
+    pub fn commands(&self, asset: &SceneAsset) -> Vec<SceneInstantiationCommand> {
+        let mut commands = Vec::with_capacity(self.entity_count + self.component_count);
+        for (entity_index, entity) in asset.entities.iter().enumerate() {
+            push_serialized_entity_commands(
+                &mut commands,
+                entity_index,
+                entity,
+                |entity_index, name, parent| SceneInstantiationCommand::SpawnEntity {
+                    entity_index,
+                    name,
+                    parent,
+                },
+                |entity_index, type_name, data| SceneInstantiationCommand::AttachComponent {
+                    entity_index,
+                    type_name,
+                    data,
+                },
+            );
+        }
+        commands
+    }
+
+    pub fn apply(&self, asset: &SceneAsset, sink: &mut impl InstantiationSink) {
+        for (entity_index, entity) in asset.entities.iter().enumerate() {
+            SceneInstantiationCommand::SpawnEntity {
+                entity_index,
+                name: entity.name.clone(),
+                parent: entity.parent,
+            }
+            .apply(sink);
+            for component in &entity.components {
+                SceneInstantiationCommand::AttachComponent {
+                    entity_index,
+                    type_name: component.type_name.clone(),
+                    data: component.data.clone(),
+                }
+                .apply(sink);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SceneInstantiationCommand {
+    SpawnEntity {
+        entity_index: usize,
+        name: Option<String>,
+        parent: Option<u64>,
+    },
+    AttachComponent {
+        entity_index: usize,
+        type_name: String,
+        data: Vec<u8>,
+    },
+}
+
+impl SceneInstantiationCommand {
+    pub fn apply(&self, sink: &mut impl InstantiationSink) {
+        match self {
+            Self::SpawnEntity {
+                entity_index,
+                name,
+                parent,
+            } => sink.spawn_entity(*entity_index, name.as_deref(), *parent),
+            Self::AttachComponent {
+                entity_index,
+                type_name,
+                data,
+            } => sink.attach_component(*entity_index, type_name, data),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PrefabInstanceComponent {
+    pub prefab: Handle<Prefab>,
+    pub loaded: bool,
+}
+
+impl PrefabInstanceComponent {
+    pub fn asset_handles(&self) -> Vec<UntypedHandle> {
+        vec![self.prefab.untyped()]
+    }
+
+    pub fn is_prefab_asset_ready(&self, assets: &AssetServer) -> bool {
+        assets.is_ready_with_dependencies(&self.prefab)
+    }
+
+    pub fn can_instantiate(&self, assets: &AssetServer) -> bool {
+        !self.loaded && self.is_prefab_asset_ready(assets)
+    }
+
+    pub fn instantiation_plan(&self, assets: &AssetServer) -> Option<PrefabInstantiationPlan> {
+        if !self.can_instantiate(assets) {
+            return None;
+        }
+        let prefab = assets.get(&self.prefab)?;
+        Some(PrefabInstantiationPlan::from_prefab(
+            self.prefab.id(),
+            prefab,
+        ))
+    }
+
+    pub fn instantiation_commands(
+        &self,
+        assets: &AssetServer,
+    ) -> Option<Vec<PrefabInstantiationCommand>> {
+        if !self.can_instantiate(assets) {
+            return None;
+        }
+        let prefab = assets.get(&self.prefab)?;
+        Some(PrefabInstantiationPlan::from_prefab(self.prefab.id(), prefab).commands(prefab))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefabInstantiationPlan {
+    pub prefab: AssetId,
+    pub entity_count: usize,
+    pub component_count: usize,
+    pub dependency_count: usize,
+}
+
+impl PrefabInstantiationPlan {
+    pub fn from_prefab(prefab: AssetId, asset: &Prefab) -> Self {
+        Self {
+            prefab,
+            entity_count: 1 + asset.children.len(),
+            component_count: asset.root.components.len()
+                + asset
+                    .children
+                    .iter()
+                    .map(|entity| entity.components.len())
+                    .sum::<usize>(),
+            dependency_count: asset.dependencies.len(),
+        }
+    }
+
+    pub fn commands(&self, asset: &Prefab) -> Vec<PrefabInstantiationCommand> {
+        let mut commands = Vec::with_capacity(self.entity_count + self.component_count);
+        push_serialized_entity_commands(
+            &mut commands,
+            0,
+            &asset.root,
+            |entity_index, name, parent| PrefabInstantiationCommand::SpawnEntity {
+                entity_index,
+                name,
+                parent,
+            },
+            |entity_index, type_name, data| PrefabInstantiationCommand::AttachComponent {
+                entity_index,
+                type_name,
+                data,
+            },
+        );
+        for (child_index, child) in asset.children.iter().enumerate() {
+            push_serialized_entity_commands(
+                &mut commands,
+                child_index + 1,
+                child,
+                |entity_index, name, parent| PrefabInstantiationCommand::SpawnEntity {
+                    entity_index,
+                    name,
+                    parent,
+                },
+                |entity_index, type_name, data| PrefabInstantiationCommand::AttachComponent {
+                    entity_index,
+                    type_name,
+                    data,
+                },
+            );
+        }
+        commands
+    }
+
+    pub fn apply(&self, asset: &Prefab, sink: &mut impl InstantiationSink) {
+        PrefabInstantiationCommand::SpawnEntity {
+            entity_index: 0,
+            name: asset.root.name.clone(),
+            parent: asset.root.parent,
+        }
+        .apply(sink);
+        for component in &asset.root.components {
+            PrefabInstantiationCommand::AttachComponent {
+                entity_index: 0,
+                type_name: component.type_name.clone(),
+                data: component.data.clone(),
+            }
+            .apply(sink);
+        }
+        for (child_index, child) in asset.children.iter().enumerate() {
+            let entity_index = child_index + 1;
+            PrefabInstantiationCommand::SpawnEntity {
+                entity_index,
+                name: child.name.clone(),
+                parent: child.parent,
+            }
+            .apply(sink);
+            for component in &child.components {
+                PrefabInstantiationCommand::AttachComponent {
+                    entity_index,
+                    type_name: component.type_name.clone(),
+                    data: component.data.clone(),
+                }
+                .apply(sink);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrefabInstantiationCommand {
+    SpawnEntity {
+        entity_index: usize,
+        name: Option<String>,
+        parent: Option<u64>,
+    },
+    AttachComponent {
+        entity_index: usize,
+        type_name: String,
+        data: Vec<u8>,
+    },
+}
+
+impl PrefabInstantiationCommand {
+    pub fn apply(&self, sink: &mut impl InstantiationSink) {
+        match self {
+            Self::SpawnEntity {
+                entity_index,
+                name,
+                parent,
+            } => sink.spawn_entity(*entity_index, name.as_deref(), *parent),
+            Self::AttachComponent {
+                entity_index,
+                type_name,
+                data,
+            } => sink.attach_component(*entity_index, type_name, data),
+        }
+    }
+}
+
+fn push_serialized_entity_commands<C, F>(
+    commands: &mut Vec<C>,
+    entity_index: usize,
+    entity: &crate::assets::scene::SerializedEntity,
+    spawn_entity: F,
+    attach_component: fn(usize, String, Vec<u8>) -> C,
+) where
+    F: Fn(usize, Option<String>, Option<u64>) -> C,
+{
+    commands.push(spawn_entity(
+        entity_index,
+        entity.name.clone(),
+        entity.parent,
+    ));
+    for component in &entity.components {
+        commands.push(attach_component(
+            entity_index,
+            component.type_name.clone(),
+            component.data.clone(),
+        ));
     }
 }
 

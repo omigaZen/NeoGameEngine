@@ -11,11 +11,19 @@ pub struct SmokeReport {
     pub render_ready: bool,
     pub audio_ready: bool,
     pub physics_ready: bool,
+    pub scene_ready: bool,
+    pub prefab_ready: bool,
     pub material_ready_with_dependencies: bool,
     pub group_ready: bool,
     pub group_total_assets: usize,
     pub group_ready_assets: usize,
     pub material_dependencies: usize,
+    pub scene_commands: usize,
+    pub prefab_commands: usize,
+    pub scene_sink_events: usize,
+    pub prefab_sink_events: usize,
+    pub scene_trace: Vec<String>,
+    pub prefab_trace: Vec<String>,
     pub render_handles: usize,
     pub audio_handles: usize,
     pub physics_handles: usize,
@@ -33,7 +41,13 @@ pub struct EditorSmokeReport {
     pub bundled_assets: usize,
     pub bundle_group_ready: bool,
     pub material_ready_with_dependencies: bool,
+    pub scene_ready_with_dependencies: bool,
+    pub prefab_ready_with_dependencies: bool,
     pub runtime_dependencies: usize,
+    pub scene_dependencies: usize,
+    pub prefab_dependencies: usize,
+    pub scene_commands: usize,
+    pub prefab_commands: usize,
     pub ready_events: usize,
     pub failed_events: usize,
 }
@@ -63,6 +77,14 @@ pub fn run_smoke() -> SmokeReport {
         "materials/hero.material",
         "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/checker.texture\nbase_color=1,1,1,1\n",
     );
+    io.insert(
+        "scenes/hero.scene",
+        "NGA_SCENE_V1\nname=hero_scene\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
+    );
+    io.insert(
+        "prefabs/hero.prefab",
+        "NGA_PREFAB_V1\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
+    );
     io.insert("audio/click.audio", audio_bytes());
     io.insert("physics/hero.physics", physics_mesh_bytes());
 
@@ -89,6 +111,14 @@ pub fn run_smoke() -> SmokeReport {
         mesh: assets.load("physics/hero.physics"),
         dynamic: true,
     };
+    let scene = SceneInstanceComponent {
+        scene: assets.load("scenes/hero.scene"),
+        loaded: false,
+    };
+    let prefab = PrefabInstanceComponent {
+        prefab: assets.load("prefabs/hero.prefab"),
+        loaded: false,
+    };
 
     let mut cursor = AssetEventCursor::default();
     let mut ready_events = 0;
@@ -110,10 +140,31 @@ pub fn run_smoke() -> SmokeReport {
         if renderer.is_ready(&assets)
             && audio.is_ready(&assets)
             && physics.is_ready(&assets)
+            && scene.can_instantiate(&assets)
+            && prefab.can_instantiate(&assets)
             && assets.group_state(&group) == AssetLoadState::Ready
         {
             break;
         }
+    }
+
+    let mut scene_sink = RecordingInstantiationSink::default();
+    let mut prefab_sink = RecordingInstantiationSink::default();
+    let scene_commands = scene
+        .instantiation_commands(&assets)
+        .map(|commands| commands.len())
+        .unwrap_or_default();
+    let prefab_commands = prefab
+        .instantiation_commands(&assets)
+        .map(|commands| commands.len())
+        .unwrap_or_default();
+    if let Some(plan) = scene.instantiation_plan(&assets) {
+        let scene_asset = assets.get(&scene.scene).unwrap();
+        plan.apply(scene_asset, &mut scene_sink);
+    }
+    if let Some(plan) = prefab.instantiation_plan(&assets) {
+        let prefab_asset = assets.get(&prefab.prefab).unwrap();
+        plan.apply(prefab_asset, &mut prefab_sink);
     }
 
     let group_progress = assets.group_progress(&group);
@@ -121,6 +172,8 @@ pub fn run_smoke() -> SmokeReport {
         render_ready: renderer.is_ready(&assets),
         audio_ready: audio.is_ready(&assets),
         physics_ready: physics.is_ready(&assets),
+        scene_ready: scene.can_instantiate(&assets),
+        prefab_ready: prefab.can_instantiate(&assets),
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&renderer.material),
         group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         group_total_assets: group_progress.total_assets,
@@ -129,6 +182,12 @@ pub fn run_smoke() -> SmokeReport {
             .dependency_graph()
             .direct_dependencies(renderer.material.id())
             .len(),
+        scene_commands,
+        prefab_commands,
+        scene_sink_events: scene_sink.events.len(),
+        prefab_sink_events: prefab_sink.events.len(),
+        scene_trace: scene_sink.events,
+        prefab_trace: prefab_sink.events,
         render_handles: renderer.asset_handles().len(),
         audio_handles: audio.asset_handles().len(),
         physics_handles: physics.asset_handles().len(),
@@ -143,11 +202,23 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let root = smoke_temp_root("editor");
     let texture_path = AssetPath::parse("textures/editor.texture");
     let material_path = AssetPath::parse("materials/editor.material");
+    let scene_path = AssetPath::parse("scenes/editor.scene");
+    let prefab_path = AssetPath::parse("prefabs/editor.prefab");
     let material_source =
         b"name=editor\ntexture.albedo=textures/editor.texture\nbase_color=0.25,0.5,1,1\n".to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(texture_path.path(), texture_bytes(1, 1));
     io.insert(material_path.path(), material_source);
+    io.insert(
+        scene_path.path(),
+        b"NGA_SCENE_V1\nname=editor_scene\ndependency=textures/editor.texture\ndependency=materials/editor.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Child;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n"
+            .to_vec(),
+    );
+    io.insert(
+        prefab_path.path(),
+        b"NGA_PREFAB_V1\ndependency=textures/editor.texture\ndependency=materials/editor.material\nroot=EditorRoot\ncomponent=Transform|translation=1,0,0\nchild=EditorChild;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n"
+            .to_vec(),
+    );
 
     let mut database = AssetDatabase::new(AssetDatabaseConfig {
         source_root: root.join("source"),
@@ -162,16 +233,15 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let scanned_sources = database.scan().unwrap().len();
     let texture_id = database.import_asset_path(&texture_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
-    database
-        .cook_asset(texture_id, TargetPlatform::Windows)
-        .unwrap();
-    database
-        .cook_asset(material_id, TargetPlatform::Windows)
-        .unwrap();
+    let scene_id = database.import_asset_path(&scene_path).unwrap();
+    let prefab_id = database.import_asset_path(&prefab_path).unwrap();
+    for id in [texture_id, material_id, scene_id, prefab_id] {
+        database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    }
     let bundle = database
         .build_bundle(&AssetDatabaseBundleBuild::new(
             "editor_smoke",
-            vec![material_id, texture_id],
+            vec![material_id, prefab_id, scene_id, texture_id],
         ))
         .unwrap();
 
@@ -182,6 +252,16 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let mounted = assets.mount_bundle_bytes(&bundle.bytes).unwrap();
     let group = assets.preload_bundle(&mounted);
     let material: Handle<Material> = assets.load(material_path);
+    let scene: Handle<SceneAsset> = assets.load(scene_path);
+    let prefab: Handle<Prefab> = assets.load(prefab_path);
+    let scene_instance = SceneInstanceComponent {
+        scene: scene.clone(),
+        loaded: false,
+    };
+    let prefab_instance = PrefabInstanceComponent {
+        prefab: prefab.clone(),
+        loaded: false,
+    };
     let mut cursor = AssetEventCursor::default();
     let mut ready_events = 0;
     let mut failed_events = 0;
@@ -200,22 +280,45 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         }
         if assets.group_state(&group) == AssetLoadState::Ready
             && assets.is_ready_with_dependencies(&material)
+            && assets.is_ready_with_dependencies(&scene)
+            && assets.is_ready_with_dependencies(&prefab)
         {
             break;
         }
     }
 
+    let scene_commands = scene_instance
+        .instantiation_commands(&assets)
+        .map(|commands| commands.len())
+        .unwrap_or_default();
+    let prefab_commands = prefab_instance
+        .instantiation_commands(&assets)
+        .map(|commands| commands.len())
+        .unwrap_or_default();
+
     let report = EditorSmokeReport {
         scanned_sources,
-        imported_assets: 2,
-        cooked_assets: 2,
+        imported_assets: 4,
+        cooked_assets: 4,
         bundled_assets: bundle.asset_count,
         bundle_group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&material),
+        scene_ready_with_dependencies: assets.is_ready_with_dependencies(&scene),
+        prefab_ready_with_dependencies: assets.is_ready_with_dependencies(&prefab),
         runtime_dependencies: assets
             .dependency_graph()
             .direct_dependencies(material.id())
             .len(),
+        scene_dependencies: assets
+            .dependency_graph()
+            .direct_dependencies(scene.id())
+            .len(),
+        prefab_dependencies: assets
+            .dependency_graph()
+            .direct_dependencies(prefab.id())
+            .len(),
+        scene_commands,
+        prefab_commands,
         ready_events,
         failed_events,
     };
@@ -385,6 +488,25 @@ fn physics_mesh_bytes() -> Vec<u8> {
     b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
 }
 
+#[derive(Default)]
+struct RecordingInstantiationSink {
+    events: Vec<String>,
+}
+
+impl InstantiationSink for RecordingInstantiationSink {
+    fn spawn_entity(&mut self, entity_index: usize, name: Option<&str>, parent: Option<u64>) {
+        self.events
+            .push(format!("spawn:{entity_index}:{name:?}:{parent:?}"));
+    }
+
+    fn attach_component(&mut self, entity_index: usize, type_name: &str, data: &[u8]) {
+        self.events.push(format!(
+            "attach:{entity_index}:{type_name}:{}",
+            String::from_utf8_lossy(data)
+        ));
+    }
+}
+
 fn smoke_temp_root(label: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -410,11 +532,37 @@ mod tests {
         assert!(report.render_ready);
         assert!(report.audio_ready);
         assert!(report.physics_ready);
+        assert!(report.scene_ready);
+        assert!(report.prefab_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.group_ready);
         assert_eq!(report.group_total_assets, 4);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
+        assert_eq!(report.scene_commands, 4);
+        assert_eq!(report.prefab_commands, 4);
+        assert_eq!(report.scene_sink_events, 4);
+        assert_eq!(report.prefab_sink_events, 4);
+        assert_eq!(
+            report.scene_trace,
+            vec![
+                "spawn:0:Some(\"Root\"):None".to_owned(),
+                "attach:0:Transform:translation=0,0,0".to_owned(),
+                "spawn:1:Some(\"Hero\"):Some(0)".to_owned(),
+                "attach:1:MeshRenderer:mesh=meshes/tri.mesh;material=materials/hero.material"
+                    .to_owned(),
+            ]
+        );
+        assert_eq!(
+            report.prefab_trace,
+            vec![
+                "spawn:0:Some(\"Hero\"):None".to_owned(),
+                "attach:0:Transform:translation=0,0,0".to_owned(),
+                "spawn:1:Some(\"Weapon\"):Some(0)".to_owned(),
+                "attach:1:MeshRenderer:mesh=meshes/tri.mesh;material=materials/hero.material"
+                    .to_owned(),
+            ]
+        );
         assert_eq!(report.render_handles, 2);
         assert_eq!(report.audio_handles, 1);
         assert_eq!(report.physics_handles, 1);
@@ -428,13 +576,19 @@ mod tests {
     fn editor_smoke_imports_cooks_bundles_and_loads_runtime_output() {
         let report = run_editor_smoke();
 
-        assert_eq!(report.scanned_sources, 2);
-        assert_eq!(report.imported_assets, 2);
-        assert_eq!(report.cooked_assets, 2);
-        assert_eq!(report.bundled_assets, 2);
+        assert_eq!(report.scanned_sources, 4);
+        assert_eq!(report.imported_assets, 4);
+        assert_eq!(report.cooked_assets, 4);
+        assert_eq!(report.bundled_assets, 4);
         assert!(report.bundle_group_ready);
         assert!(report.material_ready_with_dependencies);
+        assert!(report.scene_ready_with_dependencies);
+        assert!(report.prefab_ready_with_dependencies);
         assert_eq!(report.runtime_dependencies, 1);
+        assert_eq!(report.scene_dependencies, 2);
+        assert_eq!(report.prefab_dependencies, 2);
+        assert_eq!(report.scene_commands, 4);
+        assert_eq!(report.prefab_commands, 4);
         assert!(report.ready_events >= 2);
         assert_eq!(report.failed_events, 0);
     }

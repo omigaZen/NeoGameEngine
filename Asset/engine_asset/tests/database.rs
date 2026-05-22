@@ -23,6 +23,14 @@ fn audio_bytes() -> Vec<u8> {
         .to_vec()
 }
 
+fn animation_source_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_SOURCE_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+}
+
+fn skeleton_source_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_SOURCE_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
+}
+
 fn wav_pcm16_bytes(sample_rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
     let data_len = (samples.len() * 2) as u32;
     let mut bytes = Vec::new();
@@ -1312,6 +1320,47 @@ fn database_material_importer_canonicalizes_source_and_runtime_loads_it() {
 }
 
 #[test]
+fn database_material_cooker_canonicalizes_runtime_source_bytes() {
+    let material_path = AssetPath::parse("materials/cooked.material");
+    let source = b"# comment\n name = hero \n shader = shaders/pbr.wgsl \n texture.albedo = textures/albedo.texture \n base_color = 1, 0.5, 0.25, 1 \n roughness = 0.7 \n".to_vec();
+    let expected = b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1, 0.5, 0.25, 1\nroughness=0.7\n".to_vec();
+    let ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(material_path.clone()),
+        source_bytes: source,
+    };
+    let metadata =
+        AssetMetadata::runtime(AssetId::new(), material_path, AssetTypeId::of::<Material>());
+    let cooker = MaterialCooker::new();
+
+    let output = cooker.cook(&ctx, &metadata).unwrap();
+
+    assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+}
+
+#[test]
+fn database_shader_cooker_canonicalizes_source_documents() {
+    let shader_path = AssetPath::parse("shaders/cooked.wgsl");
+    let source =
+        b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nstage=fragment\n---\n  @fragment fn main() {}\n"
+            .to_vec();
+    let expected = b"@fragment fn main() {}\n".to_vec();
+    let ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(shader_path.clone()),
+        source_bytes: source,
+    };
+    let metadata = AssetMetadata::runtime(AssetId::new(), shader_path, AssetTypeId::of::<Shader>());
+    let cooker = ShaderCooker::new();
+
+    let output = cooker.cook(&ctx, &metadata).unwrap();
+
+    assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+}
+
+#[test]
 fn database_builtin_material_importer_reports_missing_dependency_path() {
     let config = database_config("builtin_material_missing_dependency");
     let material_path = AssetPath::parse("materials/missing_shader.material");
@@ -1362,6 +1411,7 @@ fn database_builtin_model_importer_reports_missing_material_dependency_path() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_builtin_model_importer_generates_labeled_subresources_and_runtime_outputs() {
     let config = database_config("builtin_model_generated_subresources");
     let shader_path = AssetPath::parse("shaders/pbr.wgsl");
@@ -1988,6 +2038,7 @@ fn database_model_importer_generates_lod_meshes_when_enabled() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_records_mesh_lod_binding_metadata() {
     let config = database_config("builtin_model_mesh_lod_binding");
     let model_path = AssetPath::parse("models/lod_binding.model");
@@ -2510,6 +2561,7 @@ fn database_model_importer_rejects_duplicate_generated_dependency_metadata() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_generates_physics_mesh_subresources() {
     let config = database_config("builtin_model_physics_mesh_subresource");
     let model_path = AssetPath::parse("models/collision_model.model");
@@ -2918,6 +2970,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_records_manifest_mesh_material_dependency() {
     let config = database_config("builtin_model_manifest_mesh_material_dependency");
     let shader_path = AssetPath::parse("shaders/pbr.wgsl");
@@ -3038,6 +3091,7 @@ fn database_model_importer_records_manifest_mesh_material_dependency() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
     let config = database_config("builtin_model_skinned_mesh_dependency");
     let model_path = AssetPath::parse("models/skinned.model");
@@ -4081,6 +4135,7 @@ fn database_model_importer_can_filter_generated_skeleton_and_animation_subresour
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_source_into_mesh_and_material_subresources() {
     let config = database_config("builtin_model_obj_source");
     let model_path = AssetPath::parse("models/prop.obj");
@@ -4356,6 +4411,7 @@ emissive=0.1,0.2,0.3
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_generates_obj_smoothing_group_normals() {
     let config = database_config("builtin_model_obj_smoothing_group_normals");
     let model_path = AssetPath::parse("models/smooth.obj");
@@ -4459,6 +4515,7 @@ i 0 2 3
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_roughness_extensions() {
     let config = database_config("builtin_model_obj_roughness_extensions");
     let model_path = AssetPath::parse("models/rough.obj");
@@ -4583,6 +4640,7 @@ roughness=0.35
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_transparency_to_alpha_mode() {
     let config = database_config("builtin_model_obj_transparency_alpha_mode");
     let model_path = AssetPath::parse("models/translucent.obj");
@@ -4690,6 +4748,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_dissolve_halo_to_alpha_mode() {
     let config = database_config("builtin_model_obj_dissolve_halo_alpha_mode");
     let model_path = AssetPath::parse("models/halo.obj");
@@ -4801,6 +4860,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_sharpness_and_bump_alias() {
     let config = database_config("builtin_model_obj_sharpness_bump_alias");
     let model_path = AssetPath::parse("models/compat.obj");
@@ -4928,6 +4988,7 @@ custom.sharpness.float=42
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_texture_antialiasing() {
     let config = database_config("builtin_model_obj_texture_antialiasing");
     let model_path = AssetPath::parse("models/antialias.obj");
@@ -5035,6 +5096,7 @@ custom.texture_antialias.bool=false
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_transmission_and_ior_texture_maps() {
     let config = database_config("builtin_model_obj_transmission_ior_texture_maps");
     let model_path = AssetPath::parse("models/optics.obj");
@@ -5182,6 +5244,7 @@ texture.index_of_refraction.source_channel=blue
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_alpha_texture_to_alpha_mode() {
     let config = database_config("builtin_model_obj_alpha_texture_alpha_mode");
     let model_path = AssetPath::parse("models/alpha_map.obj");
@@ -5307,6 +5370,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_transparency_texture_alias_to_alpha_mode() {
     let config = database_config("builtin_model_obj_transparency_texture_alpha_mode");
     let model_path = AssetPath::parse("models/transparency_map.obj");
@@ -5432,6 +5496,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_alpha_source_channel() {
     let config = database_config("builtin_model_obj_alpha_source_channel");
     let model_path = AssetPath::parse("models/alpha_source.obj");
@@ -5562,6 +5627,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_transparency_source_channel() {
     let config = database_config("builtin_model_obj_transparency_source_channel");
     let model_path = AssetPath::parse("models/transparency_source.obj");
@@ -5692,6 +5758,7 @@ alpha_mode=blend
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_occlusion_and_emissive_source_channels() {
     let config = database_config("builtin_model_obj_occlusion_emissive_source_channels");
     let model_path = AssetPath::parse("models/light_source.obj");
@@ -5836,6 +5903,7 @@ texture.emissive.source_channel=red
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_pbr_material_extensions() {
     let config = database_config("builtin_model_obj_pbr_material_extensions");
     let model_path = AssetPath::parse("models/pbr.obj");
@@ -6027,6 +6095,7 @@ custom.anisotropy_rotation.float=0.1
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_pbr_texture_aliases() {
     let config = database_config("builtin_model_obj_pbr_texture_aliases");
     let model_path = AssetPath::parse("models/pbr_aliases.obj");
@@ -6213,6 +6282,7 @@ custom.anisotropy_rotation.float=0.1
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_legacy_texture_map_extensions() {
     let config = database_config("builtin_model_obj_legacy_texture_maps");
     let model_path = AssetPath::parse("models/legacy_maps.obj");
@@ -6423,6 +6493,7 @@ texture.reflection.projection=cube_top
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_material_custom_properties() {
     let config = database_config("builtin_model_obj_material_custom_properties");
     let model_path = AssetPath::parse("models/material_props.obj");
@@ -6557,6 +6628,7 @@ base_color=0.2,0.3,0.4,1
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_ior_alias_custom_property() {
     let config = database_config("builtin_model_obj_material_ior_alias");
     let model_path = AssetPath::parse("models/material_ior_alias.obj");
@@ -6664,6 +6736,7 @@ custom.index_of_refraction.float=1.33
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_ambient_and_specular_texture_maps() {
     let config = database_config("builtin_model_obj_ambient_specular_texture_maps");
     let model_path = AssetPath::parse("models/material_maps.obj");
@@ -6802,6 +6875,7 @@ texture.specular.source_channel=blue
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_uppercase_and_plain_bump_aliases() {
     let config = database_config("builtin_model_obj_uppercase_bump_alias");
     let model_path = AssetPath::parse("models/bump_alias.obj");
@@ -6916,6 +6990,7 @@ texture.normal=models/textures/detail_upper.texture
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_plain_bump_alias() {
     let config = database_config("builtin_model_obj_plain_bump_alias");
     let model_path = AssetPath::parse("models/plain_bump.obj");
@@ -7027,6 +7102,7 @@ texture.normal=models/textures/detail.texture
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_norm_alias() {
     let config = database_config("builtin_model_obj_norm_alias");
     let model_path = AssetPath::parse("models/norm_alias.obj");
@@ -7138,6 +7214,7 @@ texture.normal=models/textures/detail_norm.texture
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_emissive_texture_map_alias() {
     let config = database_config("builtin_model_obj_emissive_texture_map_alias");
     let model_path = AssetPath::parse("models/emissive_map.obj");
@@ -7262,6 +7339,7 @@ texture.emissive.projection=sphere
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_metallic_and_roughness_texture_maps() {
     let config = database_config("builtin_model_obj_metallic_roughness_texture_maps");
     let model_path = AssetPath::parse("models/metallic_roughness.obj");
@@ -7405,6 +7483,7 @@ texture.metallic.source_channel=red
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_luminance_source_channel() {
     let config = database_config("builtin_model_obj_luminance_source_channel");
     let model_path = AssetPath::parse("models/luminance.obj");
@@ -7537,6 +7616,7 @@ texture.albedo.source_channel=luminance
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_depth_source_channel() {
     let config = database_config("builtin_model_obj_depth_source_channel");
     let model_path = AssetPath::parse("models/depth.obj");
@@ -7669,6 +7749,7 @@ texture.albedo.source_channel=depth
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_matte_source_channel() {
     let config = database_config("builtin_model_obj_matte_source_channel");
     let model_path = AssetPath::parse("models/matte.obj");
@@ -7801,6 +7882,7 @@ texture.albedo.source_channel=matte
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_blue_source_channel() {
     let config = database_config("builtin_model_obj_blue_source_channel");
     let model_path = AssetPath::parse("models/blue.obj");
@@ -7933,6 +8015,7 @@ texture.albedo.source_channel=blue
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_flat_projection() {
     let config = database_config("builtin_model_obj_flat_projection");
     let model_path = AssetPath::parse("models/flat.obj");
@@ -8065,6 +8148,7 @@ texture.reflection.projection=flat
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_cube_bottom_projection() {
     let config = database_config("builtin_model_obj_cube_bottom_projection");
     let model_path = AssetPath::parse("models/cube_bottom.obj");
@@ -8197,6 +8281,7 @@ texture.reflection.projection=cube_bottom
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_cube_front_projection() {
     let config = database_config("builtin_model_obj_cube_front_projection");
     let model_path = AssetPath::parse("models/cube_front.obj");
@@ -8329,6 +8414,7 @@ texture.reflection.projection=cube_front
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_cube_back_projection() {
     let config = database_config("builtin_model_obj_cube_back_projection");
     let model_path = AssetPath::parse("models/cube_back.obj");
@@ -8461,6 +8547,7 @@ texture.reflection.projection=cube_back
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_cube_left_projection() {
     let config = database_config("builtin_model_obj_cube_left_projection");
     let model_path = AssetPath::parse("models/cube_left.obj");
@@ -8593,6 +8680,7 @@ texture.reflection.projection=cube_left
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_cube_right_projection() {
     let config = database_config("builtin_model_obj_cube_right_projection");
     let model_path = AssetPath::parse("models/cube_right.obj");
@@ -8829,6 +8917,7 @@ i 0 1 2
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_usemtl_across_object_groups() {
     let config = database_config("builtin_model_obj_persistent_material_binding");
     let model_path = AssetPath::parse("models/persistent.obj");
@@ -9131,6 +9220,7 @@ i 0 2 3
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_homogeneous_vertices() {
     let config = database_config("builtin_model_obj_homogeneous_vertices");
     let model_path = AssetPath::parse("models/homogeneous.obj");
@@ -9905,6 +9995,246 @@ fn database_builtin_texture_cooker_writes_runtime_loadable_output() {
 }
 
 #[test]
+fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies_and_load_runtime_docs(
+) {
+    let config = database_config("builtin_scene_prefab_import_cook_load");
+    let shader_path = AssetPath::parse("shaders/pbr.wgsl");
+    let texture_path = AssetPath::parse("textures/hero.texture");
+    let material_path = AssetPath::parse("materials/hero.material");
+    let scene_path = AssetPath::parse("scenes/hero.scene");
+    let prefab_path = AssetPath::parse("prefabs/hero.prefab");
+    let mut io = MemoryAssetIo::new();
+    io.insert(shader_path.path(), shader_bytes());
+    io.insert(texture_path.path(), texture_bytes(1, 1, 17));
+    io.insert(
+        material_path.path(),
+        b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/hero.texture\n".to_vec(),
+    );
+    io.insert(
+        scene_path.path(),
+        b"NGA_SCENE_V1\nname=hero_scene\ndependency=textures/hero.texture\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec(),
+    );
+    io.insert(
+        prefab_path.path(),
+        b"NGA_PREFAB_V1\ndependency=textures/hero.texture\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec(),
+    );
+
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let shader_id = database.import_asset_path(&shader_path).unwrap();
+    let texture_id = database.import_asset_path(&texture_path).unwrap();
+    let material_id = database.import_asset_path(&material_path).unwrap();
+    let scene_id = database.import_asset_path(&scene_path).unwrap();
+    let prefab_id = database.import_asset_path(&prefab_path).unwrap();
+
+    assert_eq!(
+        database.registry().get(scene_id).unwrap().dependencies,
+        vec![texture_id, material_id]
+    );
+    assert_eq!(
+        database.registry().get(prefab_id).unwrap().dependencies,
+        vec![texture_id, material_id]
+    );
+    assert_eq!(
+        database.registry().get(material_id).unwrap().dependencies,
+        vec![shader_id, texture_id]
+    );
+
+    for id in [shader_id, texture_id, material_id, scene_id, prefab_id] {
+        database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    }
+
+    assert_eq!(
+        fs::read(config.cooked_root.join(scene_path.path())).unwrap(),
+        fs::read(config.imported_root.join(scene_path.path())).unwrap()
+    );
+    assert_eq!(
+        fs::read(config.cooked_root.join(prefab_path.path())).unwrap(),
+        fs::read(config.imported_root.join(prefab_path.path())).unwrap()
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let shader: Handle<Shader> = server.load(shader_path);
+    let texture: Handle<Texture> = server.load(texture_path);
+    let material: Handle<Material> = server.load(material_path);
+    let scene: Handle<SceneAsset> = server.load(scene_path);
+    let prefab: Handle<Prefab> = server.load(prefab_path);
+
+    for _ in 0..8 {
+        server.update_loading();
+        let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+        server.finish_gpu_uploads(uploads.into_iter().enumerate().map(|(index, upload)| {
+            GpuUploadResult::ok(upload.id, GpuResourceHandle(index as u64 + 1))
+        }));
+        if server.is_ready_with_dependencies(&shader)
+            && server.is_ready_with_dependencies(&texture)
+            && server.is_ready_with_dependencies(&material)
+            && server.is_ready_with_dependencies(&scene)
+            && server.is_ready_with_dependencies(&prefab)
+        {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&shader));
+    assert!(server.is_ready_with_dependencies(&texture));
+    assert!(server.is_ready_with_dependencies(&material));
+    assert!(server.is_ready_with_dependencies(&scene));
+    assert!(server.is_ready_with_dependencies(&prefab));
+    assert_eq!(
+        server
+            .dependency_graph()
+            .direct_dependencies(scene.id())
+            .len(),
+        2
+    );
+    assert_eq!(
+        server
+            .dependency_graph()
+            .direct_dependencies(prefab.id())
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtime_docs() {
+    let config = database_config("builtin_animation_skeleton_import_cook_load");
+    let animation_path = AssetPath::parse("animations/hero.animation");
+    let skeleton_path = AssetPath::parse("skeletons/hero.skeleton");
+    let mut io = MemoryAssetIo::new();
+    io.insert(animation_path.path(), animation_source_bytes());
+    io.insert(skeleton_path.path(), skeleton_source_bytes());
+
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let animation_id = database.import_asset_path(&animation_path).unwrap();
+    let skeleton_id = database.import_asset_path(&skeleton_path).unwrap();
+
+    assert_eq!(
+        database.registry().get(animation_id).unwrap().asset_type,
+        AnimationClip::TYPE_ID
+    );
+    assert_eq!(
+        database.registry().get(skeleton_id).unwrap().asset_type,
+        Skeleton::TYPE_ID
+    );
+    assert!(database
+        .registry()
+        .get(animation_id)
+        .unwrap()
+        .dependencies
+        .is_empty());
+    assert!(database
+        .registry()
+        .get(skeleton_id)
+        .unwrap()
+        .dependencies
+        .is_empty());
+
+    database
+        .cook_asset(animation_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(skeleton_id, TargetPlatform::Windows)
+        .unwrap();
+
+    assert_eq!(
+        fs::read(config.imported_root.join(animation_path.path())).unwrap(),
+        b"NGA_ANIMATION_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.cooked_root.join(animation_path.path())).unwrap(),
+        fs::read(config.imported_root.join(animation_path.path())).unwrap()
+    );
+    assert_eq!(
+        fs::read(config.cooked_root.join(skeleton_path.path())).unwrap(),
+        fs::read(config.imported_root.join(skeleton_path.path())).unwrap()
+    );
+
+    let mut server_io = MemoryAssetIo::new();
+    server_io.insert(
+        animation_path.path(),
+        fs::read(config.cooked_root.join(animation_path.path())).unwrap(),
+    );
+    server_io.insert(
+        skeleton_path.path(),
+        fs::read(config.cooked_root.join(skeleton_path.path())).unwrap(),
+    );
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(server_io);
+    server.register_builtin_loaders();
+    let animation: Handle<AnimationClip> = server.load(animation_path);
+    let skeleton: Handle<Skeleton> = server.load(skeleton_path);
+
+    for _ in 0..4 {
+        server.update_loading();
+        if server.is_ready(&animation) && server.is_ready(&skeleton) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready(&animation));
+    assert!(server.is_ready(&skeleton));
+}
+
+#[test]
+fn database_texture_cooker_canonicalizes_source_documents() {
+    let config = database_config("texture_cooker_source_conversion");
+    let path = AssetPath::parse("textures/generated.texture");
+    let source = b"NGA_TEXTURE_SOURCE_V1\nsize=2x1\nrgba=255,0,0,255;0,255,0,255\n".to_vec();
+    let expected = texture_rgba_bytes(2, 1, &[255, 0, 0, 255, 0, 255, 0, 255]);
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let texture: Handle<Texture> = server.load(path);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(11))),
+    );
+
+    assert!(server.is_ready(&texture));
+    assert_eq!(
+        (
+            server.get(&texture).unwrap().width,
+            server.get(&texture).unwrap().height
+        ),
+        (2, 1)
+    );
+}
+
+#[test]
 fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     let config = database_config("texture_importer_source_conversion");
     let path = AssetPath::parse("textures/generated.texture");
@@ -10586,6 +10916,130 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
 }
 
 #[test]
+fn database_shader_importer_preserves_glsl_source_language() {
+    let config = database_config("shader_importer_glsl_source_conversion");
+    let path = AssetPath::parse("shaders/generated.glsl");
+    let source = b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nstage=vertex\n---\n#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n".to_vec();
+    let expected =
+        b"#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
+    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let shader: Handle<Shader> = server.load(path);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].kind, GpuUploadKind::Shader);
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(4))),
+    );
+
+    assert!(server.is_ready(&shader));
+    let loaded = server.get(&shader).unwrap();
+    assert_eq!(loaded.stages[0].stage, ShaderStage::Fragment);
+    assert!(matches!(
+        &loaded.stages[0].source,
+        ShaderSource::Glsl(source)
+            if source == "#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n"
+    ));
+    assert!(loaded.reflection.is_none());
+}
+
+#[test]
+fn database_shader_importer_preserves_spv_source_language() {
+    let config = database_config("shader_importer_spv_source_conversion");
+    let path = AssetPath::parse("shaders/generated.spv");
+    let source = b"NGA_SHADER_SOURCE_V1\nlanguage=spv\nstage=compute\nsource=0x07230203,0x00010000,0x00000000,0x00000000\n".to_vec();
+    let expected = {
+        let mut bytes = Vec::new();
+        for word in [0x0723_0203u32, 0x0001_0000, 0x0000_0000, 0x0000_0000] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes
+    };
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
+    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let shader: Handle<Shader> = server.load(AssetPath::with_label(path.path(), "compute"));
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].kind, GpuUploadKind::Shader);
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(6))),
+    );
+
+    assert!(server.is_ready(&shader));
+    let loaded = server.get(&shader).unwrap();
+    assert_eq!(loaded.stages[0].stage, ShaderStage::Compute);
+    assert!(matches!(
+        &loaded.stages[0].source,
+        ShaderSource::Spirv(words)
+            if words.as_slice()
+                == [0x0723_0203, 0x0001_0000, 0x0000_0000, 0x0000_0000]
+    ));
+    assert!(loaded.reflection.is_none());
+}
+
+#[test]
 fn database_shader_importer_reports_invalid_empty_source() {
     let config = database_config("shader_importer_invalid_source");
     let path = AssetPath::parse("shaders/invalid.wgsl");
@@ -10614,6 +11068,8 @@ fn database_builtin_audio_import_cook_and_runtime_load_preserves_payload() {
     let config = database_config("builtin_audio_runtime_load");
     let path = AssetPath::parse("audio/click.audio");
     let bytes = audio_bytes();
+    let expected = b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=1\nformat=f32\nsamples=0,0.5,-0.5\nstreaming=false\n"
+        .to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(path.path(), bytes.clone());
     let mut database = AssetDatabase::new(config.clone());
@@ -10627,10 +11083,10 @@ fn database_builtin_audio_import_cook_and_runtime_load_preserves_payload() {
     assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
-    assert_eq!(output.bytes, bytes);
+    assert_eq!(output.bytes, expected);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
-        bytes
+        expected
     );
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
@@ -10657,6 +11113,8 @@ fn database_builtin_wav_audio_import_cook_and_runtime_load_preserves_payload() {
     let config = database_config("builtin_wav_audio_runtime_load");
     let path = AssetPath::parse("audio/click.wav");
     let bytes = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
+    let expected = b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=2\nformat=i16\nsamples=0,1000,-1000,500\nstreaming=false\n"
+        .to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(path.path(), bytes.clone());
     let mut database = AssetDatabase::new(config.clone());
@@ -10675,10 +11133,10 @@ fn database_builtin_wav_audio_import_cook_and_runtime_load_preserves_payload() {
     );
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
-    assert_eq!(output.bytes, bytes);
+    assert_eq!(output.bytes, expected);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
-        bytes
+        expected
     );
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
@@ -11214,6 +11672,7 @@ fn database_physics_mesh_importer_reports_invalid_source_index() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_builds_bundle_from_cooked_assets_and_preserves_dependencies() {
     let config = database_config("bundle_build");
     let texture_path = AssetPath::parse("textures/albedo.texture");
@@ -11276,6 +11735,7 @@ fn database_builds_bundle_from_cooked_assets_and_preserves_dependencies() {
 }
 
 #[test]
+#[cfg(feature = "bundle")]
 fn database_builds_rle_compressed_bundle_and_runtime_preloads_it() {
     let config = database_config("bundle_build_rle");
     let texture_path = AssetPath::parse("textures/compressed.texture");
@@ -11367,6 +11827,7 @@ fn database_builds_rle_compressed_bundle_and_runtime_preloads_it() {
 
 #[cfg(feature = "zstd")]
 #[test]
+#[cfg(feature = "bundle")]
 fn database_builds_zstd_compressed_bundle_and_runtime_preloads_it() {
     let config = database_config("bundle_build_zstd");
     let texture_path = AssetPath::parse("textures/zstd.texture");

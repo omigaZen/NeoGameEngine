@@ -25,10 +25,14 @@ use crate::assets::Shader;
     feature = "model_importer"
 ))]
 use crate::assets::Texture;
+#[cfg(any(feature = "model_importer", feature = "importers"))]
+use crate::assets::{AnimationClip, Skeleton};
 #[cfg(feature = "model_importer")]
-use crate::assets::{AnimationClip, AnimationTarget, Mesh, PhysicsMesh, Skeleton};
+use crate::assets::{AnimationTarget, Mesh, PhysicsMesh};
 #[cfg(feature = "audio_importer")]
 use crate::assets::{AudioClip, AudioCompression};
+#[cfg(feature = "importers")]
+use crate::assets::{Prefab, SceneAsset};
 
 #[cfg(feature = "model_importer")]
 const SKIN_WEIGHT_SUM_EPSILON: f32 = 0.001;
@@ -435,126 +439,11 @@ fn import_texture_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
     if !source.bytes.starts_with(b"NGA_TEXTURE_SOURCE_V1") {
         return Ok(source.bytes.clone());
     }
-    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
-        message: format!("texture source must be UTF-8: {error}"),
-    })?;
-    parse_texture_source(text)
-}
-
-#[cfg(feature = "texture_importer")]
-fn parse_texture_source(text: &str) -> Result<Vec<u8>, ImportError> {
-    let mut lines = text.lines();
-    if lines.next().unwrap_or("").trim() != "NGA_TEXTURE_SOURCE_V1" {
-        return Err(AssetError::Import {
-            message: "texture source must start with NGA_TEXTURE_SOURCE_V1".to_owned(),
-        });
-    }
-    let mut width = None;
-    let mut height = None;
-    let mut pixels = None;
-    for (line_index, line) in lines.enumerate() {
-        let line_number = line_index + 2;
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(AssetError::Import {
-                message: format!("invalid texture source line {line_number}"),
-            });
-        };
-        let key = key.trim();
-        let value = value.trim();
-        match key {
-            "width" => width = Some(parse_texture_dimension(value, "width", line_number)?),
-            "height" => height = Some(parse_texture_dimension(value, "height", line_number)?),
-            "size" => {
-                let Some((width_value, height_value)) = value.split_once('x') else {
-                    return Err(AssetError::Import {
-                        message: format!("texture source size on line {line_number} must be WxH"),
-                    });
-                };
-                width = Some(parse_texture_dimension(
-                    width_value.trim(),
-                    "width",
-                    line_number,
-                )?);
-                height = Some(parse_texture_dimension(
-                    height_value.trim(),
-                    "height",
-                    line_number,
-                )?);
-            }
-            "rgba" | "pixels" => pixels = Some(parse_texture_pixels(value, line_number)?),
-            other => {
-                return Err(AssetError::Import {
-                    message: format!("unknown texture source key `{other}` on line {line_number}"),
-                })
-            }
-        }
-    }
-    let width = width.ok_or_else(|| AssetError::Import {
-        message: "texture source missing width or size".to_owned(),
-    })?;
-    let height = height.ok_or_else(|| AssetError::Import {
-        message: "texture source missing height or size".to_owned(),
-    })?;
-    let pixels = pixels.ok_or_else(|| AssetError::Import {
-        message: "texture source missing rgba pixels".to_owned(),
-    })?;
-    let expected = (width as usize)
-        .checked_mul(height as usize)
-        .and_then(|pixels| pixels.checked_mul(4))
-        .ok_or_else(|| AssetError::Import {
-            message: "texture source dimensions overflow pixel count".to_owned(),
-        })?;
-    if pixels.len() != expected {
-        return Err(AssetError::Import {
-            message: format!(
-                "texture source rgba byte count {} did not match expected {expected}",
-                pixels.len()
-            ),
-        });
-    }
-    let mut bytes = Vec::with_capacity(8 + pixels.len());
-    bytes.extend_from_slice(&width.to_le_bytes());
-    bytes.extend_from_slice(&height.to_le_bytes());
-    bytes.extend_from_slice(&pixels);
-    Ok(bytes)
-}
-
-#[cfg(feature = "texture_importer")]
-fn parse_texture_dimension(
-    value: &str,
-    name: &str,
-    line_number: usize,
-) -> Result<u32, ImportError> {
-    let dimension = value.parse::<u32>().map_err(|error| AssetError::Import {
-        message: format!("invalid texture source {name} on line {line_number}: {error}"),
-    })?;
-    if dimension == 0 {
-        return Err(AssetError::Import {
-            message: format!("texture source {name} on line {line_number} must be non-zero"),
-        });
-    }
-    Ok(dimension)
-}
-
-#[cfg(feature = "texture_importer")]
-fn parse_texture_pixels(value: &str, line_number: usize) -> Result<Vec<u8>, ImportError> {
-    value
-        .replace(';', ",")
-        .split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            part.parse::<u8>().map_err(|error| AssetError::Import {
-                message: format!(
-                    "invalid texture source rgba byte `{part}` on line {line_number}: {error}"
-                ),
-            })
-        })
-        .collect()
+    crate::assets::texture::canonical_texture_source_document(
+        std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+            message: format!("texture source must be UTF-8: {error}"),
+        })?,
+    )
 }
 
 #[cfg(feature = "model_importer")]
@@ -1147,7 +1036,7 @@ impl AssetImporter for ShaderImporter {
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["wgsl", "glsl", "shader"]
+        &["wgsl", "glsl", "shader", "spv"]
     }
 
     fn import(
@@ -1190,98 +1079,11 @@ fn import_shader_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
     if !source.bytes.starts_with(b"NGA_SHADER_SOURCE_V1") {
         return Ok(source.bytes.clone());
     }
-    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
-        message: format!("shader source must be UTF-8: {error}"),
-    })?;
-    canonical_shader_source(text).map(String::into_bytes)
-}
-
-#[cfg(feature = "shader_importer")]
-fn canonical_shader_source(source_text: &str) -> Result<String, ImportError> {
-    let mut lines = source_text.lines();
-    if lines.next().unwrap_or("").trim() != "NGA_SHADER_SOURCE_V1" {
-        return Err(AssetError::Import {
-            message: "shader source must start with NGA_SHADER_SOURCE_V1".to_owned(),
-        });
-    }
-    let mut language = None;
-    let mut inline_source = None;
-    let mut body_lines = Vec::new();
-    let mut in_body = false;
-    for (line_index, line) in lines.enumerate() {
-        let line_number = line_index + 2;
-        if in_body {
-            body_lines.push(line);
-            continue;
-        }
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if trimmed == "---" {
-            in_body = true;
-            continue;
-        }
-        let Some((key, value)) = trimmed.split_once('=') else {
-            return Err(AssetError::Import {
-                message: format!("invalid shader source line {line_number}"),
-            });
-        };
-        match key.trim() {
-            "language" => language = Some(parse_shader_source_language(value.trim(), line_number)?),
-            "source" => {
-                if inline_source.is_some() || !body_lines.is_empty() {
-                    return Err(AssetError::Import {
-                        message: format!("shader source body is repeated on line {line_number}"),
-                    });
-                }
-                inline_source = Some(value.trim().to_owned());
-            }
-            "entry" | "stage" => {}
-            other => {
-                return Err(AssetError::Import {
-                    message: format!("unknown shader source key `{other}` on line {line_number}"),
-                })
-            }
-        }
-    }
-    let _language = language.ok_or_else(|| AssetError::Import {
-        message: "shader source missing language".to_owned(),
-    })?;
-    let source = match (inline_source, body_lines.is_empty()) {
-        (Some(source), true) => source,
-        (Some(_), false) => {
-            return Err(AssetError::Import {
-                message: "shader source body is repeated".to_owned(),
-            })
-        }
-        (None, false) => body_lines.join("\n"),
-        (None, true) => {
-            return Err(AssetError::Import {
-                message: "shader source missing body".to_owned(),
-            })
-        }
-    };
-    let source = source.trim();
-    if source.is_empty() {
-        return Err(AssetError::Import {
-            message: "shader source body is empty".to_owned(),
-        });
-    }
-    Ok(format!("{source}\n"))
-}
-
-#[cfg(feature = "shader_importer")]
-fn parse_shader_source_language(
-    value: &str,
-    line_number: usize,
-) -> Result<&'static str, ImportError> {
-    match value {
-        "wgsl" => Ok("wgsl"),
-        other => Err(AssetError::Import {
-            message: format!("unsupported shader source language `{other}` on line {line_number}"),
-        }),
-    }
+    crate::assets::shader::canonical_shader_source_document(
+        std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+            message: format!("shader source must be UTF-8: {error}"),
+        })?,
+    )
 }
 
 #[cfg(feature = "importers")]
@@ -2319,6 +2121,547 @@ fn canonical_audio_f32(value: f32) -> String {
     }
 }
 
+#[cfg(feature = "importers")]
+pub struct SceneImporter;
+
+#[cfg(feature = "importers")]
+impl SceneImporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "importers")]
+impl Default for SceneImporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "importers")]
+impl AssetImporter for SceneImporter {
+    fn name(&self) -> &'static str {
+        "SceneImporter"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn extensions(&self) -> &[&'static str] {
+        &["scene"]
+    }
+
+    fn import(
+        &self,
+        ctx: &mut ImportContext,
+        source: &SourceAsset,
+        settings: &ImporterSettings,
+    ) -> Result<ImportOutput, ImportError> {
+        let id = AssetId::new();
+        let bytes = import_scene_bytes(ctx, source)?;
+        let mut metadata = AssetMetadata::runtime(id, source.path.clone(), SceneAsset::TYPE_ID);
+        metadata.source_path = Some(source.path.clone());
+        metadata.cooked_path = Some(source.path.clone());
+        metadata.importer = Some(self.name().to_owned());
+        metadata.importer_version = self.version();
+        metadata.source_hash = Some(source.hash);
+        metadata.settings_hash = Some(ContentHash(settings_hash(settings)));
+        metadata.version_hash = Some(VersionHash(self.version() as u64));
+        let generated = ImportGeneratedAsset {
+            id,
+            path: source.path.clone(),
+            asset_type: SceneAsset::TYPE_ID,
+            bytes,
+            labels: Vec::new(),
+            dependencies: Vec::new(),
+        };
+        ctx.add_generated_asset(generated.clone());
+        let (generated, dependencies) = std::mem::take(ctx).finish();
+        Ok(ImportOutput {
+            metadata,
+            generated,
+            dependencies,
+            version_hash: VersionHash(self.version() as u64),
+        })
+    }
+}
+
+#[cfg(feature = "importers")]
+pub struct PrefabImporter;
+
+#[cfg(feature = "importers")]
+impl PrefabImporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "importers")]
+impl Default for PrefabImporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "importers")]
+impl AssetImporter for PrefabImporter {
+    fn name(&self) -> &'static str {
+        "PrefabImporter"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn extensions(&self) -> &[&'static str] {
+        &["prefab"]
+    }
+
+    fn import(
+        &self,
+        ctx: &mut ImportContext,
+        source: &SourceAsset,
+        settings: &ImporterSettings,
+    ) -> Result<ImportOutput, ImportError> {
+        let id = AssetId::new();
+        let bytes = import_prefab_bytes(ctx, source)?;
+        let mut metadata = AssetMetadata::runtime(id, source.path.clone(), Prefab::TYPE_ID);
+        metadata.source_path = Some(source.path.clone());
+        metadata.cooked_path = Some(source.path.clone());
+        metadata.importer = Some(self.name().to_owned());
+        metadata.importer_version = self.version();
+        metadata.source_hash = Some(source.hash);
+        metadata.settings_hash = Some(ContentHash(settings_hash(settings)));
+        metadata.version_hash = Some(VersionHash(self.version() as u64));
+        let generated = ImportGeneratedAsset {
+            id,
+            path: source.path.clone(),
+            asset_type: Prefab::TYPE_ID,
+            bytes,
+            labels: Vec::new(),
+            dependencies: Vec::new(),
+        };
+        ctx.add_generated_asset(generated.clone());
+        let (generated, dependencies) = std::mem::take(ctx).finish();
+        Ok(ImportOutput {
+            metadata,
+            generated,
+            dependencies,
+            version_hash: VersionHash(self.version() as u64),
+        })
+    }
+}
+
+#[cfg(feature = "importers")]
+pub struct AnimationImporter;
+
+#[cfg(feature = "importers")]
+impl AnimationImporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "importers")]
+impl Default for AnimationImporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "importers")]
+impl AssetImporter for AnimationImporter {
+    fn name(&self) -> &'static str {
+        "AnimationImporter"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn extensions(&self) -> &[&'static str] {
+        &["animation", "anim"]
+    }
+
+    fn import(
+        &self,
+        ctx: &mut ImportContext,
+        source: &SourceAsset,
+        settings: &ImporterSettings,
+    ) -> Result<ImportOutput, ImportError> {
+        let id = AssetId::new();
+        let bytes = import_animation_bytes(source)?;
+        let mut metadata = AssetMetadata::runtime(id, source.path.clone(), AnimationClip::TYPE_ID);
+        metadata.source_path = Some(source.path.clone());
+        metadata.cooked_path = Some(source.path.clone());
+        metadata.importer = Some(self.name().to_owned());
+        metadata.importer_version = self.version();
+        metadata.source_hash = Some(source.hash);
+        metadata.settings_hash = Some(ContentHash(settings_hash(settings)));
+        metadata.version_hash = Some(VersionHash(self.version() as u64));
+        let generated = ImportGeneratedAsset {
+            id,
+            path: source.path.clone(),
+            asset_type: AnimationClip::TYPE_ID,
+            bytes,
+            labels: Vec::new(),
+            dependencies: Vec::new(),
+        };
+        ctx.add_generated_asset(generated.clone());
+        let (generated, dependencies) = std::mem::take(ctx).finish();
+        Ok(ImportOutput {
+            metadata,
+            generated,
+            dependencies,
+            version_hash: VersionHash(self.version() as u64),
+        })
+    }
+}
+
+#[cfg(feature = "importers")]
+pub struct SkeletonImporter;
+
+#[cfg(feature = "importers")]
+impl SkeletonImporter {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "importers")]
+impl Default for SkeletonImporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "importers")]
+impl AssetImporter for SkeletonImporter {
+    fn name(&self) -> &'static str {
+        "SkeletonImporter"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn extensions(&self) -> &[&'static str] {
+        &["skeleton", "skel"]
+    }
+
+    fn import(
+        &self,
+        ctx: &mut ImportContext,
+        source: &SourceAsset,
+        settings: &ImporterSettings,
+    ) -> Result<ImportOutput, ImportError> {
+        let id = AssetId::new();
+        let bytes = import_skeleton_bytes(source)?;
+        let mut metadata = AssetMetadata::runtime(id, source.path.clone(), Skeleton::TYPE_ID);
+        metadata.source_path = Some(source.path.clone());
+        metadata.cooked_path = Some(source.path.clone());
+        metadata.importer = Some(self.name().to_owned());
+        metadata.importer_version = self.version();
+        metadata.source_hash = Some(source.hash);
+        metadata.settings_hash = Some(ContentHash(settings_hash(settings)));
+        metadata.version_hash = Some(VersionHash(self.version() as u64));
+        let generated = ImportGeneratedAsset {
+            id,
+            path: source.path.clone(),
+            asset_type: Skeleton::TYPE_ID,
+            bytes,
+            labels: Vec::new(),
+            dependencies: Vec::new(),
+        };
+        ctx.add_generated_asset(generated.clone());
+        let (generated, dependencies) = std::mem::take(ctx).finish();
+        Ok(ImportOutput {
+            metadata,
+            generated,
+            dependencies,
+            version_hash: VersionHash(self.version() as u64),
+        })
+    }
+}
+
+#[cfg(feature = "importers")]
+fn import_scene_bytes(
+    ctx: &mut ImportContext,
+    source: &SourceAsset,
+) -> Result<Vec<u8>, ImportError> {
+    validate_scene_source_document(source, |path, asset_type| {
+        register_import_dependency(ctx, path, asset_type)
+    })?;
+    Ok(source.bytes.clone())
+}
+
+#[cfg(feature = "importers")]
+fn import_prefab_bytes(
+    ctx: &mut ImportContext,
+    source: &SourceAsset,
+) -> Result<Vec<u8>, ImportError> {
+    validate_prefab_source_document(source, |path, asset_type| {
+        register_import_dependency(ctx, path, asset_type)
+    })?;
+    Ok(source.bytes.clone())
+}
+
+#[cfg(feature = "importers")]
+fn import_animation_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
+    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+        message: format!("animation source must be UTF-8: {error}"),
+    })?;
+    if text.lines().next().unwrap_or("").trim() != "NGA_ANIMATION_SOURCE_V1" {
+        return Err(AssetError::Import {
+            message: "animation source must start with NGA_ANIMATION_SOURCE_V1".to_owned(),
+        });
+    }
+    let runtime_text = text.replacen("NGA_ANIMATION_SOURCE_V1", "NGA_ANIMATION_V1", 1);
+    crate::assets::animation::parse_animation_clip(runtime_text.as_bytes())?;
+    Ok(runtime_text.into_bytes())
+}
+
+#[cfg(feature = "importers")]
+fn import_skeleton_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
+    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+        message: format!("skeleton source must be UTF-8: {error}"),
+    })?;
+    if text.lines().next().unwrap_or("").trim() != "NGA_SKELETON_SOURCE_V1" {
+        return Err(AssetError::Import {
+            message: "skeleton source must start with NGA_SKELETON_SOURCE_V1".to_owned(),
+        });
+    }
+    let runtime_text = text.replacen("NGA_SKELETON_SOURCE_V1", "NGA_SKELETON_V1", 1);
+    crate::assets::skeleton::parse_skeleton(runtime_text.as_bytes())?;
+    Ok(runtime_text.into_bytes())
+}
+
+#[cfg(feature = "importers")]
+pub(crate) fn validate_scene_source_document<F>(
+    source: &SourceAsset,
+    mut on_dependency: F,
+) -> Result<(), ImportError>
+where
+    F: FnMut(AssetPath, AssetTypeId) -> Result<(), ImportError>,
+{
+    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+        message: format!("scene source must be UTF-8: {error}"),
+    })?;
+    let mut lines = text.lines();
+    let header = lines.next().unwrap_or("").trim();
+    if header != "NGA_SCENE_V1" {
+        return Err(AssetError::Import {
+            message: "scene source must start with NGA_SCENE_V1".to_owned(),
+        });
+    }
+
+    let mut name = None;
+    let mut entities = Vec::new();
+    let mut current_entity = None;
+
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(AssetError::Import {
+                message: format!("invalid scene line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "name" => {
+                if value.is_empty() {
+                    return Err(AssetError::Import {
+                        message: format!("scene name is empty on line {line_number}"),
+                    });
+                }
+                name = Some(value.to_owned());
+            }
+            "dependency" => {
+                let path = AssetPath::parse(value);
+                let asset_type =
+                    crate::assets::scene::dependency_type_for_path(&path, line_number, "scene")?;
+                on_dependency(path, asset_type)?;
+            }
+            "entity" => {
+                let entity =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "scene")?;
+                entities.push(entity);
+                current_entity = Some(entities.len() - 1);
+            }
+            "component" => {
+                let Some(entity_index) = current_entity else {
+                    return Err(AssetError::Import {
+                        message: format!("scene component on line {line_number} has no entity"),
+                    });
+                };
+                entities[entity_index].components.push(
+                    crate::assets::scene::parse_serialized_component(value, line_number, "scene")?,
+                );
+            }
+            other => {
+                return Err(AssetError::Import {
+                    message: format!("unknown scene key `{other}` on line {line_number}"),
+                });
+            }
+        }
+    }
+
+    name.ok_or_else(|| AssetError::Import {
+        message: "scene source missing name".to_owned(),
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "importers")]
+pub(crate) fn validate_prefab_source_document<F>(
+    source: &SourceAsset,
+    mut on_dependency: F,
+) -> Result<(), ImportError>
+where
+    F: FnMut(AssetPath, AssetTypeId) -> Result<(), ImportError>,
+{
+    let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
+        message: format!("prefab source must be UTF-8: {error}"),
+    })?;
+    let mut lines = text.lines();
+    let header = lines.next().unwrap_or("").trim();
+    if header != "NGA_PREFAB_V1" {
+        return Err(AssetError::Import {
+            message: "prefab source must start with NGA_PREFAB_V1".to_owned(),
+        });
+    }
+
+    #[derive(Clone, Copy)]
+    enum PrefabEntityTarget {
+        Root,
+        Child(usize),
+    }
+
+    let mut root = None;
+    let mut children = Vec::new();
+    let mut current_entity = None;
+
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(AssetError::Import {
+                message: format!("invalid prefab line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "dependency" => {
+                let path = AssetPath::parse(value);
+                let asset_type =
+                    crate::assets::scene::dependency_type_for_path(&path, line_number, "prefab")?;
+                on_dependency(path, asset_type)?;
+            }
+            "root" => {
+                if root.is_some() {
+                    return Err(AssetError::Import {
+                        message: format!("duplicate prefab root on line {line_number}"),
+                    });
+                }
+                let root_entity =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "prefab")?;
+                if root_entity.parent.is_some() {
+                    return Err(AssetError::Import {
+                        message: format!("prefab root cannot have parent on line {line_number}"),
+                    });
+                }
+                root = Some(root_entity);
+                current_entity = Some(PrefabEntityTarget::Root);
+            }
+            "child" => {
+                if root.is_none() {
+                    return Err(AssetError::Import {
+                        message: format!("prefab child on line {line_number} has no root"),
+                    });
+                }
+                let child =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "prefab")?;
+                children.push(child);
+                current_entity = Some(PrefabEntityTarget::Child(children.len() - 1));
+            }
+            "component" => {
+                let component =
+                    crate::assets::scene::parse_serialized_component(value, line_number, "prefab")?;
+                match current_entity {
+                    Some(PrefabEntityTarget::Root) => {
+                        if let Some(root) = root.as_mut() {
+                            root.components.push(component);
+                        }
+                    }
+                    Some(PrefabEntityTarget::Child(index)) => {
+                        children[index].components.push(component);
+                    }
+                    None => {
+                        return Err(AssetError::Import {
+                            message: format!(
+                                "prefab component on line {line_number} has no entity"
+                            ),
+                        });
+                    }
+                }
+            }
+            other => {
+                return Err(AssetError::Import {
+                    message: format!("unknown prefab key `{other}` on line {line_number}"),
+                });
+            }
+        }
+    }
+
+    root.ok_or_else(|| AssetError::Import {
+        message: "prefab source missing root".to_owned(),
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "importers")]
+fn register_import_dependency(
+    ctx: &mut ImportContext,
+    path: AssetPath,
+    asset_type: AssetTypeId,
+) -> Result<(), ImportError> {
+    match asset_type {
+        t if t == crate::assets::Texture::TYPE_ID => {
+            ctx.dependency::<crate::assets::Texture>(path)?;
+        }
+        t if t == crate::assets::mesh::Mesh::TYPE_ID => {
+            ctx.dependency::<crate::assets::mesh::Mesh>(path)?;
+        }
+        t if t == crate::assets::Shader::TYPE_ID => {
+            ctx.dependency::<crate::assets::Shader>(path)?;
+        }
+        t if t == crate::assets::Material::TYPE_ID => {
+            ctx.dependency::<crate::assets::Material>(path)?;
+        }
+        t if t == crate::assets::AudioClip::TYPE_ID => {
+            ctx.dependency::<crate::assets::AudioClip>(path)?;
+        }
+        t if t == SceneAsset::TYPE_ID => {
+            ctx.dependency::<SceneAsset>(path)?;
+        }
+        t if t == Prefab::TYPE_ID => {
+            ctx.dependency::<Prefab>(path)?;
+        }
+        _ => unreachable!("dependency_type_for_path returned unsupported asset type"),
+    }
+    Ok(())
+}
+
 #[cfg(feature = "material_importer")]
 pub struct MaterialImporter;
 
@@ -2398,31 +2741,9 @@ impl AssetImporter for MaterialImporter {
 
 #[cfg(feature = "material_importer")]
 fn canonical_material_source(source_text: &str) -> Result<String, ImportError> {
-    let mut lines = Vec::new();
-    for (line_index, line) in source_text.lines().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            return Err(AssetError::Import {
-                message: format!("invalid material line {}", line_index + 1),
-            });
-        };
-        let key = key.trim();
-        let value = value.trim();
-        if key.is_empty() {
-            return Err(AssetError::Import {
-                message: format!("material key is empty on line {}", line_index + 1),
-            });
-        }
-        lines.push(format!("{key}={value}"));
-    }
-    let mut canonical = lines.join("\n");
-    if !canonical.is_empty() {
-        canonical.push('\n');
-    }
-    Ok(canonical)
+    Ok(crate::assets::material::canonical_material_source_text(
+        source_text,
+    ))
 }
 
 #[cfg(any(feature = "material_importer", feature = "model_importer"))]

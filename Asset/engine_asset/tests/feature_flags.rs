@@ -8,6 +8,26 @@ fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     bytes
 }
 
+fn shader_bytes() -> Vec<u8> {
+    b"@fragment fn main() {}\n".to_vec()
+}
+
+fn scene_bytes() -> Vec<u8> {
+    b"NGA_SCENE_V1\nname=hero_scene\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec()
+}
+
+fn prefab_bytes() -> Vec<u8> {
+    b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec()
+}
+
+fn animation_source_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_SOURCE_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+}
+
+fn skeleton_source_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_SOURCE_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
+}
+
 fn database_config(name: &str) -> AssetDatabaseConfig {
     let root = std::env::temp_dir()
         .join("engine_asset_feature_flags")
@@ -178,8 +198,20 @@ fn filesystem_feature_gate_matches_filesystem_io_behavior() {
 #[test]
 fn importer_feature_gates_match_registration_paths() {
     let mut database = AssetDatabase::new(database_config("importer_feature_gates"));
-    database
-        .set_io(MemoryAssetIo::new().with_file("textures/albedo.texture", texture_bytes(1, 1, 7)));
+    database.set_io(
+        MemoryAssetIo::new()
+            .with_file("shaders/pbr.wgsl", shader_bytes())
+            .with_file("textures/albedo.texture", texture_bytes(1, 1, 7))
+            .with_file(
+                "materials/hero.material",
+                b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\n"
+                    .to_vec(),
+            )
+            .with_file("animations/hero.animation", animation_source_bytes())
+            .with_file("skeletons/hero.skeleton", skeleton_source_bytes())
+            .with_file("scenes/hero.scene", scene_bytes())
+            .with_file("prefabs/hero.prefab", prefab_bytes()),
+    );
 
     if asset_feature_enabled(AssetFeature::Importers) {
         database.try_register_builtin_importers().unwrap();
@@ -202,6 +234,56 @@ fn importer_feature_gates_match_registration_paths() {
             .unwrap();
         let metadata = database.registry().get(id).unwrap();
         assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
+        let shader_id = database
+            .import_asset_path(&AssetPath::parse("shaders/pbr.wgsl"))
+            .unwrap();
+        let material_id = database
+            .import_asset_path(&AssetPath::parse("materials/hero.material"))
+            .unwrap();
+        let animation_id = database
+            .import_asset_path(&AssetPath::parse("animations/hero.animation"))
+            .unwrap();
+        let skeleton_id = database
+            .import_asset_path(&AssetPath::parse("skeletons/hero.skeleton"))
+            .unwrap();
+        let scene_id = database
+            .import_asset_path(&AssetPath::parse("scenes/hero.scene"))
+            .unwrap();
+        let prefab_id = database
+            .import_asset_path(&AssetPath::parse("prefabs/hero.prefab"))
+            .unwrap();
+        assert_eq!(
+            database.registry().get(material_id).unwrap().dependencies,
+            vec![shader_id, id]
+        );
+        assert_eq!(
+            database.registry().get(scene_id).unwrap().dependencies,
+            vec![id, material_id]
+        );
+        assert_eq!(
+            database.registry().get(prefab_id).unwrap().dependencies,
+            vec![id, material_id]
+        );
+        assert_eq!(
+            database.registry().get(animation_id).unwrap().asset_type,
+            AssetTypeId::of::<AnimationClip>()
+        );
+        assert_eq!(
+            database.registry().get(skeleton_id).unwrap().asset_type,
+            AssetTypeId::of::<Skeleton>()
+        );
+        assert!(database
+            .registry()
+            .get(animation_id)
+            .unwrap()
+            .dependencies
+            .is_empty());
+        assert!(database
+            .registry()
+            .get(skeleton_id)
+            .unwrap()
+            .dependencies
+            .is_empty());
     } else {
         assert!(matches!(
             database.import_asset_path_with_settings(
@@ -210,14 +292,36 @@ fn importer_feature_gates_match_registration_paths() {
             ),
             Err(AssetError::Import { message }) if message.contains("no importer registered")
         ));
+        assert!(matches!(
+            database.import_asset_path(&AssetPath::parse("scenes/hero.scene")),
+            Err(AssetError::Import { message }) if message.contains("no importer registered")
+        ));
+        assert!(matches!(
+            database.import_asset_path(&AssetPath::parse("prefabs/hero.prefab")),
+            Err(AssetError::Import { message }) if message.contains("no importer registered")
+        ));
+        assert!(matches!(
+            database.import_asset_path(&AssetPath::parse("animations/hero.animation")),
+            Err(AssetError::Import { message }) if message.contains("no importer registered")
+        ));
+        assert!(matches!(
+            database.import_asset_path(&AssetPath::parse("skeletons/hero.skeleton")),
+            Err(AssetError::Import { message }) if message.contains("no importer registered")
+        ));
     }
 }
 
 #[test]
 fn cooker_feature_gates_match_registration_paths() {
     let mut database = AssetDatabase::new(database_config("cooker_feature_gates"));
-    database
-        .set_io(MemoryAssetIo::new().with_file("textures/albedo.texture", texture_bytes(1, 1, 7)));
+    database.set_io(
+        MemoryAssetIo::new()
+            .with_file("textures/albedo.texture", texture_bytes(1, 1, 7))
+            .with_file("animations/hero.animation", animation_source_bytes())
+            .with_file("skeletons/hero.skeleton", skeleton_source_bytes())
+            .with_file("scenes/hero.scene", scene_bytes())
+            .with_file("prefabs/hero.prefab", prefab_bytes()),
+    );
 
     if asset_feature_enabled(AssetFeature::Cookers) {
         database.try_register_builtin_cookers().unwrap();
@@ -235,6 +339,30 @@ fn cooker_feature_gates_match_registration_paths() {
         AssetPath::parse("textures/albedo.texture"),
         Texture::TYPE_ID,
     ));
+    let scene_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f002);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        scene_id,
+        AssetPath::parse("scenes/hero.scene"),
+        SceneAsset::TYPE_ID,
+    ));
+    let prefab_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f003);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        prefab_id,
+        AssetPath::parse("prefabs/hero.prefab"),
+        Prefab::TYPE_ID,
+    ));
+    let animation_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f004);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        animation_id,
+        AssetPath::parse("animations/hero.animation"),
+        AnimationClip::TYPE_ID,
+    ));
+    let skeleton_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f005);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        skeleton_id,
+        AssetPath::parse("skeletons/hero.skeleton"),
+        Skeleton::TYPE_ID,
+    ));
 
     if asset_feature_enabled(AssetFeature::TextureCooker) {
         let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
@@ -243,6 +371,42 @@ fn cooker_feature_gates_match_registration_paths() {
     } else {
         assert!(matches!(
             database.cook_asset(id, TargetPlatform::Windows),
+            Err(AssetError::Cook { message }) if message.contains("no cooker registered")
+        ));
+    }
+
+    if asset_feature_enabled(AssetFeature::Cookers) {
+        let scene_output = database
+            .cook_asset(scene_id, TargetPlatform::Windows)
+            .unwrap();
+        let prefab_output = database
+            .cook_asset(prefab_id, TargetPlatform::Windows)
+            .unwrap();
+        let animation_output = database
+            .cook_asset(animation_id, TargetPlatform::Windows)
+            .unwrap();
+        let skeleton_output = database
+            .cook_asset(skeleton_id, TargetPlatform::Windows)
+            .unwrap();
+        assert_eq!(scene_output.bytes, scene_bytes());
+        assert_eq!(prefab_output.bytes, prefab_bytes());
+        assert_eq!(animation_output.bytes, animation_source_bytes());
+        assert_eq!(skeleton_output.bytes, skeleton_source_bytes());
+    } else {
+        assert!(matches!(
+            database.cook_asset(scene_id, TargetPlatform::Windows),
+            Err(AssetError::Cook { message }) if message.contains("no cooker registered")
+        ));
+        assert!(matches!(
+            database.cook_asset(prefab_id, TargetPlatform::Windows),
+            Err(AssetError::Cook { message }) if message.contains("no cooker registered")
+        ));
+        assert!(matches!(
+            database.cook_asset(animation_id, TargetPlatform::Windows),
+            Err(AssetError::Cook { message }) if message.contains("no cooker registered")
+        ));
+        assert!(matches!(
+            database.cook_asset(skeleton_id, TargetPlatform::Windows),
             Err(AssetError::Cook { message }) if message.contains("no cooker registered")
         ));
     }

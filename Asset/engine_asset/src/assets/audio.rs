@@ -439,3 +439,49 @@ fn read_wav_u32(bytes: &[u8], offset: usize, field: &str) -> Result<u32, AssetEr
         })?;
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
+
+pub fn canonical_audio_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    let clip = parse_audio_clip(bytes)?;
+    encode_audio_clip_runtime_bytes(&clip)
+}
+
+pub fn encode_audio_clip_runtime_bytes(audio: &AudioClip) -> Result<Vec<u8>, AssetError> {
+    let (sample_format, samples) = match &audio.samples {
+        AudioSamples::I16(samples) => ("i16", canonical_audio_i16_samples(samples)),
+        AudioSamples::F32(samples) => ("f32", canonical_audio_f32_samples(samples)),
+        AudioSamples::Streaming(_) => {
+            return Err(AssetError::Decode {
+                message: "audio streaming samples cannot be encoded to runtime bytes".to_owned(),
+            })
+        }
+    };
+    Ok(format!(
+        "NGA_AUDIO_V1\nsample_rate={}\nchannels={}\nformat={sample_format}\nsamples={samples}\nstreaming={}\n",
+        audio.sample_rate,
+        audio.channels,
+        audio.streaming
+    )
+    .into_bytes())
+}
+
+fn canonical_audio_i16_samples(samples: &[i16]) -> String {
+    samples
+        .iter()
+        .map(|sample| sample.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn canonical_audio_f32_samples(samples: &[f32]) -> String {
+    samples
+        .iter()
+        .map(|sample| {
+            if *sample == 0.0 {
+                "0".to_owned()
+            } else {
+                sample.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}

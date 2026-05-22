@@ -143,6 +143,18 @@ fn shader_bytes() -> Vec<u8> {
     b"/* ignored comment with braces {} */\n@group(2)\n@binding(3)\nvar<storage, read_write> particles: array<u32>;\n@compute @workgroup_size(1) fn main() {}\n".to_vec()
 }
 
+fn glsl_shader_bytes() -> Vec<u8> {
+    b"#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n".to_vec()
+}
+
+fn spirv_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for word in [0x0723_0203u32, 0x0001_0000, 0x0000_0000, 0x0000_0000] {
+        push_u32(&mut bytes, word);
+    }
+    bytes
+}
+
 fn scene_bytes() -> Vec<u8> {
     b"NGA_SCENE_V1\nname=level\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec()
 }
@@ -558,6 +570,82 @@ fn shader_load_populates_vertex_reflection_metadata() {
 }
 
 #[test]
+fn shader_spirv_load_reaches_ready_after_renderer_upload_handoff() {
+    let bytes = spirv_bytes();
+    let io = MemoryAssetIo::new().with_file("shaders/compute.spv", bytes.clone());
+    let mut server = server_with_io(io);
+
+    let shader: Handle<Shader> = server.load("shaders/compute.spv#compute");
+    server.update_loading();
+
+    assert_eq!(server.state(&shader), AssetLoadState::UploadingGpu);
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].id, shader.id());
+    assert_eq!(uploads[0].kind, GpuUploadKind::Shader);
+    assert_eq!(
+        uploads[0].label.as_deref(),
+        Some("shaders/compute.spv#compute")
+    );
+    assert_eq!(uploads[0].bytes, bytes);
+
+    server.finish_gpu_uploads(vec![GpuUploadResult::ok(
+        shader.id(),
+        GpuResourceHandle(23),
+    )]);
+
+    assert!(server.is_ready(&shader));
+    let loaded = server.get(&shader).unwrap();
+    assert_eq!(loaded.stages.len(), 1);
+    assert_eq!(loaded.stages[0].stage, ShaderStage::Compute);
+    assert!(matches!(
+        &loaded.stages[0].source,
+        ShaderSource::Spirv(words)
+            if words.as_slice()
+                == [0x0723_0203, 0x0001_0000, 0x0000_0000, 0x0000_0000]
+    ));
+    assert!(loaded.reflection.is_none());
+    assert_eq!(loaded.gpu, Some(GpuResourceHandle(23)));
+}
+
+#[test]
+fn shader_glsl_load_reaches_ready_without_reflection_after_renderer_upload_handoff() {
+    let bytes = glsl_shader_bytes();
+    let io = MemoryAssetIo::new().with_file("shaders/compute.glsl", bytes.clone());
+    let mut server = server_with_io(io);
+
+    let shader: Handle<Shader> = server.load("shaders/compute.glsl#compute");
+    server.update_loading();
+
+    assert_eq!(server.state(&shader), AssetLoadState::UploadingGpu);
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].id, shader.id());
+    assert_eq!(uploads[0].kind, GpuUploadKind::Shader);
+    assert_eq!(
+        uploads[0].label.as_deref(),
+        Some("shaders/compute.glsl#compute")
+    );
+    assert_eq!(uploads[0].bytes, bytes);
+
+    server.finish_gpu_uploads(vec![GpuUploadResult::ok(
+        shader.id(),
+        GpuResourceHandle(24),
+    )]);
+
+    assert!(server.is_ready(&shader));
+    let loaded = server.get(&shader).unwrap();
+    assert_eq!(loaded.stages.len(), 1);
+    assert_eq!(loaded.stages[0].stage, ShaderStage::Compute);
+    assert!(matches!(
+        &loaded.stages[0].source,
+        ShaderSource::Glsl(source) if source == "#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n"
+    ));
+    assert!(loaded.reflection.is_none());
+    assert_eq!(loaded.gpu, Some(GpuResourceHandle(24)));
+}
+
+#[test]
 fn invalid_shader_payload_fails_with_decode_error_and_event() {
     let cases = vec![
         (
@@ -579,6 +667,21 @@ fn invalid_shader_payload_fails_with_decode_error_and_event() {
             "shaders/unclosed_block_comment.wgsl",
             b"/* unclosed shader comment with } brace\n@fragment fn main() {}\n".to_vec(),
             "shader source has unclosed block comment",
+        ),
+        (
+            "shaders/unaligned.spv",
+            vec![0x03, 0x02, 0x23],
+            "shader SPIR-V source must be 4-byte aligned",
+        ),
+        (
+            "shaders/bad_magic.spv",
+            {
+                let mut bytes = Vec::new();
+                push_u32(&mut bytes, 0xFFFF_FFFF);
+                push_u32(&mut bytes, 0x0001_0000);
+                bytes
+            },
+            "shader SPIR-V source must start with the SPIR-V magic word",
         ),
     ];
 

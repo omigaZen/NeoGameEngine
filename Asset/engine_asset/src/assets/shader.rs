@@ -70,13 +70,115 @@ impl Default for ShaderLoader {
     }
 }
 
+pub fn canonical_shader_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    if bytes.is_empty() {
+        return Err(AssetError::Decode {
+            message: "shader source is empty".to_owned(),
+        });
+    }
+    if bytes.starts_with(b"NGA_SHADER_SOURCE_V1") {
+        let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
+            message: format!("shader source must be UTF-8: {error}"),
+        })?;
+        return canonical_shader_source_document(source);
+    }
+    Ok(bytes.to_vec())
+}
+
+#[cfg(feature = "shader_importer")]
+pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, AssetError> {
+    let mut lines = source_text.lines();
+    if lines.next().unwrap_or("").trim() != "NGA_SHADER_SOURCE_V1" {
+        return Err(AssetError::Import {
+            message: "shader source must start with NGA_SHADER_SOURCE_V1".to_owned(),
+        });
+    }
+    let mut language = None;
+    let mut inline_source = None;
+    let mut body_lines = Vec::new();
+    let mut in_body = false;
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        if in_body {
+            body_lines.push(line);
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed == "---" {
+            in_body = true;
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            return Err(AssetError::Import {
+                message: format!("invalid shader source line {line_number}"),
+            });
+        };
+        match key.trim() {
+            "language" => language = Some(parse_shader_source_language(value.trim(), line_number)?),
+            "source" => {
+                if inline_source.is_some() || !body_lines.is_empty() {
+                    return Err(AssetError::Import {
+                        message: format!("shader source body is repeated on line {line_number}"),
+                    });
+                }
+                inline_source = Some(value.trim().to_owned());
+            }
+            "entry" | "stage" => {}
+            other => {
+                return Err(AssetError::Import {
+                    message: format!("unknown shader source key `{other}` on line {line_number}"),
+                })
+            }
+        }
+    }
+    let language = language.ok_or_else(|| AssetError::Import {
+        message: "shader source missing language".to_owned(),
+    })?;
+    let source = match (inline_source, body_lines.is_empty()) {
+        (Some(source), true) => source,
+        (Some(_), false) => {
+            return Err(AssetError::Import {
+                message: "shader source body is repeated".to_owned(),
+            })
+        }
+        (None, false) => body_lines.join("\n"),
+        (None, true) => {
+            return Err(AssetError::Import {
+                message: "shader source missing body".to_owned(),
+            })
+        }
+    };
+    let source = source.trim();
+    if source.is_empty() {
+        return Err(AssetError::Import {
+            message: "shader source body is empty".to_owned(),
+        });
+    }
+    match language {
+        ShaderSourceLanguage::Wgsl | ShaderSourceLanguage::Glsl => {
+            Ok(format!("{source}\n").into_bytes())
+        }
+        ShaderSourceLanguage::Spv => canonical_shader_spirv_source(source),
+    }
+}
+
+#[cfg(not(feature = "shader_importer"))]
+pub fn canonical_shader_source_document(_source_text: &str) -> Result<Vec<u8>, AssetError> {
+    Err(AssetError::Unsupported(
+        "shader source document import requires the shader_importer feature",
+    ))
+}
+
 impl AssetLoader for ShaderLoader {
     fn name(&self) -> &'static str {
         "ShaderLoader"
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["wgsl", "glsl", "shader"]
+        &["wgsl", "glsl", "shader", "spv"]
     }
 
     fn asset_type(&self) -> AssetTypeId {
@@ -89,22 +191,53 @@ impl AssetLoader for ShaderLoader {
         bytes: &[u8],
         _settings: &LoaderSettings,
     ) -> Result<LoadedAsset, AssetLoadError> {
-        let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
-            message: format!("shader source must be UTF-8: {error}"),
-        })?;
-        if source.trim().is_empty() {
-            return Err(AssetError::Decode {
-                message: "shader source is empty".to_owned(),
-            });
-        }
-        let uncommented_lines = shader_source_lines_without_comments(source)?;
-        validate_shader_source_structure(&uncommented_lines)?;
         let stage = shader_stage_from_label(ctx.path().label())?;
-        let reflection = reflect_wgsl_shader(&uncommented_lines, stage)?;
+        let source_variant = match ctx
+            .path()
+            .extension()
+            .map(|extension| extension.to_ascii_lowercase())
+        {
+            Some(extension) if extension == "spv" => {
+                ShaderSource::Spirv(shader_spirv_words(bytes)?)
+            }
+            Some(extension) if extension == "glsl" => {
+                let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
+                    message: format!("shader source must be UTF-8: {error}"),
+                })?;
+                if source.trim().is_empty() {
+                    return Err(AssetError::Decode {
+                        message: "shader source is empty".to_owned(),
+                    });
+                }
+                ShaderSource::Glsl(source.to_owned())
+            }
+            _ => {
+                let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
+                    message: format!("shader source must be UTF-8: {error}"),
+                })?;
+                if source.trim().is_empty() {
+                    return Err(AssetError::Decode {
+                        message: "shader source is empty".to_owned(),
+                    });
+                }
+                ShaderSource::Wgsl(source.to_owned())
+            }
+        };
+        let reflection_source = match &source_variant {
+            ShaderSource::Spirv(_) | ShaderSource::Glsl(_) => None,
+            ShaderSource::Wgsl(source) => {
+                let uncommented_lines = shader_source_lines_without_comments(source)?;
+                validate_shader_source_structure(&uncommented_lines)?;
+                Some(uncommented_lines)
+            }
+        };
+        let reflection = reflection_source
+            .map(|lines| reflect_wgsl_shader(&lines, stage))
+            .transpose()?;
         let shader = Shader {
             stages: vec![ShaderStageSource {
                 stage,
-                source: ShaderSource::Wgsl(source.to_owned()),
+                source: source_variant,
             }],
             reflection: shader_reflection_or_none(reflection),
             gpu: None,
@@ -118,14 +251,6 @@ impl AssetLoader for ShaderLoader {
     }
 }
 
-fn shader_reflection_or_none(reflection: ShaderReflection) -> Option<ShaderReflection> {
-    if reflection.bind_groups.is_empty() && reflection.vertex_inputs.is_empty() {
-        None
-    } else {
-        Some(reflection)
-    }
-}
-
 fn shader_stage_from_label(label: Option<&str>) -> Result<ShaderStage, AssetError> {
     match label {
         Some(label) if label.eq_ignore_ascii_case("vertex") => Ok(ShaderStage::Vertex),
@@ -136,6 +261,106 @@ fn shader_stage_from_label(label: Option<&str>) -> Result<ShaderStage, AssetErro
         }),
         None => Ok(ShaderStage::Fragment),
     }
+}
+
+fn shader_reflection_or_none(reflection: Option<ShaderReflection>) -> Option<ShaderReflection> {
+    reflection.filter(|reflection| {
+        !reflection.bind_groups.is_empty() || !reflection.vertex_inputs.is_empty()
+    })
+}
+
+fn shader_spirv_words(bytes: &[u8]) -> Result<Vec<u32>, AssetError> {
+    if bytes.is_empty() {
+        return Err(AssetError::Decode {
+            message: "shader source is empty".to_owned(),
+        });
+    }
+    if bytes.len() % 4 != 0 {
+        return Err(AssetError::Decode {
+            message: format!(
+                "shader SPIR-V source must be 4-byte aligned, got {} bytes",
+                bytes.len()
+            ),
+        });
+    }
+
+    let words = bytes
+        .chunks_exact(4)
+        .map(|chunk| u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect::<Vec<_>>();
+    if words.first().copied() != Some(0x0723_0203) {
+        return Err(AssetError::Decode {
+            message: "shader SPIR-V source must start with the SPIR-V magic word".to_owned(),
+        });
+    }
+    Ok(words)
+}
+
+#[cfg(feature = "shader_importer")]
+fn parse_shader_source_language(
+    value: &str,
+    line_number: usize,
+) -> Result<ShaderSourceLanguage, AssetError> {
+    match value {
+        "wgsl" => Ok(ShaderSourceLanguage::Wgsl),
+        "glsl" => Ok(ShaderSourceLanguage::Glsl),
+        "spv" => Ok(ShaderSourceLanguage::Spv),
+        other => Err(AssetError::Import {
+            message: format!("unsupported shader source language `{other}` on line {line_number}"),
+        }),
+    }
+}
+
+#[cfg(feature = "shader_importer")]
+fn canonical_shader_spirv_source(source_text: &str) -> Result<Vec<u8>, AssetError> {
+    let mut bytes = Vec::new();
+    let mut count = 0;
+    for token in source_text
+        .split(|character: char| character.is_whitespace() || matches!(character, ',' | ';' | '|'))
+    {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let token = token
+            .strip_prefix("0x")
+            .or_else(|| token.strip_prefix("0X"))
+            .unwrap_or(token);
+        if token.len() > 8 {
+            return Err(AssetError::Import {
+                message: format!("shader SPIR-V word `{token}` is too large"),
+            });
+        }
+        let word = u32::from_str_radix(token, 16).map_err(|error| AssetError::Import {
+            message: format!("invalid shader SPIR-V word `{token}`: {error}"),
+        })?;
+        bytes.extend_from_slice(&word.to_le_bytes());
+        count += 1;
+    }
+    if count == 0 {
+        return Err(AssetError::Import {
+            message: "shader SPIR-V source is empty".to_owned(),
+        });
+    }
+    if bytes.len() % 4 != 0 {
+        return Err(AssetError::Import {
+            message: "shader SPIR-V source must be composed of 32-bit words".to_owned(),
+        });
+    }
+    if bytes[..4] != 0x0723_0203u32.to_le_bytes() {
+        return Err(AssetError::Import {
+            message: "shader SPIR-V source must start with the SPIR-V magic word".to_owned(),
+        });
+    }
+    Ok(bytes)
+}
+
+#[cfg(feature = "shader_importer")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ShaderSourceLanguage {
+    Wgsl,
+    Glsl,
+    Spv,
 }
 
 fn shader_source_lines_without_comments(source: &str) -> Result<Vec<String>, AssetError> {

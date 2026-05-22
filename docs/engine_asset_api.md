@@ -4540,12 +4540,23 @@ pub struct PhysicsColliderComponent {
     pub mesh: Handle<PhysicsMesh>,
     pub dynamic: bool,
 }
+
+pub trait InstantiationSink {
+    fn spawn_entity(&mut self, entity_index: usize, name: Option<&str>, parent: Option<u64>);
+    fn attach_component(&mut self, entity_index: usize, type_name: &str, data: &[u8]);
+}
 ```
 
 ```rust
 #[derive(Clone, Debug)]
 pub struct SceneInstanceComponent {
     pub scene: Handle<SceneAsset>,
+    pub loaded: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PrefabInstanceComponent {
+    pub prefab: Handle<Prefab>,
     pub loaded: bool,
 }
 ```
@@ -4558,11 +4569,62 @@ pub struct SceneInstantiationPlan {
     pub component_count: usize,
     pub dependency_count: usize,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrefabInstantiationPlan {
+    pub prefab: AssetId,
+    pub entity_count: usize,
+    pub component_count: usize,
+    pub dependency_count: usize,
+}
+```
+
+```rust
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SceneInstantiationCommand {
+    SpawnEntity {
+        entity_index: usize,
+        name: Option<String>,
+        parent: Option<u64>,
+    },
+    AttachComponent {
+        entity_index: usize,
+        type_name: String,
+        data: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrefabInstantiationCommand {
+    SpawnEntity {
+        entity_index: usize,
+        name: Option<String>,
+        parent: Option<u64>,
+    },
+    AttachComponent {
+        entity_index: usize,
+        type_name: String,
+        data: Vec<u8>,
+    },
+}
 ```
 
 `SceneInstanceComponent::instantiation_plan(&AssetServer)` 只在 scene handle Ready、其依赖也
 Ready、且 `loaded == false` 时返回计划。计划只统计待实例化实体数、组件数和 scene 中记录的
 依赖 handle 数，不会修改 `AssetServer`，也不会取得 scene 资源所有权。
+
+`SceneInstanceComponent::instantiation_commands(&AssetServer)` 会在同样的 ready 条件下，按
+实体顺序导出稳定的 `SpawnEntity` / `AttachComponent` 命令序列，供宿主 ECS 或场景系统消费。
+它仍然不修改 `AssetServer`，也不会直接接管实体生命周期。
+
+`SceneInstantiationPlan::apply(&SceneAsset, &mut impl InstantiationSink)` 和
+`PrefabInstantiationPlan::apply(&Prefab, &mut impl InstantiationSink)` 会把同样的实体/组件序列
+直接投递到宿主 sink。它们还是纯数据桥，不负责实体存储、组件反序列化或生命周期管理。
+
+`PrefabInstanceComponent::instantiation_plan(&AssetServer)` 和
+`PrefabInstanceComponent::instantiation_commands(&AssetServer)` 语义与 scene 版本一致，只是
+输入从 `SceneAsset` 换成了 `Prefab` 的 root/children 结构。Prefab 命令也按实体顺序导出稳定的
+`SpawnEntity` / `AttachComponent` 序列，供宿主 ECS 直接消费。
 
 ---
 
@@ -4895,6 +4957,12 @@ impl PrefabLoader {
 `PrefabLoader` 注册 `prefab` 扩展名，解析文档中的 `NGA_PREFAB_V1` 文本 payload。
 `dependency=<path>` 行会注册运行时依赖，Prefab 本体在所有直接和传递依赖 Ready 后才会
 进入 Ready。Prefab 当前是 CPU-only 资源，不会产生 GPU upload command。
+
+`AssetDatabase::register_builtin_importers()` 默认也会注册 `SceneImporter` 与 `PrefabImporter`，
+它们会把 `NGA_SCENE_V1` / `NGA_PREFAB_V1` 源文档导入成 runtime 资源并保留依赖路径。
+`AssetDatabase::register_builtin_cookers()` 默认也会注册 `SceneCooker` 与 `PrefabCooker`，
+它们会把 scene/prefab runtime 文档写入 cooked bundle，供 `SceneLoader` / `PrefabLoader`
+在运行时直接加载。
 
 ---
 

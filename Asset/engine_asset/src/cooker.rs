@@ -26,6 +26,8 @@ use crate::assets::Texture;
 use crate::assets::{AnimationClip, Mesh, Skeleton};
 #[cfg(feature = "cookers")]
 use crate::assets::{Font, PhysicsMesh};
+#[cfg(feature = "cookers")]
+use crate::assets::{Prefab, SceneAsset};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TargetPlatform {
@@ -142,7 +144,71 @@ macro_rules! define_passthrough_cooker {
 }
 
 #[cfg(feature = "texture_cooker")]
-define_passthrough_cooker!(TextureCooker, Texture, 1);
+pub struct TextureCooker;
+
+#[cfg(feature = "texture_cooker")]
+impl TextureCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "texture_cooker")]
+impl Default for TextureCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "texture_cooker")]
+impl AssetCooker for TextureCooker {
+    fn name(&self) -> &'static str {
+        "TextureCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Texture::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "TextureCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = if ctx.source_bytes.starts_with(b"NGA_TEXTURE_SOURCE_V1") {
+            let text = std::str::from_utf8(&ctx.source_bytes).map_err(|error| CookError::Cook {
+                message: format!("TextureCooker failed to canonicalize texture source: {error}"),
+            })?;
+            crate::assets::texture::canonical_texture_source_document(text).map_err(|error| {
+                CookError::Cook {
+                    message: format!(
+                        "TextureCooker failed to canonicalize texture source: {error}"
+                    ),
+                }
+            })?
+        } else {
+            crate::assets::texture::canonical_texture_runtime_bytes(&ctx.source_bytes).map_err(
+                |error| CookError::Cook {
+                    message: format!(
+                        "TextureCooker failed to canonicalize texture source: {error}"
+                    ),
+                },
+            )?
+        };
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
 #[cfg(feature = "model_cooker")]
 pub struct MeshCooker;
 
@@ -335,15 +401,163 @@ fn push_compacted_mesh_vertex(compacted: &mut Mesh, source: &Mesh, index: usize)
     }
 }
 #[cfg(feature = "material_cooker")]
-define_passthrough_cooker!(MaterialCooker, Material, 1);
+pub struct MaterialCooker;
+
+#[cfg(feature = "material_cooker")]
+impl MaterialCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "material_cooker")]
+impl Default for MaterialCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "material_cooker")]
+impl AssetCooker for MaterialCooker {
+    fn name(&self) -> &'static str {
+        "MaterialCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Material::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "MaterialCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = crate::assets::material::canonical_material_runtime_bytes(&ctx.source_bytes)
+            .map_err(|error| CookError::Cook {
+                message: format!("MaterialCooker failed to canonicalize material source: {error}"),
+            })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
 #[cfg(feature = "shader_cooker")]
-define_passthrough_cooker!(ShaderCooker, Shader, 1);
+pub struct ShaderCooker;
+
+#[cfg(feature = "shader_cooker")]
+impl ShaderCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "shader_cooker")]
+impl Default for ShaderCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "shader_cooker")]
+impl AssetCooker for ShaderCooker {
+    fn name(&self) -> &'static str {
+        "ShaderCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Shader::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "ShaderCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = crate::assets::shader::canonical_shader_runtime_bytes(&ctx.source_bytes)
+            .map_err(|error| CookError::Cook {
+                message: format!("ShaderCooker failed to canonicalize shader source: {error}"),
+            })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
 #[cfg(feature = "audio_cooker")]
-define_passthrough_cooker!(AudioCooker, AudioClip, 1);
+pub struct AudioCooker;
+
+#[cfg(feature = "audio_cooker")]
+impl AudioCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "audio_cooker")]
+impl Default for AudioCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "audio_cooker")]
+impl AssetCooker for AudioCooker {
+    fn name(&self) -> &'static str {
+        "AudioCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        AudioClip::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "AudioCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = crate::assets::audio::canonical_audio_runtime_bytes(&ctx.source_bytes)
+            .map_err(|error| CookError::Cook {
+                message: format!("AudioCooker failed to canonicalize audio source: {error}"),
+            })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
 #[cfg(feature = "model_cooker")]
 define_passthrough_cooker!(SkeletonCooker, Skeleton, 1);
 #[cfg(feature = "model_cooker")]
 define_passthrough_cooker!(AnimationCooker, AnimationClip, 1);
+#[cfg(feature = "cookers")]
+define_passthrough_cooker!(SceneCooker, SceneAsset, 1);
+#[cfg(feature = "cookers")]
+define_passthrough_cooker!(PrefabCooker, Prefab, 1);
 #[cfg(feature = "cookers")]
 define_passthrough_cooker!(FontCooker, Font, 1);
 #[cfg(feature = "cookers")]

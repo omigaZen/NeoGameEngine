@@ -34,7 +34,7 @@ use crate::cooker::TextureCooker;
 #[cfg(feature = "model_cooker")]
 use crate::cooker::{AnimationCooker, MeshCooker, SkeletonCooker};
 #[cfg(feature = "cookers")]
-use crate::cooker::{FontCooker, PhysicsMeshCooker};
+use crate::cooker::{FontCooker, PhysicsMeshCooker, PrefabCooker, SceneCooker};
 #[cfg(feature = "audio_importer")]
 use crate::importer::AudioImporter;
 #[cfg(feature = "material_importer")]
@@ -44,7 +44,9 @@ use crate::importer::ShaderImporter;
 #[cfg(feature = "texture_importer")]
 use crate::importer::TextureImporter;
 #[cfg(feature = "importers")]
-use crate::importer::{FontImporter, PhysicsMeshImporter};
+use crate::importer::{AnimationImporter, SkeletonImporter};
+#[cfg(feature = "importers")]
+use crate::importer::{FontImporter, PhysicsMeshImporter, PrefabImporter, SceneImporter};
 #[cfg(feature = "model_importer")]
 use crate::importer::{MeshImporter, ModelImporter};
 
@@ -301,6 +303,10 @@ impl AssetDatabase {
         }
         #[cfg(feature = "importers")]
         if crate::features::asset_feature_enabled(AssetFeature::Importers) {
+            self.register_importer(AnimationImporter::new());
+            self.register_importer(SceneImporter::new());
+            self.register_importer(PrefabImporter::new());
+            self.register_importer(SkeletonImporter::new());
             self.register_importer(FontImporter::new());
             self.register_importer(PhysicsMeshImporter::new());
         }
@@ -337,6 +343,8 @@ impl AssetDatabase {
         }
         #[cfg(feature = "cookers")]
         if crate::features::asset_feature_enabled(AssetFeature::Cookers) {
+            self.register_cooker(SceneCooker::new());
+            self.register_cooker(PrefabCooker::new());
             self.register_cooker(FontCooker::new());
             self.register_cooker(PhysicsMeshCooker::new());
         }

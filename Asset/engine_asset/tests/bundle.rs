@@ -8,6 +8,20 @@ fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     bytes
 }
 
+fn scene_bytes(name: &str, dependency_path: &str) -> Vec<u8> {
+    format!(
+        "NGA_SCENE_V1\nname={name}\ndependency={dependency_path}\nentity=Root\ncomponent=Transform|translation=0,0,0\n"
+    )
+    .into_bytes()
+}
+
+fn prefab_bytes(name: &str, dependency_path: &str) -> Vec<u8> {
+    format!(
+        "NGA_PREFAB_V1\ndependency={dependency_path}\nroot={name}\ncomponent=Transform|translation=0,0,0\nchild={name}_child;parent=0\ncomponent=Transform|translation=1,0,0\n"
+    )
+    .into_bytes()
+}
+
 fn content_hash(bytes: &[u8]) -> ContentHash {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
     for byte in bytes {
@@ -1743,6 +1757,234 @@ fn asset_package_asset_override_report_tracks_semantic_policy_issues() {
             if message.contains("semantic_wrong_type_patch")
                 && message.contains("asset type")
     ));
+}
+
+#[test]
+fn asset_package_asset_override_report_tracks_scene_and_prefab_semantic_policy_issues() {
+    let base_scene_dependency = AssetId::new();
+    let base_scene = AssetId::new();
+    let base_prefab_dependency = AssetId::new();
+    let base_prefab = AssetId::new();
+    let patch_scene_dependency = AssetId::new();
+    let patch_scene = AssetId::new();
+    let patch_prefab_dependency = AssetId::new();
+    let patch_prefab = AssetId::new();
+    let scene_path = AssetPath::parse("scenes/arena.scene");
+    let prefab_path = AssetPath::parse("prefabs/hero.prefab");
+
+    let (base, _base_bundle) = package_from_assets(
+        "semantic_scene_base",
+        AssetIoLayerKind::BaseBundle,
+        20,
+        BundleId(42),
+        "packages/semantic_scene_base.bundle",
+        vec![
+            BundleAsset {
+                id: base_scene_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/base.scene.texture"),
+                bytes: texture_bytes(1, 1, 4),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: base_scene,
+                asset_type: AssetTypeId::of::<SceneAsset>(),
+                path: scene_path.clone(),
+                bytes: scene_bytes("arena", "textures/base.scene.texture"),
+                dependencies: vec![base_scene_dependency],
+            },
+            BundleAsset {
+                id: base_prefab_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/base.prefab.texture"),
+                bytes: texture_bytes(1, 1, 6),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: base_prefab,
+                asset_type: AssetTypeId::of::<Prefab>(),
+                path: prefab_path.clone(),
+                bytes: prefab_bytes("hero", "textures/base.prefab.texture"),
+                dependencies: vec![base_prefab_dependency],
+            },
+        ],
+    );
+    let (patch, _patch_bundle) = package_from_assets(
+        "semantic_scene_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(43),
+        "packages/semantic_scene_patch.bundle",
+        vec![
+            BundleAsset {
+                id: patch_scene_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/patch.scene.texture"),
+                bytes: texture_bytes(1, 1, 8),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: patch_scene,
+                asset_type: AssetTypeId::of::<SceneAsset>(),
+                path: scene_path.clone(),
+                bytes: scene_bytes("arena", "textures/patch.scene.texture"),
+                dependencies: vec![patch_scene_dependency],
+            },
+            BundleAsset {
+                id: patch_prefab_dependency,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/patch.prefab.texture"),
+                bytes: texture_bytes(1, 1, 10),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: patch_prefab,
+                asset_type: AssetTypeId::of::<Prefab>(),
+                path: prefab_path.clone(),
+                bytes: prefab_bytes("hero", "textures/patch.prefab.texture"),
+                dependencies: vec![patch_prefab_dependency],
+            },
+        ],
+    );
+    let current = AssetPackageRegistry::new(vec![base.clone()]).unwrap();
+    let next = AssetPackageRegistry::new(vec![patch.clone(), base.clone()]).unwrap();
+
+    let override_report = next.asset_override_report();
+    assert!(override_report.has_overrides());
+    assert!(override_report.has_issues());
+    assert_eq!(override_report.overrides.len(), 2);
+
+    let scene_override = override_report
+        .overrides
+        .iter()
+        .find(|asset_override| asset_override.path == scene_path)
+        .unwrap();
+    assert_eq!(scene_override.winner.name, "semantic_scene_patch");
+    assert_eq!(scene_override.shadowed.name, "semantic_scene_base");
+    assert_eq!(scene_override.winner_asset.id, patch_scene);
+    assert_eq!(scene_override.shadowed_asset.id, base_scene);
+    assert_eq!(
+        scene_override.winner_asset.asset_type,
+        AssetTypeId::of::<SceneAsset>()
+    );
+    assert_eq!(
+        scene_override.shadowed_asset.asset_type,
+        AssetTypeId::of::<SceneAsset>()
+    );
+    assert_eq!(
+        scene_override.issues,
+        vec![
+            AssetPackageAssetOverrideIssueKind::AssetIdChanged,
+            AssetPackageAssetOverrideIssueKind::ContentHashChanged,
+            AssetPackageAssetOverrideIssueKind::DependenciesChanged,
+            AssetPackageAssetOverrideIssueKind::DependencyProvidersChanged,
+        ]
+    );
+    assert_eq!(
+        scene_override.winner_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_scene_patch")
+    );
+    assert_eq!(
+        scene_override.shadowed_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_scene_base")
+    );
+
+    let prefab_override = override_report
+        .overrides
+        .iter()
+        .find(|asset_override| asset_override.path == prefab_path)
+        .unwrap();
+    assert_eq!(prefab_override.winner.name, "semantic_scene_patch");
+    assert_eq!(prefab_override.shadowed.name, "semantic_scene_base");
+    assert_eq!(prefab_override.winner_asset.id, patch_prefab);
+    assert_eq!(prefab_override.shadowed_asset.id, base_prefab);
+    assert_eq!(
+        prefab_override.winner_asset.asset_type,
+        AssetTypeId::of::<Prefab>()
+    );
+    assert_eq!(
+        prefab_override.shadowed_asset.asset_type,
+        AssetTypeId::of::<Prefab>()
+    );
+    assert_eq!(
+        prefab_override.issues,
+        vec![
+            AssetPackageAssetOverrideIssueKind::AssetIdChanged,
+            AssetPackageAssetOverrideIssueKind::ContentHashChanged,
+            AssetPackageAssetOverrideIssueKind::DependenciesChanged,
+            AssetPackageAssetOverrideIssueKind::DependencyProvidersChanged,
+        ]
+    );
+    assert_eq!(
+        prefab_override.winner_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_scene_patch")
+    );
+    assert_eq!(
+        prefab_override.shadowed_dependency_providers[0]
+            .provider
+            .as_ref()
+            .map(|provider| provider.name.as_str()),
+        Some("semantic_scene_base")
+    );
+
+    let default_report = current
+        .update_report(&next, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(default_report.is_compatible());
+    assert_eq!(default_report.asset_overrides, override_report);
+
+    let strict_policy = AssetPackageUpdatePolicy::default()
+        .with_asset_compatibility(AssetPackageAssetCompatibilityPolicy::strict());
+    let strict_report = current.update_report(&next, strict_policy).unwrap();
+    assert!(!strict_report.is_compatible());
+    assert_eq!(strict_report.compatibility_issues.len(), 8);
+    assert_eq!(
+        strict_report
+            .compatibility_issues
+            .iter()
+            .filter(|issue| {
+                issue
+                    .asset_override
+                    .as_ref()
+                    .map(|asset_override| asset_override.path == scene_path)
+                    .unwrap_or(false)
+            })
+            .count(),
+        4
+    );
+    assert_eq!(
+        strict_report
+            .compatibility_issues
+            .iter()
+            .filter(|issue| {
+                issue
+                    .asset_override
+                    .as_ref()
+                    .map(|asset_override| asset_override.path == prefab_path)
+                    .unwrap_or(false)
+            })
+            .count(),
+        4
+    );
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server
+        .activate_asset_package_registry(current.clone(), AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(matches!(
+        server.activate_asset_package_registry(next.clone(), strict_policy),
+        Err(AssetError::Bundle { message })
+            if message.contains("semantic_scene_patch") && message.contains("asset id")
+    ));
+    assert_eq!(server.asset_package_registry(), &current);
 }
 
 #[test]

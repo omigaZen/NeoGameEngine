@@ -564,6 +564,39 @@ pub(crate) fn validate_material_source(source: &str) -> Result<(), AssetError> {
     Ok(())
 }
 
+pub fn canonical_material_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
+        message: format!("material source must be UTF-8: {error}"),
+    })?;
+    validate_material_source(source)?;
+    Ok(canonical_material_source_text(source).into_bytes())
+}
+
+pub fn canonical_material_source_text(source_text: &str) -> String {
+    let mut lines = Vec::new();
+    for line in source_text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with("# mtllib ") {
+            lines.push(line.to_owned());
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            lines.push(format!("{}={}", key.trim(), value.trim()));
+        }
+    }
+    let mut canonical = lines.join("\n");
+    if !canonical.is_empty() {
+        canonical.push('\n');
+    }
+    canonical
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct MaterialTextureMetadata {
     sampler: SamplerDesc,
