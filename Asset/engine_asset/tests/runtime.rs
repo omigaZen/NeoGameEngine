@@ -20,6 +20,50 @@ fn audio_bytes() -> Vec<u8> {
         .to_vec()
 }
 
+fn wav_pcm16_bytes(sample_rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 16) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * 2).to_le_bytes());
+    bytes.extend_from_slice(&(channels * 2).to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
+}
+
+fn wav_float32_bytes(sample_rate: u32, channels: u16, samples: &[f32]) -> Vec<u8> {
+    let data_len = (samples.len() * 4) as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 16) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&3u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * 4).to_le_bytes());
+    bytes.extend_from_slice(&(channels * 4).to_le_bytes());
+    bytes.extend_from_slice(&32u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
+}
+
 fn animation_bytes() -> Vec<u8> {
     b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntrack=bone:Root\ntranslation=0:0,0,0\nrotation=0:0,0,0,1\nscale=0:1,1,1\n"
         .to_vec()
@@ -962,6 +1006,51 @@ fn audio_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn wav_audio_load_reaches_ready_without_renderer_upload() {
+    let wav = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
+    let io = MemoryAssetIo::new().with_file("audio/click.wav", wav);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/click.wav");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 44_100);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
+    assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1000, -1000, 500]));
+    assert!(!loaded.streaming);
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == audio.id())));
+}
+
+#[test]
+fn wav_float32_audio_load_reaches_ready_without_renderer_upload() {
+    let wav = wav_float32_bytes(48_000, 2, &[0.0, 0.5, -0.25, 1.0]);
+    let io = MemoryAssetIo::new().with_file("audio/tone.wav", wav);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/tone.wav");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 48_000);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 2.0 / 48_000.0);
+    assert_eq!(
+        loaded.samples,
+        AudioSamples::F32(vec![0.0, 0.5, -0.25, 1.0])
+    );
+    assert!(!loaded.streaming);
+}
+
+#[test]
 fn invalid_audio_payload_fails_with_decode_error_and_event() {
     let io = MemoryAssetIo::new().with_file("audio/broken.audio", b"not audio".to_vec());
     let mut server = server_with_io(io);
@@ -974,6 +1063,27 @@ fn invalid_audio_payload_fails_with_decode_error_and_event() {
         server.error_by_id(audio.id()),
         Some(AssetError::Decode { message })
             if message.contains("audio source must start with NGA_AUDIO_V1")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_wav_audio_payload_fails_with_decode_error_and_event() {
+    let io =
+        MemoryAssetIo::new().with_file("audio/broken.wav", b"RIFF\x04\x00\x00\x00WAVE".to_vec());
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/broken.wav");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("WAV audio source missing fmt chunk")
     ));
     assert!(server
         .events()

@@ -94,6 +94,10 @@ impl AssetLoader for AudioLoader {
 }
 
 fn parse_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
+    if bytes.starts_with(b"RIFF") {
+        return parse_wav_audio_clip(bytes);
+    }
+
     let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
         message: format!("audio source must be UTF-8: {error}"),
     })?;
@@ -250,4 +254,188 @@ fn validate_sample_count(sample_count: usize, channels: u16) -> Result<(), Asset
         });
     }
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WavFormat {
+    audio_format: u16,
+    channels: u16,
+    sample_rate: u32,
+    block_align: u16,
+    bits_per_sample: u16,
+}
+
+fn parse_wav_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err(AssetError::Decode {
+            message: "WAV audio source must start with RIFF/WAVE".to_owned(),
+        });
+    }
+
+    let mut offset = 12;
+    let mut format = None;
+    let mut data = None;
+    while offset + 8 <= bytes.len() {
+        let chunk_id = &bytes[offset..offset + 4];
+        let chunk_size = read_wav_u32(bytes, offset + 4, "chunk size")? as usize;
+        let chunk_start = offset + 8;
+        let chunk_end = chunk_start
+            .checked_add(chunk_size)
+            .ok_or_else(|| AssetError::Decode {
+                message: "WAV chunk size overflow".to_owned(),
+            })?;
+        if chunk_end > bytes.len() {
+            return Err(AssetError::Decode {
+                message: format!(
+                    "WAV chunk `{}` extends past end of file",
+                    String::from_utf8_lossy(chunk_id)
+                ),
+            });
+        }
+
+        match chunk_id {
+            b"fmt " => format = Some(parse_wav_format(&bytes[chunk_start..chunk_end])?),
+            b"data" => data = Some(&bytes[chunk_start..chunk_end]),
+            _ => {}
+        }
+
+        offset = chunk_end + usize::from(chunk_size % 2 == 1 && chunk_end < bytes.len());
+    }
+
+    let format = format.ok_or_else(|| AssetError::Decode {
+        message: "WAV audio source missing fmt chunk".to_owned(),
+    })?;
+    if format.channels == 0 {
+        return Err(AssetError::Decode {
+            message: "WAV channels must be greater than zero".to_owned(),
+        });
+    }
+    if format.sample_rate == 0 {
+        return Err(AssetError::Decode {
+            message: "WAV sample_rate must be greater than zero".to_owned(),
+        });
+    }
+    let data = data.ok_or_else(|| AssetError::Decode {
+        message: "WAV audio source missing data chunk".to_owned(),
+    })?;
+
+    let samples = match (format.audio_format, format.bits_per_sample) {
+        (1, 16) => {
+            validate_wav_block_align(format, 2)?;
+            AudioSamples::I16(parse_wav_i16_samples(data, format.channels)?)
+        }
+        (3, 32) => {
+            validate_wav_block_align(format, 4)?;
+            AudioSamples::F32(parse_wav_f32_samples(data, format.channels)?)
+        }
+        (audio_format, bits_per_sample) => {
+            return Err(AssetError::Decode {
+                message: format!(
+                    "unsupported WAV audio format {audio_format} with {bits_per_sample} bits per sample"
+                ),
+            })
+        }
+    };
+
+    let sample_count = match &samples {
+        AudioSamples::I16(samples) => samples.len(),
+        AudioSamples::F32(samples) => samples.len(),
+        AudioSamples::Streaming(_) => 0,
+    };
+    let frames = sample_count as f32 / f32::from(format.channels);
+    Ok(AudioClip {
+        sample_rate: format.sample_rate,
+        channels: format.channels,
+        samples,
+        duration_seconds: frames / format.sample_rate as f32,
+        streaming: false,
+    })
+}
+
+fn parse_wav_format(bytes: &[u8]) -> Result<WavFormat, AssetError> {
+    if bytes.len() < 16 {
+        return Err(AssetError::Decode {
+            message: "WAV fmt chunk must be at least 16 bytes".to_owned(),
+        });
+    }
+
+    Ok(WavFormat {
+        audio_format: read_wav_u16(bytes, 0, "audio format")?,
+        channels: read_wav_u16(bytes, 2, "channels")?,
+        sample_rate: read_wav_u32(bytes, 4, "sample rate")?,
+        block_align: read_wav_u16(bytes, 12, "block align")?,
+        bits_per_sample: read_wav_u16(bytes, 14, "bits per sample")?,
+    })
+}
+
+fn validate_wav_block_align(format: WavFormat, bytes_per_sample: u16) -> Result<(), AssetError> {
+    let expected = format
+        .channels
+        .checked_mul(bytes_per_sample)
+        .ok_or_else(|| AssetError::Decode {
+            message: "WAV block_align overflow".to_owned(),
+        })?;
+    if format.block_align != expected {
+        return Err(AssetError::Decode {
+            message: format!(
+                "WAV block_align {} does not match channels {} and sample size {}",
+                format.block_align, format.channels, bytes_per_sample
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn parse_wav_i16_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
+    if bytes.len() % 2 != 0 {
+        return Err(AssetError::Decode {
+            message: "WAV i16 data byte length must be divisible by 2".to_owned(),
+        });
+    }
+
+    let samples = bytes
+        .chunks_exact(2)
+        .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect::<Vec<_>>();
+    validate_sample_count(samples.len(), channels)?;
+    Ok(samples)
+}
+
+fn parse_wav_f32_samples(bytes: &[u8], channels: u16) -> Result<Vec<f32>, AssetError> {
+    if bytes.len() % 4 != 0 {
+        return Err(AssetError::Decode {
+            message: "WAV f32 data byte length must be divisible by 4".to_owned(),
+        });
+    }
+
+    let mut samples = Vec::with_capacity(bytes.len() / 4);
+    for (index, sample) in bytes.chunks_exact(4).enumerate() {
+        let value = f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
+        if !value.is_finite() {
+            return Err(AssetError::Decode {
+                message: format!("invalid WAV f32 sample {index}: value must be finite"),
+            });
+        }
+        samples.push(value);
+    }
+    validate_sample_count(samples.len(), channels)?;
+    Ok(samples)
+}
+
+fn read_wav_u16(bytes: &[u8], offset: usize, field: &str) -> Result<u16, AssetError> {
+    let value = bytes
+        .get(offset..offset + 2)
+        .ok_or_else(|| AssetError::Decode {
+            message: format!("WAV {field} is truncated"),
+        })?;
+    Ok(u16::from_le_bytes([value[0], value[1]]))
+}
+
+fn read_wav_u32(bytes: &[u8], offset: usize, field: &str) -> Result<u32, AssetError> {
+    let value = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| AssetError::Decode {
+            message: format!("WAV {field} is truncated"),
+        })?;
+    Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }

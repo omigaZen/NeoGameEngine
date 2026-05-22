@@ -23,6 +23,28 @@ fn audio_bytes() -> Vec<u8> {
         .to_vec()
 }
 
+fn wav_pcm16_bytes(sample_rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
+    let data_len = (samples.len() * 2) as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 16) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * 2).to_le_bytes());
+    bytes.extend_from_slice(&(channels * 2).to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
+}
+
 fn font_bytes() -> Vec<u8> {
     b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\n".to_vec()
 }
@@ -10631,6 +10653,56 @@ fn database_builtin_audio_import_cook_and_runtime_load_preserves_payload() {
 }
 
 #[test]
+fn database_builtin_wav_audio_import_cook_and_runtime_load_preserves_payload() {
+    let config = database_config("builtin_wav_audio_runtime_load");
+    let path = AssetPath::parse("audio/click.wav");
+    let bytes = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), bytes.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        bytes
+    );
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+    assert_eq!(output.bytes, bytes);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        bytes
+    );
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert!(metadata.cooked_hash.is_some());
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 44_100);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
+    assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1000, -1000, 500]));
+    assert!(!loaded.streaming);
+}
+
+#[test]
 fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
     let config = database_config("audio_importer_source_conversion");
     let path = AssetPath::parse("audio/generated.audio");
@@ -10647,7 +10719,7 @@ fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
     assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -10688,6 +10760,176 @@ fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
     assert_eq!(loaded.channels, 2);
     assert!(loaded.streaming);
     assert_eq!(loaded.samples, AudioSamples::F32(vec![0.0, 0.5, -0.5, 1.0]));
+}
+
+#[test]
+fn database_audio_importer_applies_force_mono_and_normalize_settings() {
+    let config = database_config("audio_importer_force_mono_normalize");
+    let path = AssetPath::parse("audio/processed.audio");
+    let source = b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=2\nformat=f32\nframes=0.0, 0.0; 0.25, 0.25; -0.5, -0.5\nstreaming=false\n".to_vec();
+    let expected =
+        b"NGA_AUDIO_V1\nsample_rate=48000\nchannels=1\nformat=f32\nsamples=0,0.5,-1\nstreaming=false\n"
+            .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+    let mut settings = ImporterSettings::default();
+    settings.set("force_mono", "true");
+    settings.set("normalize", "true");
+
+    let id = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        metadata.importer_settings,
+        vec![
+            ("force_mono".to_owned(), "true".to_owned()),
+            ("normalize".to_owned(), "true".to_owned())
+        ]
+    );
+    assert!(metadata.settings_hash.is_some());
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, expected);
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 48000);
+    assert_eq!(loaded.channels, 1);
+    assert_eq!(loaded.duration_seconds, 3.0 / 48000.0);
+    assert!(!loaded.streaming);
+    assert_eq!(loaded.samples, AudioSamples::F32(vec![0.0, 0.5, -1.0]));
+}
+
+#[test]
+fn database_audio_importer_reports_invalid_audio_settings() {
+    let config = database_config("audio_importer_invalid_settings");
+    let path = AssetPath::parse("audio/invalid_settings.audio");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        path.path(),
+        b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=i16\nsamples=0,1\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+    let mut settings = ImporterSettings::default();
+    settings.set("force_mono", "maybe");
+
+    let error = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `AudioImporter` failed")
+                && message.contains("audio/invalid_settings.audio")
+                && message.contains("force_mono=maybe")
+                && message.contains(
+                    "invalid audio import setting `force_mono` value `maybe`; expected true or false"
+                )
+    ));
+}
+
+#[test]
+fn database_audio_importer_applies_streaming_setting_override() {
+    let config = database_config("audio_importer_streaming_override");
+    let path = AssetPath::parse("audio/override.audio");
+    let source = b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=f32\nsamples=0.0,0.5,-0.5\nstreaming=true\n".to_vec();
+    let expected = b"NGA_AUDIO_V1\nsample_rate=48000\nchannels=1\nformat=f32\nsamples=0,0.5,-0.5\nstreaming=false\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+    let mut settings = ImporterSettings::default();
+    settings.set("streaming", "false");
+    settings.set("compression", "none");
+
+    let id = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        metadata.importer_settings,
+        vec![
+            ("compression".to_owned(), "none".to_owned()),
+            ("streaming".to_owned(), "false".to_owned()),
+        ]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, expected);
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    let loaded = server.get(&audio).unwrap();
+    assert!(!loaded.streaming);
+    assert_eq!(loaded.samples, AudioSamples::F32(vec![0.0, 0.5, -0.5]));
+}
+
+#[test]
+fn database_audio_importer_reports_unsupported_audio_compression() {
+    let config = database_config("audio_importer_unsupported_compression");
+    let path = AssetPath::parse("audio/unsupported.audio");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        path.path(),
+        b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=i16\nsamples=0,1\nstreaming=false\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "vorbis");
+
+    let error = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `AudioImporter` failed")
+                && message.contains("audio/unsupported.audio")
+                && message.contains("compression=vorbis")
+                && message.contains("unsupported audio import compression `vorbis`; expected `none`")
+    ));
 }
 
 #[test]

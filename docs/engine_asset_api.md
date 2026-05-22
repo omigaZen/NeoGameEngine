@@ -4215,6 +4215,13 @@ streaming=false
 `channels` 的非零倍数。加载成功后不会产生 GPU upload command；无效 header、
 缺失字段、未知 key、非法采样值或不匹配的 sample count 都会返回 `AssetError::Decode`。
 
+`AudioLoader` 还会解析基础 RIFF/WAVE payload：当前支持 PCM `format=1`/16-bit
+little-endian 采样并生成 `AudioSamples::I16`，以及 IEEE float `format=3`/32-bit
+little-endian 采样并生成 `AudioSamples::F32`。`fmt ` 和 `data` chunk 必须存在，
+`channels`/`sample_rate` 必须非零，`block_align` 必须匹配声道数和采样字节数；
+无效或不支持的 WAV payload 会返回 `AssetError::Decode`，加载成功同样是 CPU-only
+`Ready`，不会产生 GPU upload command。
+
 ```rust
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AudioImportSettings {
@@ -4822,8 +4829,9 @@ impl AudioLoader {
 }
 ```
 
-`AudioLoader` 注册 `audio`、`wav`、`ogg` 扩展名，当前解析文档中的 `NGA_AUDIO_V1`
-文本 payload，并直接生成 CPU-only `AudioClip`。
+`AudioLoader` 注册 `audio`、`wav`、`ogg` 扩展名，解析文档中的 `NGA_AUDIO_V1`
+文本 payload，也解析基础 RIFF/WAVE PCM16 和 IEEE-float32 payload，并直接生成
+CPU-only `AudioClip`。
 
 ---
 
@@ -5269,8 +5277,9 @@ impl AudioImporter {
 }
 ```
 
-`AudioImporter` 保持 runtime `NGA_AUDIO_V1` payload 的 pass-through 兼容性；如果 source
-以 `NGA_AUDIO_SOURCE_V1` 开头，则会验证并规范化为 `AudioLoader` 使用的 runtime 文本：
+`AudioImporter` 保持 runtime `NGA_AUDIO_V1` payload 和 `.wav` payload 的 pass-through
+兼容性；如果 source 以 `NGA_AUDIO_SOURCE_V1` 开头，则会验证并规范化为
+`AudioLoader` 使用的 runtime 文本：
 
 ```text
 NGA_AUDIO_SOURCE_V1
@@ -5293,9 +5302,14 @@ streaming=true
 ```
 
 `samples=` 和 `frames=` 都可使用；逗号和分号都会作为 sample 分隔符。Importer 会验证
-`sample_rate`、`channels`、`format`、sample 类型和 sample 数量是否为 channel 数的非零倍数。
-导入错误会包含 `AudioImporter`、source path 和 settings 上下文。转换后的 bytes 会写入
-imported root，后续 `cook_asset`、bundle 和 runtime load 都使用该规范化 payload。
+`sample_rate`、`channels`、`format`、sample 类型、finite `f32` sample、以及 sample 数量是否为
+channel 数的非零倍数。`ImporterSettings` 可为 `NGA_AUDIO_SOURCE_V1` 转换设置
+`force_mono=true`、`normalize=true`、`streaming=true/false` 和 `compression=none`：`force_mono`
+会先按 frame 平均多声道采样并输出 `channels=1`，`normalize` 随后按峰值绝对振幅缩放
+`i16`/`f32` samples，`streaming` 会覆盖 source 文本中的同名字段，`compression` 当前只接受
+`none`，`vorbis`/`opus` 会返回 visible import error。非法 boolean settings 会作为 import
+error 返回。导入错误会包含 `AudioImporter`、source path 和 settings 上下文。转换后的
+bytes 会写入 imported root，后续 `cook_asset`、bundle 和 runtime load 都使用该规范化 payload。
 
 ---
 

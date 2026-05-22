@@ -9,8 +9,6 @@ use crate::{
     registry::AssetRegistry,
 };
 
-#[cfg(feature = "audio_importer")]
-use crate::assets::AudioClip;
 #[cfg(feature = "importers")]
 use crate::assets::Font;
 #[cfg(any(feature = "material_importer", feature = "model_importer"))]
@@ -29,6 +27,8 @@ use crate::assets::Shader;
 use crate::assets::Texture;
 #[cfg(feature = "model_importer")]
 use crate::assets::{AnimationClip, AnimationTarget, Mesh, PhysicsMesh, Skeleton};
+#[cfg(feature = "audio_importer")]
+use crate::assets::{AudioClip, AudioCompression};
 
 #[cfg(feature = "model_importer")]
 const SKIN_WEIGHT_SUM_EPSILON: f32 = 0.001;
@@ -1882,7 +1882,7 @@ impl AssetImporter for AudioImporter {
     }
 
     fn version(&self) -> u32 {
-        2
+        3
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -1896,7 +1896,7 @@ impl AssetImporter for AudioImporter {
         settings: &ImporterSettings,
     ) -> Result<ImportOutput, ImportError> {
         let id = AssetId::new();
-        let bytes = import_audio_bytes(source)?;
+        let bytes = import_audio_bytes(source, settings)?;
         let mut metadata = AssetMetadata::runtime(id, source.path.clone(), AudioClip::TYPE_ID);
         metadata.source_path = Some(source.path.clone());
         metadata.cooked_path = Some(source.path.clone());
@@ -1925,18 +1925,107 @@ impl AssetImporter for AudioImporter {
 }
 
 #[cfg(feature = "audio_importer")]
-fn import_audio_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
+#[derive(Clone, Copy, Debug, Default)]
+struct AudioImporterOptions {
+    force_mono: bool,
+    normalize: bool,
+    streaming: Option<bool>,
+    compression: Option<AudioCompression>,
+}
+
+#[cfg(feature = "audio_importer")]
+impl AudioImporterOptions {
+    fn from_importer_settings(settings: &ImporterSettings) -> Result<Self, ImportError> {
+        Ok(Self {
+            force_mono: parse_optional_audio_import_bool(settings, "force_mono", false)?,
+            normalize: parse_optional_audio_import_bool(settings, "normalize", false)?,
+            streaming: parse_optional_audio_import_bool_option(settings, "streaming")?,
+            compression: parse_optional_audio_import_compression(settings)?,
+        })
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn parse_optional_audio_import_bool_option(
+    settings: &ImporterSettings,
+    key: &str,
+) -> Result<Option<bool>, ImportError> {
+    let Some(value) = settings.get(key) else {
+        return Ok(None);
+    };
+    match value {
+        "true" => Ok(Some(true)),
+        "false" => Ok(Some(false)),
+        other => Err(AssetError::Import {
+            message: format!(
+                "invalid audio import setting `{key}` value `{other}`; expected true or false"
+            ),
+        }),
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn parse_optional_audio_import_compression(
+    settings: &ImporterSettings,
+) -> Result<Option<AudioCompression>, ImportError> {
+    let Some(value) = settings.get("compression") else {
+        return Ok(None);
+    };
+    let compression = match value {
+        "none" => AudioCompression::None,
+        "vorbis" => AudioCompression::Vorbis,
+        "opus" => AudioCompression::Opus,
+        other => {
+            return Err(AssetError::Import {
+                message: format!(
+                    "invalid audio import setting `compression` value `{other}`; expected none, vorbis, or opus"
+                ),
+            })
+        }
+    };
+    Ok(Some(compression))
+}
+
+#[cfg(feature = "audio_importer")]
+fn parse_optional_audio_import_bool(
+    settings: &ImporterSettings,
+    key: &str,
+    default: bool,
+) -> Result<bool, ImportError> {
+    let Some(value) = settings.get(key) else {
+        return Ok(default);
+    };
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(AssetError::Import {
+            message: format!(
+                "invalid audio import setting `{key}` value `{other}`; expected true or false"
+            ),
+        }),
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn import_audio_bytes(
+    source: &SourceAsset,
+    settings: &ImporterSettings,
+) -> Result<Vec<u8>, ImportError> {
     if !source.bytes.starts_with(b"NGA_AUDIO_SOURCE_V1") {
         return Ok(source.bytes.clone());
     }
     let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
         message: format!("audio source must be UTF-8: {error}"),
     })?;
-    canonical_audio_source(text).map(String::into_bytes)
+    let options = AudioImporterOptions::from_importer_settings(settings)?;
+    canonical_audio_source(text, options).map(String::into_bytes)
 }
 
 #[cfg(feature = "audio_importer")]
-fn canonical_audio_source(source_text: &str) -> Result<String, ImportError> {
+fn canonical_audio_source(
+    source_text: &str,
+    options: AudioImporterOptions,
+) -> Result<String, ImportError> {
     let mut lines = source_text.lines();
     if lines.next().unwrap_or("").trim() != "NGA_AUDIO_SOURCE_V1" {
         return Err(AssetError::Import {
@@ -1990,7 +2079,22 @@ fn canonical_audio_source(source_text: &str) -> Result<String, ImportError> {
     let samples = samples.ok_or_else(|| AssetError::Import {
         message: "audio source missing samples".to_owned(),
     })?;
-    let samples = canonical_audio_samples(&samples, &sample_format, channels)?;
+    let streaming = options.streaming.unwrap_or(streaming);
+    match options.compression.unwrap_or(AudioCompression::None) {
+        AudioCompression::None => {}
+        AudioCompression::Vorbis => {
+            return Err(AssetError::Import {
+                message: "unsupported audio import compression `vorbis`; expected `none`"
+                    .to_owned(),
+            })
+        }
+        AudioCompression::Opus => {
+            return Err(AssetError::Import {
+                message: "unsupported audio import compression `opus`; expected `none`".to_owned(),
+            })
+        }
+    }
+    let (samples, channels) = canonical_audio_samples(&samples, &sample_format, channels, options)?;
     Ok(format!(
         "NGA_AUDIO_V1\nsample_rate={sample_rate}\nchannels={channels}\nformat={sample_format}\nsamples={samples}\nstreaming={streaming}\n"
     ))
@@ -2044,37 +2148,175 @@ fn canonical_audio_samples(
     value: &str,
     sample_format: &str,
     channels: u16,
-) -> Result<String, ImportError> {
-    let parts = value
+    options: AudioImporterOptions,
+) -> Result<(String, u16), ImportError> {
+    match sample_format {
+        "i16" => canonical_audio_i16_samples(value, channels, options),
+        "f32" => canonical_audio_f32_samples(value, channels, options),
+        _ => unreachable!("sample format validated before parsing samples"),
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn canonical_audio_i16_samples(
+    value: &str,
+    channels: u16,
+    options: AudioImporterOptions,
+) -> Result<(String, u16), ImportError> {
+    let mut samples = parse_audio_source_samples(value, "i16", |part| {
+        part.parse::<i16>().map_err(|error| error.to_string())
+    })?;
+    validate_audio_source_sample_count(samples.len(), channels)?;
+    let output_channels = if options.force_mono && channels > 1 {
+        samples = force_mono_i16_samples(&samples, channels);
+        1
+    } else {
+        channels
+    };
+    if options.normalize {
+        normalize_i16_samples(&mut samples);
+    }
+    Ok((
+        samples
+            .into_iter()
+            .map(|sample| sample.to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        output_channels,
+    ))
+}
+
+#[cfg(feature = "audio_importer")]
+fn canonical_audio_f32_samples(
+    value: &str,
+    channels: u16,
+    options: AudioImporterOptions,
+) -> Result<(String, u16), ImportError> {
+    let mut samples = parse_audio_source_samples(value, "f32", |part| {
+        let sample = part.parse::<f32>().map_err(|error| error.to_string())?;
+        if !sample.is_finite() {
+            return Err("sample must be finite".to_owned());
+        }
+        Ok(sample)
+    })?;
+    validate_audio_source_sample_count(samples.len(), channels)?;
+    let output_channels = if options.force_mono && channels > 1 {
+        samples = force_mono_f32_samples(&samples, channels);
+        1
+    } else {
+        channels
+    };
+    if options.normalize {
+        normalize_f32_samples(&mut samples);
+    }
+    Ok((
+        samples
+            .into_iter()
+            .map(canonical_audio_f32)
+            .collect::<Vec<_>>()
+            .join(","),
+        output_channels,
+    ))
+}
+
+#[cfg(feature = "audio_importer")]
+fn parse_audio_source_samples<T>(
+    value: &str,
+    sample_format: &str,
+    parse: impl Fn(&str) -> Result<T, String>,
+) -> Result<Vec<T>, ImportError> {
+    value
         .replace(';', ",")
         .split(',')
         .map(str::trim)
         .filter(|part| !part.is_empty())
-        .map(|part| match sample_format {
-            "i16" => part
-                .parse::<i16>()
-                .map(|sample| sample.to_string())
-                .map_err(|error| error.to_string()),
-            "f32" => part
-                .parse::<f32>()
-                .map(|sample| sample.to_string())
-                .map_err(|error| error.to_string()),
-            _ => unreachable!("sample format validated before parsing samples"),
+        .map(|part| {
+            parse(part).map_err(|error| AssetError::Import {
+                message: format!("invalid audio source {sample_format} sample: {error}"),
+            })
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| AssetError::Import {
-            message: format!("invalid audio source {sample_format} sample: {error}"),
-        })?;
+        .collect()
+}
+
+#[cfg(feature = "audio_importer")]
+fn validate_audio_source_sample_count(
+    sample_count: usize,
+    channels: u16,
+) -> Result<(), ImportError> {
     let channel_count = usize::from(channels);
-    if parts.is_empty() || parts.len() % channel_count != 0 {
+    if sample_count == 0 || sample_count % channel_count != 0 {
         return Err(AssetError::Import {
             message: format!(
-                "audio source sample count {} must be a non-zero multiple of channels {channel_count}",
-                parts.len()
+                "audio source sample count {sample_count} must be a non-zero multiple of channels {channel_count}"
             ),
         });
     }
-    Ok(parts.join(","))
+    Ok(())
+}
+
+#[cfg(feature = "audio_importer")]
+fn force_mono_i16_samples(samples: &[i16], channels: u16) -> Vec<i16> {
+    let channel_count = usize::from(channels);
+    let channel_count_i32 = i32::from(channels);
+    samples
+        .chunks_exact(channel_count)
+        .map(|frame| {
+            let sum = frame.iter().map(|sample| i32::from(*sample)).sum::<i32>();
+            (sum / channel_count_i32) as i16
+        })
+        .collect()
+}
+
+#[cfg(feature = "audio_importer")]
+fn force_mono_f32_samples(samples: &[f32], channels: u16) -> Vec<f32> {
+    let channel_count = usize::from(channels);
+    let scale = f32::from(channels);
+    samples
+        .chunks_exact(channel_count)
+        .map(|frame| frame.iter().sum::<f32>() / scale)
+        .collect()
+}
+
+#[cfg(feature = "audio_importer")]
+fn normalize_i16_samples(samples: &mut [i16]) {
+    let max_abs = samples
+        .iter()
+        .map(|sample| i32::from(*sample).abs())
+        .max()
+        .unwrap_or(0);
+    if max_abs == 0 {
+        return;
+    }
+    let scale = f32::from(i16::MAX) / max_abs as f32;
+    for sample in samples {
+        let scaled = f32::from(*sample) * scale;
+        *sample = scaled
+            .round()
+            .clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16;
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn normalize_f32_samples(samples: &mut [f32]) {
+    let max_abs = samples
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f32, f32::max);
+    if max_abs == 0.0 {
+        return;
+    }
+    for sample in samples {
+        *sample /= max_abs;
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn canonical_audio_f32(value: f32) -> String {
+    if value == 0.0 {
+        "0".to_owned()
+    } else {
+        value.to_string()
+    }
 }
 
 #[cfg(feature = "material_importer")]
