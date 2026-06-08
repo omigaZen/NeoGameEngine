@@ -126,7 +126,8 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
                 }
                 inline_source = Some(value.trim().to_owned());
             }
-            "entry" | "stage" => {}
+            "stage" => validate_shader_source_stage(value.trim(), line_number)?,
+            "entry" => validate_shader_source_entry(value.trim(), line_number)?,
             other => {
                 return Err(AssetError::Import {
                     message: format!("unknown shader source key `{other}` on line {line_number}"),
@@ -361,6 +362,30 @@ enum ShaderSourceLanguage {
     Wgsl,
     Glsl,
     Spv,
+}
+
+#[cfg(feature = "shader_importer")]
+fn validate_shader_source_stage(value: &str, line_number: usize) -> Result<(), AssetError> {
+    match value.to_ascii_lowercase().as_str() {
+        "vertex" | "fragment" | "compute" => Ok(()),
+        other => Err(AssetError::Import {
+            message: format!("unsupported shader source stage `{other}` on line {line_number}"),
+        }),
+    }
+}
+
+#[cfg(feature = "shader_importer")]
+fn validate_shader_source_entry(value: &str, line_number: usize) -> Result<(), AssetError> {
+    let mut characters = value.chars();
+    let valid = matches!(characters.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric());
+    if valid {
+        Ok(())
+    } else {
+        Err(AssetError::Import {
+            message: format!("invalid shader source entry `{value}` on line {line_number}"),
+        })
+    }
 }
 
 fn shader_source_lines_without_comments(source: &str) -> Result<Vec<String>, AssetError> {

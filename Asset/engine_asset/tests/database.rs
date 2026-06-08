@@ -2094,7 +2094,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2647,7 +2647,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 65);
+    assert_eq!(physics_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2803,7 +2803,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2933,7 +2933,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 65);
+    assert_eq!(physics_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3091,7 +3091,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 65);
+    assert_eq!(material_metadata.importer_version, 66);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3350,7 +3350,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3446,7 +3446,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3564,7 +3564,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3736,7 +3736,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4719,7 +4719,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4727,7 +4727,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 65);
+    assert_eq!(material_metadata.importer_version, 66);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -4977,7 +4977,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 65);
+    assert_eq!(mesh_metadata.importer_version, 66);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -5280,7 +5280,7 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Glass
-d -halo 0.4
+d -HALO 0.4
 "
     .to_vec();
     let expected_material = b"# mtllib halo.mtl
@@ -10974,7 +10974,7 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
     assert_eq!(metadata.importer.as_deref(), Some("TextureImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -11534,7 +11534,7 @@ fn database_builtin_shader_import_cook_and_runtime_load_preserves_payload() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
     assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, bytes);
@@ -11592,7 +11592,7 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
     assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -11663,7 +11663,7 @@ fn database_shader_importer_preserves_glsl_source_language() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
     assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -11727,7 +11727,7 @@ fn database_shader_importer_preserves_spv_source_language() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
     assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -11791,6 +11791,44 @@ fn database_shader_importer_reports_invalid_empty_source() {
                 && message.contains("shader source body is empty")
                 && message.contains("shaders/invalid.wgsl")
     ));
+}
+
+#[test]
+fn database_shader_importer_validates_stage_and_entry_metadata() {
+    for (config_name, path, source, expected_message) in [
+        (
+            "shader_importer_invalid_stage",
+            "shaders/invalid_stage.wgsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nstage=geometry\nsource=@fragment fn main() {}\n"
+                .to_vec(),
+            "unsupported shader source stage `geometry` on line 3",
+        ),
+        (
+            "shader_importer_invalid_entry",
+            "shaders/invalid_entry.wgsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nentry=main-entry\nsource=@fragment fn main() {}\n"
+                .to_vec(),
+            "invalid shader source entry `main-entry` on line 3",
+        ),
+    ] {
+        let config = database_config(config_name);
+        let path = AssetPath::parse(path);
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), source);
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `ShaderImporter` failed")
+                    && message.contains(expected_message)
+                    && message.contains(path.path())
+        ));
+    }
 }
 
 #[test]

@@ -392,7 +392,7 @@ impl AssetImporter for TextureImporter {
     }
 
     fn version(&self) -> u32 {
-        2
+        3
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -1032,7 +1032,7 @@ impl AssetImporter for ShaderImporter {
     }
 
     fn version(&self) -> u32 {
-        2
+        3
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -2955,7 +2955,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        65
+        66
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -6063,7 +6063,8 @@ fn parse_obj_material_dissolve<'a>(
             path.display_string()
         ),
     })?;
-    let (value, halo) = if first == "-halo" {
+    let option = first.to_ascii_lowercase();
+    let (value, halo) = if option == "-halo" {
         (
             parts.next().ok_or_else(|| AssetError::Import {
                 message: format!(
