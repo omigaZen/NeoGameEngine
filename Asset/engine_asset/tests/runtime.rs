@@ -361,6 +361,14 @@ fn invalid_material_texture_projection_fails_with_decode_error_and_event() {
 }
 
 #[test]
+fn invalid_material_texture_color_space_fails_with_decode_error_and_event() {
+    assert_material_decode_error(
+        "name=broken\ntexture.albedo.color_space=display_p3\n",
+        "invalid material texture color space `display_p3` on line 2",
+    );
+}
+
+#[test]
 fn invalid_material_texture_resolution_fails_with_decode_error_and_event() {
     assert_material_decode_error(
         "name=broken\ntexture.albedo.texture_resolution=0\n",
@@ -382,7 +390,7 @@ fn material_load_applies_texture_metadata() {
     io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
     io.insert(
         "materials/sampled.material",
-        "name=sampled\ntexture.albedo.sampler.address=clamp_to_edge\ntexture.albedo.sampler.filter=nearest\ntexture.albedo.transform.offset=0.25,0.5,0\ntexture.albedo.transform.scale=2,3,1\ntexture.albedo.transform.turbulence=0.01,0.02,0.03\ntexture.albedo.bump_scale=0.3\ntexture.albedo.color_remap=0.1,0.9\ntexture.albedo.source_channel=green\ntexture.albedo.boost=1.5\ntexture.albedo.blend_u=false\ntexture.albedo.blend_v=true\ntexture.albedo.color_correction=true\ntexture.albedo.projection=sphere\ntexture.albedo.texture_resolution=1024\ntexture.albedo=textures/albedo.texture\nemissive=0.1,0.2,0.3\nalpha_cutoff=0.45\nalpha_mode=mask\ndouble_sided=true\ndepth_write=false\ndepth_test=false\n",
+        "name=sampled\ntexture.albedo.sampler.address=clamp_to_edge\ntexture.albedo.sampler.filter=nearest\ntexture.albedo.transform.offset=0.25,0.5,0\ntexture.albedo.transform.scale=2,3,1\ntexture.albedo.transform.turbulence=0.01,0.02,0.03\ntexture.albedo.bump_scale=0.3\ntexture.albedo.color_remap=0.1,0.9\ntexture.albedo.source_channel=green\ntexture.albedo.boost=1.5\ntexture.albedo.blend_u=false\ntexture.albedo.blend_v=true\ntexture.albedo.color_correction=true\ntexture.albedo.color_space=srgb\ntexture.albedo.projection=sphere\ntexture.albedo.texture_resolution=1024\ntexture.albedo=textures/albedo.texture\nemissive=0.1,0.2,0.3\nalpha_cutoff=0.45\nalpha_mode=mask\ndouble_sided=true\ndepth_write=false\ndepth_test=false\n",
     );
     let mut server = server_with_io(io);
 
@@ -420,6 +428,10 @@ fn material_load_applies_texture_metadata() {
     assert_eq!(loaded.textures[0].options.blend_u, Some(false));
     assert_eq!(loaded.textures[0].options.blend_v, Some(true));
     assert_eq!(loaded.textures[0].options.color_correction, Some(true));
+    assert_eq!(
+        loaded.textures[0].options.color_space,
+        Some(MaterialTextureColorSpace::Srgb)
+    );
     assert_eq!(
         loaded.textures[0].options.projection,
         Some(MaterialTextureProjection::Sphere)

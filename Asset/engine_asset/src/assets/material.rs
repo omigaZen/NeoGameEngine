@@ -102,6 +102,7 @@ pub struct MaterialTextureOptions {
     pub blend_u: Option<bool>,
     pub blend_v: Option<bool>,
     pub color_correction: Option<bool>,
+    pub color_space: Option<MaterialTextureColorSpace>,
     pub projection: Option<MaterialTextureProjection>,
     pub texture_resolution: Option<u32>,
 }
@@ -117,6 +118,7 @@ impl Default for MaterialTextureOptions {
             blend_u: None,
             blend_v: None,
             color_correction: None,
+            color_space: None,
             projection: None,
             texture_resolution: None,
         }
@@ -131,6 +133,14 @@ pub enum MaterialTextureChannel {
     Matte,
     Luminance,
     Depth,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaterialTextureColorSpace {
+    Srgb,
+    Linear,
+    NonColor,
+    Raw,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -413,6 +423,20 @@ impl AssetLoader for MaterialLoader {
                         binding.options = metadata.options;
                     }
                 }
+                key if key.starts_with("texture.") && key.ends_with(".color_space") => {
+                    let name = parse_texture_option_key(key, ".color_space", line_index)?;
+                    let metadata = texture_metadata.entry(name.to_owned()).or_default();
+                    metadata.options.color_space =
+                        Some(parse_texture_color_space(value, line_index)?);
+                    if let Some(binding) = material
+                        .textures
+                        .iter_mut()
+                        .rev()
+                        .find(|binding| binding.name == name)
+                    {
+                        binding.options = metadata.options;
+                    }
+                }
                 key if key.starts_with("texture.") && key.ends_with(".projection") => {
                     let name = parse_texture_option_key(key, ".projection", line_index)?;
                     let metadata = texture_metadata.entry(name.to_owned()).or_default();
@@ -543,6 +567,10 @@ pub(crate) fn validate_material_source(source: &str) -> Result<(), AssetError> {
             key if key.starts_with("texture.") && key.ends_with(".color_correction") => {
                 let _ = parse_texture_option_key(key, ".color_correction", line_index)?;
                 let _ = parse_bool(value, line_index)?;
+            }
+            key if key.starts_with("texture.") && key.ends_with(".color_space") => {
+                let _ = parse_texture_option_key(key, ".color_space", line_index)?;
+                let _ = parse_texture_color_space(value, line_index)?;
             }
             key if key.starts_with("texture.") && key.ends_with(".projection") => {
                 let _ = parse_texture_option_key(key, ".projection", line_index)?;
@@ -877,6 +905,30 @@ fn parse_texture_projection(
         other => Err(AssetError::Decode {
             message: format!(
                 "invalid material texture projection `{other}` on line {}",
+                line_index + 1
+            ),
+        }),
+    }
+}
+
+fn parse_texture_color_space(
+    value: &str,
+    line_index: usize,
+) -> Result<MaterialTextureColorSpace, AssetError> {
+    match value
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_")
+        .as_str()
+    {
+        "srgb" => Ok(MaterialTextureColorSpace::Srgb),
+        "linear" => Ok(MaterialTextureColorSpace::Linear),
+        "non_color" => Ok(MaterialTextureColorSpace::NonColor),
+        "raw" => Ok(MaterialTextureColorSpace::Raw),
+        other => Err(AssetError::Decode {
+            message: format!(
+                "invalid material texture color space `{other}` on line {}",
                 line_index + 1
             ),
         }),

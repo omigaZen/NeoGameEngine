@@ -2686,7 +2686,7 @@ impl AssetImporter for MaterialImporter {
     }
 
     fn version(&self) -> u32 {
-        3
+        4
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -2828,6 +2828,7 @@ fn is_material_texture_metadata_key(key: &str, line_index: usize) -> Result<bool
         ".blend_u",
         ".blend_v",
         ".color_correction",
+        ".color_space",
         ".projection",
         ".texture_resolution",
     ] {
@@ -2886,7 +2887,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        54
+        56
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4622,6 +4623,7 @@ struct ObjMaterialTextureOptions {
     blend_u: Option<bool>,
     blend_v: Option<bool>,
     color_correction: Option<bool>,
+    color_space: Option<String>,
     projection: Option<String>,
     texture_resolution: Option<u32>,
 }
@@ -6205,6 +6207,9 @@ fn merge_obj_material_texture_options(
     if source.color_correction.is_some() {
         target.color_correction = source.color_correction;
     }
+    if source.color_space.is_some() {
+        target.color_space = source.color_space;
+    }
     if source.projection.is_some() {
         target.projection = source.projection;
     }
@@ -6362,6 +6367,30 @@ fn parse_obj_material_texture_option(
             )?;
             let mut options = ObjMaterialTextureOptions::default();
             options.boost = Some(parse_obj_material_texture_option_number(
+                value,
+                directive,
+                option,
+                library,
+                path,
+                line_number,
+            )?);
+            Ok(ObjMaterialTextureOption {
+                next_index: index + 2,
+                options,
+            })
+        }
+        "-colorspace" => {
+            let value = require_obj_material_texture_option_arg(
+                parts,
+                index,
+                directive,
+                option,
+                library,
+                path,
+                line_number,
+            )?;
+            let mut options = ObjMaterialTextureOptions::default();
+            options.color_space = Some(parse_obj_material_texture_color_space(
                 value,
                 directive,
                 option,
@@ -6551,6 +6580,36 @@ fn parse_obj_material_texture_projection(
 }
 
 #[cfg(feature = "model_importer")]
+fn parse_obj_material_texture_color_space(
+    value: &str,
+    directive: &str,
+    option: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<String, ImportError> {
+    match value
+        .trim()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+        .replace(' ', "_")
+        .as_str()
+    {
+        "srgb" => Ok("srgb".to_owned()),
+        "linear" => Ok("linear".to_owned()),
+        "non_color" => Ok("non_color".to_owned()),
+        "raw" => Ok("raw".to_owned()),
+        other => Err(AssetError::Import {
+            message: format!(
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        }),
+    }
+}
+
+#[cfg(feature = "model_importer")]
 fn parse_obj_material_texture_resolution(
     value: &str,
     directive: &str,
@@ -6724,7 +6783,8 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         "map_Ke" => Some("emissive"),
         "map_Tf" => Some("transmission_filter"),
         "map_d" | "map_Tr" => Some("alpha"),
-        "map_Bump" | "map_bump" | "bump" | "norm" => Some("normal"),
+        "map_Bump" | "map_bump" | "bump" | "norm" | "normal" | "map_Kn" | "map_kn"
+        | "map_Normal" | "map_normal" => Some("normal"),
         "map_Pr" | "map_Ns" => Some("roughness"),
         "map_Ni" => Some("index_of_refraction"),
         "map_Pm" => Some("metallic"),
@@ -6900,6 +6960,12 @@ fn obj_material_payload(
             if let Some(color_correction) = texture.options.color_correction {
                 payload.push_str(&format!(
                     "\ntexture.{}.color_correction={color_correction}",
+                    texture.channel
+                ));
+            }
+            if let Some(color_space) = &texture.options.color_space {
+                payload.push_str(&format!(
+                    "\ntexture.{}.color_space={color_space}",
                     texture.channel
                 ));
             }
