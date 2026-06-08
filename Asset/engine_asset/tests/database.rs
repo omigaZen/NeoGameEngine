@@ -2094,7 +2094,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2647,7 +2647,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 58);
+    assert_eq!(physics_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2803,7 +2803,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2933,7 +2933,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 58);
+    assert_eq!(physics_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3091,7 +3091,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 58);
+    assert_eq!(material_metadata.importer_version, 61);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3350,7 +3350,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3446,7 +3446,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3564,7 +3564,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3736,7 +3736,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4395,11 +4395,11 @@ f 1/1/1 2/2/1 3/3/1 4/4/1
 "
     .to_vec();
     let material_library_source = b"newmtl Red
-map_Kd -boost 1.5 -blendu OFF -blendv ON -cc TRUE -texres 1024 -s 2 3 -o 0.25 0.5 -t 0.01 0.02 0.03 textures/prop_albedo.texture
-norm -bm 0.3 -colorspace Non-Color textures/prop_normal.texture
-map_Pr textures/prop_roughness.texture -clamp True
+MAP_KD -boost 1.5 -blendu OFF -blendv ON -cc TRUE -texres 1024 -s 2 3 -o 0.25 0.5 -t 0.01 0.02 0.03 textures/prop_albedo.texture
+MAP_NORMAL -bm 0.3 -colorspace Non-Color textures/prop_normal.texture
+MAP_PR textures/prop_roughness.texture -clamp True
 map_Pm -mm 0 1 textures/prop_metallic.texture
-map_Ke -type sphere -imfchan r textures/prop_emissive.texture
+map_Ke -type Sphere -imfchan R textures/prop_emissive.texture
 Kd 0.8 0.2 0.1
 d 0.75
 Ns 250
@@ -4719,7 +4719,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 58);
+    assert_eq!(mesh_metadata.importer_version, 61);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4727,7 +4727,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 58);
+    assert_eq!(material_metadata.importer_version, 61);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -6547,11 +6547,11 @@ Pc 0.6
 Pcr 0.15
 aniso 0.8
 anisor 0.1
-map_sheen -imfchan red textures/pbr_sheen.texture
-map_clearcoat -imfchan green textures/pbr_clearcoat.texture
-map_clearcoat_roughness -imfchan blue textures/pbr_clearcoat_roughness.texture
-map_anisotropy -imfchan matte textures/pbr_anisotropy.texture
-map_anisotropy_rotation -imfchan luminance textures/pbr_anisotropy_rotation.texture
+MAP_SHEEN -imfchan red textures/pbr_sheen.texture
+Map_Clearcoat -imfchan green textures/pbr_clearcoat.texture
+MAP_CLEARCOAT_ROUGHNESS -imfchan blue textures/pbr_clearcoat_roughness.texture
+Map_Anisotropy -imfchan matte textures/pbr_anisotropy.texture
+MAP_ANISOTROPY_ROTATION -imfchan luminance textures/pbr_anisotropy_rotation.texture
 "
     .to_vec();
     let expected_material = b"# mtllib pbr_aliases.mtl
@@ -6721,12 +6721,12 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Legacy
-disp textures/height.texture
-map_Disp textures/height_alias.texture
-decal textures/decal.texture
-map_decal textures/decal_alias.texture
-refl -type cube_top textures/reflection.texture
-map_refl -type cube_top textures/reflection_alias.texture
+DISP textures/height.texture
+MAP_DISP textures/height_alias.texture
+DECAL textures/decal.texture
+MAP_DECAL textures/decal_alias.texture
+refl -type CUBE_TOP textures/reflection.texture
+MAP_REFL -type Cube_Top textures/reflection_alias.texture
 "
     .to_vec();
     let expected_material = b"# mtllib legacy_maps.mtl
@@ -7172,7 +7172,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Lit
 map_Ka textures/material_occlusion.texture
-map_Ks -imfchan blue textures/material_specular.texture
+map_Ks -imfchan BLUE textures/material_specular.texture
 "
     .to_vec();
     let expected_material = b"# mtllib material_maps.mtl
@@ -7991,7 +7991,7 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Light
-map_Kd -imfchan luminance textures/luminance.texture
+map_Kd -imfchan Luminance textures/luminance.texture
 "
     .to_vec();
     let expected_material = b"# mtllib luminance.mtl

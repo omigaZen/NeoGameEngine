@@ -2887,7 +2887,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        58
+        61
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -6573,12 +6573,13 @@ fn parse_obj_material_texture_projection(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<String, ImportError> {
-    match value {
+    let normalized = value.to_ascii_lowercase();
+    match normalized.as_str() {
         "flat" | "sphere" | "cube_top" | "cube_bottom" | "cube_front" | "cube_back"
-        | "cube_left" | "cube_right" => Ok(value.to_owned()),
-        other => Err(AssetError::Import {
+        | "cube_left" | "cube_right" => Ok(normalized),
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
@@ -6653,16 +6654,16 @@ fn parse_obj_material_texture_source_channel(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<String, ImportError> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "r" | "red" => Ok("red".to_owned()),
         "g" | "green" => Ok("green".to_owned()),
         "b" | "blue" => Ok("blue".to_owned()),
         "m" | "matte" => Ok("matte".to_owned()),
         "l" | "luminance" => Ok("luminance".to_owned()),
         "z" | "depth" => Ok("depth".to_owned()),
-        other => Err(AssetError::Import {
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
@@ -6783,24 +6784,23 @@ fn is_obj_material_texture_option_number(value: &str) -> bool {
 
 #[cfg(feature = "model_importer")]
 fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
-    match directive {
-        "map_Kd" => Some("albedo"),
-        "map_Ks" => Some("specular"),
-        "map_Ka" => Some("occlusion"),
-        "map_Ke" => Some("emissive"),
-        "map_Tf" => Some("transmission_filter"),
-        "map_d" | "map_Tr" => Some("alpha"),
-        "map_Bump" | "map_bump" | "bump" | "norm" | "normal" | "map_Kn" | "map_kn"
-        | "map_Normal" | "map_normal" => Some("normal"),
-        "map_Pr" | "map_Ns" => Some("roughness"),
-        "map_Ni" => Some("index_of_refraction"),
-        "map_Pm" => Some("metallic"),
-        "map_Ps" | "map_sheen" => Some("sheen"),
-        "map_Pc" | "map_clearcoat" => Some("clearcoat"),
-        "map_Pcr" | "map_clearcoat_roughness" => Some("clearcoat_roughness"),
+    match directive.to_ascii_lowercase().as_str() {
+        "map_kd" => Some("albedo"),
+        "map_ks" => Some("specular"),
+        "map_ka" => Some("occlusion"),
+        "map_ke" => Some("emissive"),
+        "map_tf" => Some("transmission_filter"),
+        "map_d" | "map_tr" => Some("alpha"),
+        "map_bump" | "bump" | "norm" | "normal" | "map_kn" | "map_normal" => Some("normal"),
+        "map_pr" | "map_ns" => Some("roughness"),
+        "map_ni" => Some("index_of_refraction"),
+        "map_pm" => Some("metallic"),
+        "map_ps" | "map_sheen" => Some("sheen"),
+        "map_pc" | "map_clearcoat" => Some("clearcoat"),
+        "map_pcr" | "map_clearcoat_roughness" => Some("clearcoat_roughness"),
         "map_aniso" | "map_anisotropy" => Some("anisotropy"),
         "map_anisor" | "map_anisotropy_rotation" => Some("anisotropy_rotation"),
-        "disp" | "map_Disp" | "map_disp" | "map_displacement" => Some("displacement"),
+        "disp" | "map_disp" | "map_displacement" => Some("displacement"),
         "decal" | "map_decal" => Some("decal"),
         "refl" | "map_refl" => Some("reflection"),
         _ => None,
