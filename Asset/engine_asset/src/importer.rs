@@ -2887,7 +2887,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        61
+        64
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4662,7 +4662,8 @@ fn parse_model_obj_source(
         }
         let mut parts = line.split_whitespace();
         let directive = parts.next().unwrap_or("");
-        match directive {
+        let directive_key = directive.to_ascii_lowercase();
+        match directive_key.as_str() {
             "o" | "g" => {
                 let label = line[directive.len()..].trim();
                 if label.is_empty() {
@@ -4699,7 +4700,7 @@ fn parse_model_obj_source(
                 );
             }
             "usemtl" => {
-                let name = line["usemtl".len()..].trim();
+                let name = line[directive.len()..].trim();
                 if name.is_empty() {
                     return Err(AssetError::Import {
                         message: format!("OBJ usemtl name is empty on line {line_number}"),
@@ -4715,16 +4716,16 @@ fn parse_model_obj_source(
                 current_material_label = Some(label);
             }
             "mtllib" => parse_obj_material_libraries(
-                line["mtllib".len()..].trim(),
+                line[directive.len()..].trim(),
                 line_number,
                 &mut material_libraries,
             )?,
             "s" => {
                 current_smoothing_group = parse_obj_smoothing_group(parts, line_number)?;
             }
-            other => {
+            _ => {
                 return Err(AssetError::Import {
-                    message: format!("unknown OBJ directive `{other}` on line {line_number}"),
+                    message: format!("unknown OBJ directive `{directive}` on line {line_number}"),
                 })
             }
         }
@@ -5647,7 +5648,8 @@ fn parse_obj_material_library_text(
         }
         let mut parts = line.split_whitespace();
         let directive = parts.next().unwrap_or("");
-        match directive {
+        let directive_key = directive.to_ascii_lowercase();
+        match directive_key.as_str() {
             "newmtl" => {
                 if let Some((name, line_number)) = current_name.take() {
                     materials.push(ObjMaterialDefinition {
@@ -5682,7 +5684,7 @@ fn parse_obj_material_library_text(
                 defined_names.push(name.to_owned());
                 current_name = Some((name.to_owned(), line_number));
             }
-            "Kd" => {
+            "kd" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let color = parse_obj_material_rgb(parts, directive, library, path, line_number)?;
                 let alpha = current_properties
@@ -5691,7 +5693,7 @@ fn parse_obj_material_library_text(
                     .unwrap_or(1.0);
                 current_properties.base_color = Some([color[0], color[1], color[2], alpha]);
             }
-            "Ka" => {
+            "ka" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.ambient_color = Some(parse_obj_material_rgb(
                     parts,
@@ -5701,7 +5703,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Ks" => {
+            "ks" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.specular_color = Some(parse_obj_material_rgb(
                     parts,
@@ -5711,7 +5713,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Ke" => {
+            "ke" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.emissive = Some(parse_obj_material_rgb(
                     parts,
@@ -5728,27 +5730,27 @@ fn parse_obj_material_library_text(
                 set_obj_material_alpha(&mut current_properties, alpha);
                 current_properties.dissolve_halo |= halo;
             }
-            "Tr" => {
+            "tr" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let transparency =
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?;
                 set_obj_material_alpha(&mut current_properties, 1.0 - transparency);
             }
-            "Ns" => {
+            "ns" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let shininess =
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?;
                 let gloss = (shininess / 1000.0).clamp(0.0, 1.0).sqrt();
                 current_properties.roughness = Some((1.0 - gloss).clamp(0.0, 1.0));
             }
-            "Pr" | "roughness" => {
+            "pr" | "roughness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.roughness = Some(
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?
                         .clamp(0.0, 1.0),
                 );
             }
-            "Tf" => {
+            "tf" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.transmission_filter = Some(parse_obj_material_rgb(
                     parts,
@@ -5758,7 +5760,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Ni" | "ior" => {
+            "ni" | "ior" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.index_of_refraction = Some(parse_obj_material_scalar(
                     parts,
@@ -5798,14 +5800,14 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Pm" | "metallic" => {
+            "pm" | "metallic" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.metallic = Some(
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?
                         .clamp(0.0, 1.0),
                 );
             }
-            "Ps" | "sheen" => {
+            "ps" | "sheen" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.sheen = Some(parse_obj_material_scalar(
                     parts,
@@ -5815,7 +5817,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Pc" | "clearcoat" => {
+            "pc" | "clearcoat" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.clearcoat = Some(parse_obj_material_scalar(
                     parts,
@@ -5825,7 +5827,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "Pcr" | "clearcoat_roughness" => {
+            "pcr" | "clearcoat_roughness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.clearcoat_roughness = Some(parse_obj_material_scalar(
                     parts,
@@ -5855,7 +5857,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            directive if obj_material_texture_channel(directive).is_some() => {
+            _ if obj_material_texture_channel(directive).is_some() => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let texture_map =
                     parse_obj_material_texture_map(parts, directive, library, path, line_number)?;
@@ -6235,7 +6237,8 @@ fn parse_obj_material_texture_option(
     line_number: usize,
 ) -> Result<ObjMaterialTextureOption, ImportError> {
     let option = parts[index];
-    match option {
+    let option_key = option.to_ascii_lowercase();
+    match option_key.as_str() {
         "-blendu" | "-blendv" | "-cc" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
@@ -6255,7 +6258,7 @@ fn parse_obj_material_texture_option(
                 path,
                 line_number,
             )?;
-            match option {
+            match option_key.as_str() {
                 "-blendu" => options.blend_u = Some(value),
                 "-blendv" => options.blend_v = Some(value),
                 "-cc" => options.color_correction = Some(value),
@@ -6487,7 +6490,7 @@ fn parse_obj_material_texture_option(
             })
         }
         "-o" | "-s" | "-t" => {
-            let default = if option == "-s" { 1.0 } else { 0.0 };
+            let default = if option_key == "-s" { 1.0 } else { 0.0 };
             let (next_index, value) = parse_obj_material_texture_option_vec3(
                 parts,
                 index,
@@ -6499,7 +6502,7 @@ fn parse_obj_material_texture_option(
                 line_number,
             )?;
             let mut options = ObjMaterialTextureOptions::default();
-            match option {
+            match option_key.as_str() {
                 "-o" => options.transform_offset = Some(value),
                 "-s" => options.transform_scale = Some(value),
                 "-t" => options.transform_turbulence = Some(value),
@@ -6596,20 +6599,19 @@ fn parse_obj_material_texture_color_space(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<String, ImportError> {
-    match value
+    let normalized = value
         .trim()
         .to_ascii_lowercase()
         .replace('-', "_")
-        .replace(' ', "_")
-        .as_str()
-    {
+        .replace(' ', "_");
+    match normalized.as_str() {
         "srgb" => Ok("srgb".to_owned()),
         "linear" => Ok("linear".to_owned()),
         "non_color" => Ok("non_color".to_owned()),
         "raw" => Ok("raw".to_owned()),
-        other => Err(AssetError::Import {
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
