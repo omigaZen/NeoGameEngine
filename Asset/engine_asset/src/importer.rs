@@ -2886,7 +2886,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        51
+        53
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3061,7 +3061,7 @@ fn parse_model_source(
     extension: &str,
     settings: &ModelImportSettings,
 ) -> Result<Vec<ModelSubresource>, ImportError> {
-    let first_line = source_text.lines().next().unwrap_or("").trim();
+    let first_line = strip_model_source_comment(source_text.lines().next().unwrap_or("")).trim();
     if first_line == "NGA_MODEL_V1" {
         return parse_model_manifest(source_text);
     }
@@ -3077,6 +3077,11 @@ fn parse_model_source(
     Err(AssetError::Import {
         message: "model source must start with NGA_MODEL_V1 or be an OBJ source".to_owned(),
     })
+}
+
+#[cfg(feature = "model_importer")]
+fn strip_model_source_comment(line: &str) -> &str {
+    line.split_once('#').map(|(value, _)| value).unwrap_or(line)
 }
 
 #[cfg(feature = "model_importer")]
@@ -3195,7 +3200,7 @@ fn model_lod_subresource(mesh: &ModelSubresource) -> Result<Option<ModelSubresou
 #[cfg(feature = "model_importer")]
 fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, ImportError> {
     let lines = source_text.lines().collect::<Vec<_>>();
-    if lines.first().copied().unwrap_or("").trim() != "NGA_MODEL_V1" {
+    if strip_model_source_comment(lines.first().copied().unwrap_or("")).trim() != "NGA_MODEL_V1" {
         return Err(AssetError::Import {
             message: "model manifest must start with NGA_MODEL_V1".to_owned(),
         });
@@ -4648,6 +4653,7 @@ fn parse_model_obj_source(
         if has_header && line_number == 1 {
             continue;
         }
+        let line = strip_model_source_comment(line);
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -7267,46 +7273,94 @@ fn optimize_model_mesh_payload_text(text: &str) -> Result<String, ImportError> {
         })?;
     let mut unique_indices = Vec::new();
     let mut remap = vec![u32::MAX; mesh.vertices.len()];
-    let mut referenced_vertices = vec![true; mesh.vertices.len()];
-    if !mesh.indices.is_empty() {
-        referenced_vertices.fill(false);
-        for index in &mesh.indices {
-            referenced_vertices[*index as usize] = true;
-        }
-    }
-
-    for original_index in 0..mesh.vertices.len() {
-        if !referenced_vertices[original_index] {
-            continue;
-        }
-        let optimized_index = if let Some(existing_index) =
-            unique_indices.iter().position(|candidate_index| {
-                model_mesh_vertex_attributes_equal(&mesh, *candidate_index, original_index)
-            }) {
-            existing_index
-        } else {
-            let optimized_index = unique_indices.len();
-            unique_indices.push(original_index);
-            optimized_index
-        };
-        remap[original_index] = u32::try_from(optimized_index).map_err(|_| AssetError::Import {
-            message: "model mesh optimization produced too many vertices".to_owned(),
-        })?;
-    }
-
     let mut optimized_indices = Vec::with_capacity(mesh.indices.len());
-    for index in &mesh.indices {
-        let optimized_index = remap[*index as usize];
-        if optimized_index == u32::MAX {
+
+    if mesh.indices.is_empty() {
+        for original_index in 0..mesh.vertices.len() {
+            model_mesh_optimized_vertex_index(
+                &mesh,
+                &mut unique_indices,
+                &mut remap,
+                original_index,
+            )?;
+        }
+    } else {
+        let mut chunks = mesh.indices.chunks_exact(3);
+        for triangle in &mut chunks {
+            if model_mesh_triangle_is_degenerate(&mesh, triangle) {
+                continue;
+            }
+            for index in triangle {
+                let optimized_index = model_mesh_optimized_vertex_index(
+                    &mesh,
+                    &mut unique_indices,
+                    &mut remap,
+                    *index as usize,
+                )?;
+                optimized_indices.push(optimized_index);
+            }
+        }
+        if !chunks.remainder().is_empty() {
             return Err(AssetError::Import {
-                message: format!(
-                    "model mesh optimization failed to remap referenced vertex {index}"
-                ),
+                message: "model mesh optimization input has a non-triangle index count".to_owned(),
             });
         }
-        optimized_indices.push(optimized_index);
+        if optimized_indices.is_empty() {
+            return Err(AssetError::Import {
+                message: "model mesh optimization removed all triangles as degenerate".to_owned(),
+            });
+        }
     }
+
     model_mesh_payload_text_from_mesh(&mesh, &unique_indices, &optimized_indices)
+}
+
+#[cfg(feature = "model_importer")]
+fn model_mesh_optimized_vertex_index(
+    mesh: &Mesh,
+    unique_indices: &mut Vec<usize>,
+    remap: &mut [u32],
+    original_index: usize,
+) -> Result<u32, ImportError> {
+    if remap[original_index] != u32::MAX {
+        return Ok(remap[original_index]);
+    }
+    let optimized_index = if let Some(existing_index) =
+        unique_indices.iter().position(|candidate_index| {
+            model_mesh_vertex_attributes_equal(mesh, *candidate_index, original_index)
+        }) {
+        existing_index
+    } else {
+        let optimized_index = unique_indices.len();
+        unique_indices.push(original_index);
+        optimized_index
+    };
+    let optimized_index = u32::try_from(optimized_index).map_err(|_| AssetError::Import {
+        message: "model mesh optimization produced too many vertices".to_owned(),
+    })?;
+    remap[original_index] = optimized_index;
+    Ok(optimized_index)
+}
+
+#[cfg(feature = "model_importer")]
+fn model_mesh_triangle_is_degenerate(mesh: &Mesh, triangle: &[u32]) -> bool {
+    let [i0, i1, i2] = triangle else {
+        return false;
+    };
+    if i0 == i1 || i0 == i2 || i1 == i2 {
+        return true;
+    }
+    let p0 = mesh.vertices[*i0 as usize];
+    let p1 = mesh.vertices[*i1 as usize];
+    let p2 = mesh.vertices[*i2 as usize];
+    let edge0 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+    let edge1 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
+    let cross = [
+        edge0[1] * edge1[2] - edge0[2] * edge1[1],
+        edge0[2] * edge1[0] - edge0[0] * edge1[2],
+        edge0[0] * edge1[1] - edge0[1] * edge1[0],
+    ];
+    cross[0] == 0.0 && cross[1] == 0.0 && cross[2] == 0.0
 }
 
 #[cfg(feature = "model_importer")]
