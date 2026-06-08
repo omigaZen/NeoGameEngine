@@ -2887,7 +2887,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        56
+        58
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4948,6 +4948,13 @@ fn parse_obj_texture_coord<'a>(
             message: format!("missing OBJ texture coordinate value on line {line_number}"),
         });
     }
+    if count == 3 && values[2].abs() > f32::EPSILON {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ texture coordinate w component is unsupported because runtime mesh UVs are 2D on line {line_number}"
+            ),
+        });
+    }
     if parts.next().is_some() {
         return Err(AssetError::Import {
             message: format!("too many OBJ texture coordinate values on line {line_number}"),
@@ -6094,12 +6101,12 @@ fn parse_obj_material_bool_value(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<bool, ImportError> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "on" | "true" | "1" => Ok(true),
         "off" | "false" | "0" => Ok(false),
-        other => Err(AssetError::Import {
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
@@ -6522,12 +6529,12 @@ fn parse_obj_material_texture_clamp(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<String, ImportError> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "on" | "true" | "1" => Ok("clamp_to_edge".to_owned()),
         "off" | "false" | "0" => Ok("repeat".to_owned()),
-        other => Err(AssetError::Import {
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
@@ -6544,12 +6551,12 @@ fn parse_obj_material_texture_option_bool(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<bool, ImportError> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "on" | "true" | "1" => Ok(true),
         "off" | "false" | "0" => Ok(false),
-        other => Err(AssetError::Import {
+        _ => Err(AssetError::Import {
             message: format!(
-                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{other}` on line {line_number}",
+                "invalid OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number}",
                 library.name,
                 path.display_string()
             ),
