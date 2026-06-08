@@ -109,21 +109,21 @@ pub mod prelude {
         RendererLightingImplementationLevel, RendererLightingSupport, RendererLimits,
         RendererRenderGraphSupport, RendererRhiFeature, RendererRhiFeatureSupport,
         RendererRhiImplementationLevel, RendererRhiSupport, ResidencyPriority,
-        ResourceBackendResidencyLevel, ResourceKind,
-        ResourceLifecycleClass, ResourceLifecycleClassSupport, ResourceLifecycleSupport,
-        ResourceReclaimPolicy, ResourceStatus, RhiCustomResolvePath, RhiCustomResolvePathSupport,
-        RhiCustomResolveSupport, RhiResolveMode, RhiResolveShaderDesc, SamplerDesc, SamplerHandle,
-        SamplerInfo, SceneCommand, SceneCommandBuffer, SceneDesc, SceneHandle, SceneWriter,
-        ShaderDesc, ShaderEntryPointInfo, ShaderEntryPoints, ShaderFeatureSet, ShaderHandle,
-        ShaderInfo, ShaderReflectionMode, ShaderReloadDesc, ShaderSource, ShaderStages,
-        SkeletonInstanceDesc, SkeletonInstanceHandle, SkeletonInstanceInfo, SpotLightDesc,
-        SpotShadowDesc, StandardMaterialDesc, StorageTextureAccess, SubMeshDesc, SurfaceHandle,
-        TextureDesc, TextureDimension, TextureFormat, TextureHandle, TextureInfo,
-        TextureInitialData, TextureRegion, TextureSubresource, TextureUpdate, TextureUsage,
-        TextureViewDesc, UVec2, UploadStats, VSyncMode, ValidationMode, Vec2, Vec3, Vec4,
-        VertexAttribute, VertexData, VertexFormat, VertexLayout, VertexSemantic, VertexStepMode,
-        VertexStream, VertexStreamLayout, ViewDesc, ViewHandle, ViewQualitySettings, Viewport,
-        VisibilityFlags, IDENTITY_MAT4,
+        ResourceBackendResidencyLevel, ResourceKind, ResourceLifecycleClass,
+        ResourceLifecycleClassSupport, ResourceLifecycleSupport, ResourceReclaimPolicy,
+        ResourceStatus, RhiCustomResolvePath, RhiCustomResolvePathSupport, RhiCustomResolveSupport,
+        RhiResolveMode, RhiResolveShaderDesc, SamplerDesc, SamplerHandle, SamplerInfo,
+        SceneCommand, SceneCommandBuffer, SceneDesc, SceneHandle, SceneWriter, ShaderDesc,
+        ShaderEntryPointInfo, ShaderEntryPoints, ShaderFeatureSet, ShaderHandle, ShaderInfo,
+        ShaderReflectionMode, ShaderReloadDesc, ShaderSource, ShaderStages, SkeletonInstanceDesc,
+        SkeletonInstanceHandle, SkeletonInstanceInfo, SpotLightDesc, SpotShadowDesc,
+        StandardMaterialDesc, StorageTextureAccess, SubMeshDesc, SurfaceHandle, TextureDesc,
+        TextureDimension, TextureFormat, TextureHandle, TextureInfo, TextureInitialData,
+        TextureRegion, TextureSubresource, TextureUpdate, TextureUsage, TextureViewDesc, UVec2,
+        UploadStats, VSyncMode, ValidationMode, Vec2, Vec3, Vec4, VertexAttribute, VertexData,
+        VertexFormat, VertexLayout, VertexSemantic, VertexStepMode, VertexStream,
+        VertexStreamLayout, ViewDesc, ViewHandle, ViewQualitySettings, Viewport, VisibilityFlags,
+        IDENTITY_MAT4,
     };
 }
 
@@ -7259,7 +7259,9 @@ fn merge_pipeline_cache_backend_objects(
     mut facade_stats: PipelineCacheStats,
     backend_stats: &PipelineCacheStats,
 ) -> PipelineCacheStats {
-    facade_stats.backend_objects = facade_stats.backend_objects.max(backend_stats.backend_objects);
+    facade_stats.backend_objects = facade_stats
+        .backend_objects
+        .max(backend_stats.backend_objects);
     facade_stats
 }
 
@@ -9220,22 +9222,22 @@ impl Renderer {
         Ok(renderer)
     }
 
-#[cfg(feature = "backend-wgpu")]
-fn validate_surface_window_handles(
-    window: &dyn engine_platform::PlatformWindow,
-) -> Result<(), RendererError> {
-    window
-        .window_handle()
-        .map_err(|error| {
-            RendererError::Validation(format!("window handle is invalid for surface creation: {error}"))
+    #[cfg(feature = "backend-wgpu")]
+    fn validate_surface_window_handles(
+        window: &dyn engine_platform::PlatformWindow,
+    ) -> Result<(), RendererError> {
+        window.window_handle().map_err(|error| {
+            RendererError::Validation(format!(
+                "window handle is invalid for surface creation: {error}"
+            ))
         })?;
-    window
-        .display_handle()
-        .map_err(|error| RendererError::Validation(format!(
-            "display handle is invalid for surface creation: {error}"
-        )))?;
-    Ok(())
-}
+        window.display_handle().map_err(|error| {
+            RendererError::Validation(format!(
+                "display handle is invalid for surface creation: {error}"
+            ))
+        })?;
+        Ok(())
+    }
 
     #[cfg(not(feature = "backend-wgpu"))]
     pub async fn with_surface(
@@ -9325,12 +9327,13 @@ fn validate_surface_window_handles(
     fn supports_nonblocking_resource_retirement_poll(&self) -> bool {
         #[cfg(feature = "backend-wgpu")]
         {
-            return self
-                .backend_submission_completion_report()
-                .nonblocking_submission_index_poll_supported;
+            self.backend_submission_completion_report()
+                .nonblocking_submission_index_poll_supported
         }
-
-        false
+        #[cfg(not(feature = "backend-wgpu"))]
+        {
+            false
+        }
     }
 
     pub fn supports_feature(&self, feature: RendererFeature) -> bool {
@@ -15789,7 +15792,9 @@ fn fs_main() -> @location(0) vec4<f32> {
                     .value
                     .as_ref()
                     .and_then(|environment| environment.desc.prefiltered_specular)
-                    .is_some_and(|texture| self.backend_gpu_mip_generation_active_for_texture(texture))
+                    .is_some_and(|texture| {
+                        self.backend_gpu_mip_generation_active_for_texture(texture)
+                    })
         })
     }
 
@@ -15949,14 +15954,13 @@ fn fs_main() -> @location(0) vec4<f32> {
             .unwrap_or_default();
         #[cfg(not(feature = "backend-wgpu"))]
         let live_native_alias_keys = HashSet::new();
-        self.pipeline_cache_backend_aliases
-            .retain(|key, aliases| {
-                if !active_pipeline_keys.contains(key) {
-                    return false;
-                }
-                aliases.retain(|native_key| live_native_alias_keys.contains(native_key));
-                !aliases.is_empty()
-            });
+        self.pipeline_cache_backend_aliases.retain(|key, aliases| {
+            if !active_pipeline_keys.contains(key) {
+                return false;
+            }
+            aliases.retain(|native_key| live_native_alias_keys.contains(native_key));
+            !aliases.is_empty()
+        });
         let aliased_backend_object_keys = self
             .pipeline_cache_backend_aliases
             .keys()
@@ -16849,9 +16853,9 @@ fn fs_main() -> @location(0) vec4<f32> {
         }
         Err(RendererError::Validation(format!(
             "backend submission completion polling is unavailable: {}",
-            report.limitation.unwrap_or(
-                "backend-wgpu runtime is not active"
-            )
+            report
+                .limitation
+                .unwrap_or("backend-wgpu runtime is not active")
         )))
     }
 
@@ -20545,7 +20549,9 @@ fn generate_texture_mip_chain(texture: &StoredTexture) -> Result<Vec<Vec<u8>>, R
     }
     if !matches!(
         texture.desc.format,
-        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::Bgra8UnormSrgb
+        TextureFormat::Rgba8Unorm
+            | TextureFormat::Rgba8UnormSrgb
+            | TextureFormat::Bgra8UnormSrgb
             | TextureFormat::Rgba32Float
     ) {
         return Err(RendererError::Validation(
@@ -20598,7 +20604,9 @@ fn generate_texture_mip_chain(texture: &StoredTexture) -> Result<Vec<Vec<u8>>, R
     Ok(mips)
 }
 
-fn generate_texture_mip_chain_rgba32f(texture: &StoredTexture) -> Result<Vec<Vec<u8>>, RendererError> {
+fn generate_texture_mip_chain_rgba32f(
+    texture: &StoredTexture,
+) -> Result<Vec<Vec<u8>>, RendererError> {
     let base_layers = compact_base_level_rgba32f_layers(texture)?;
     let mut layer_chains = Vec::with_capacity(base_layers.len());
     let mut level_count = 0;
@@ -20625,11 +20633,12 @@ fn generate_texture_mip_chain_rgba32f(texture: &StoredTexture) -> Result<Vec<Vec
     for level in 0..level_count {
         let mut level_bytes = Vec::new();
         for layer_chain in &layer_chains {
-            let level_mip = layer_chain
-                .get(level)
-                .ok_or_else(|| RendererError::Validation("generated mip-chain is incomplete".to_owned()))?;
+            let level_mip = layer_chain.get(level).ok_or_else(|| {
+                RendererError::Validation("generated mip-chain is incomplete".to_owned())
+            })?;
             for texel in level_mip {
-                level_bytes.extend_from_slice(&encode_texel_color(TextureFormat::Rgba32Float, *texel));
+                level_bytes
+                    .extend_from_slice(&encode_texel_color(TextureFormat::Rgba32Float, *texel));
             }
         }
         mips.push(level_bytes);
@@ -20667,10 +20676,13 @@ fn compact_base_level_rgba32f_layers(
     )?;
     let bytes_per_row = usize::try_from(layout.bytes_per_row)
         .map_err(|_| RendererError::Validation("texture bytes_per_row is invalid".to_owned()))?;
-    let layer_stride = usize::try_from(layout.rows_per_image)
-        .and_then(|rows| rows.checked_mul(usize::try_from(layout.bytes_per_row).map_err(|_| 0)?))
-        .map_err(|_| RendererError::Validation("texture layout stride is invalid".to_owned()))?;
-    let bytes_per_texel = usize::from(texture_format_bytes_per_pixel(texture.desc.format));
+    let rows_per_image = usize::try_from(layout.rows_per_image)
+        .map_err(|_| RendererError::Validation("texture rows_per_image is invalid".to_owned()))?;
+    let layer_stride = rows_per_image
+        .checked_mul(bytes_per_row)
+        .ok_or_else(|| RendererError::Validation("texture layout stride is invalid".to_owned()))?;
+    let bytes_per_texel = usize::try_from(texture_format_bytes_per_pixel(texture.desc.format))
+        .map_err(|_| RendererError::Validation("texture format byte size is invalid".to_owned()))?;
     let row_bytes = usize::try_from(texture.desc.width)
         .ok()
         .and_then(|width| width.checked_mul(bytes_per_texel))
@@ -20685,28 +20697,36 @@ fn compact_base_level_rgba32f_layers(
                 .checked_mul(usize::try_from(texture.desc.height).unwrap_or(0))
                 .unwrap_or(0),
         );
-        let layer_offset = usize::try_from(layer).unwrap_or(0).checked_mul(layer_stride).ok_or_else(
-            || RendererError::Validation("texture layout stride is invalid".to_owned()),
-        )?;
+        let layer_offset = usize::try_from(layer)
+            .unwrap_or(0)
+            .checked_mul(layer_stride)
+            .ok_or_else(|| {
+                RendererError::Validation("texture layout stride is invalid".to_owned())
+            })?;
         for y in 0..texture.desc.height {
-            let row_start = layer_offset.checked_add(
-                usize::try_from(y)
-                    .ok()
-                    .and_then(|y| y.checked_mul(bytes_per_row))
-                    .ok_or_else(|| {
-                        RendererError::Validation("texture base mip row offset overflows".to_owned())
-                    })?,
-            )?;
+            let row_offset = usize::try_from(y)
+                .ok()
+                .and_then(|y| y.checked_mul(bytes_per_row))
+                .ok_or_else(|| {
+                    RendererError::Validation("texture base mip row offset overflows".to_owned())
+                })?;
+            let row_start = layer_offset.checked_add(row_offset).ok_or_else(|| {
+                RendererError::Validation("texture base mip stride overflow".to_owned())
+            })?;
             for x in 0..texture.desc.width {
-                let byte_start = row_start.checked_add(
-                    usize::try_from(x).ok().and_then(|x| x.checked_mul(bytes_per_texel)).ok_or_else(
-                        || RendererError::Validation("texture base mip width offset overflows".to_owned()),
-                    )?,
-                )?;
+                let texel_offset = usize::try_from(x)
+                    .ok()
+                    .and_then(|x| x.checked_mul(bytes_per_texel))
+                    .ok_or_else(|| {
+                        RendererError::Validation(
+                            "texture base mip width offset overflows".to_owned(),
+                        )
+                    })?;
+                let byte_start = row_start.checked_add(texel_offset).ok_or_else(|| {
+                    RendererError::Validation("texture base mip texel offset overflowed".to_owned())
+                })?;
                 let byte_end = byte_start.checked_add(bytes_per_texel).ok_or_else(|| {
-                    RendererError::Validation(
-                        "texture base mip texel offset overflowed".to_owned(),
-                    )
+                    RendererError::Validation("texture base mip texel offset overflowed".to_owned())
                 })?;
                 let texel = texture
                     .bytes
@@ -20719,10 +20739,10 @@ fn compact_base_level_rgba32f_layers(
                     })?;
                 texels.push(texel);
             }
-            let row_end = row_start.checked_add(row_bytes).ok_or_else(|| {
+            let _row_end = row_start.checked_add(row_bytes).ok_or_else(|| {
                 RendererError::Validation("texture base mip row range overflowed".to_owned())
             })?;
-            if row_end > bytes_per_row.checked_add(layer_offset).unwrap_or(usize::MAX) {
+            if row_bytes > bytes_per_row {
                 return Err(RendererError::Validation(
                     "texture base mip row exceeds provided bytes_per_row".to_owned(),
                 ));
@@ -20765,19 +20785,18 @@ fn generate_next_rgba32f_mip(
             let mut sample_count = 0.0_f32;
             for source_y in source_y_start..source_y_end {
                 for source_x in source_x_start..source_x_end {
-                    let source_offset = usize::try_from((source_y * previous_width) + source_x)
-                        .unwrap_or(0)
-                        * 4;
-                    let sample = previous[source_offset..source_offset + 4].try_into().unwrap_or([0.0; 4]);
+                    let source_offset =
+                        usize::try_from((source_y * previous_width) + source_x).unwrap_or(0);
+                    let sample = previous[source_offset];
                     for channel in 0..4 {
                         channel_sums[channel] += sample[channel];
                     }
                     sample_count += 1.0;
                 }
             }
-            let destination_offset = ((y * next_width + x) as usize) * 4;
+            let destination_offset = (y * next_width + x) as usize;
             let inv = 1.0 / sample_count.max(1.0);
-            next[destination_offset / 4] = [
+            next[destination_offset] = [
                 channel_sums[0] * inv,
                 channel_sums[1] * inv,
                 channel_sums[2] * inv,
@@ -20788,16 +20807,18 @@ fn generate_next_rgba32f_mip(
     next
 }
 
-fn generate_texture_volume_mip_chain_rgba32f(texture: &StoredTexture) -> Result<Vec<Vec<u8>>, RendererError> {
+fn generate_texture_volume_mip_chain_rgba32f(
+    texture: &StoredTexture,
+) -> Result<Vec<Vec<u8>>, RendererError> {
     let base = compact_base_level_rgba32f_volume(texture)?;
     let mut mips = vec![base];
     let mut width = texture.desc.width;
     let mut height = texture.desc.height;
     let mut depth = texture.desc.depth_or_layers;
     while width > 1 || height > 1 || depth > 1 {
-        let previous = mips
-            .last()
-            .ok_or_else(|| RendererError::Validation("invalid mip-chain generation state".to_owned()))?;
+        let previous = mips.last().ok_or_else(|| {
+            RendererError::Validation("invalid mip-chain generation state".to_owned())
+        })?;
         let previous_width = width;
         let previous_height = height;
         let previous_depth = depth;
@@ -20837,11 +20858,12 @@ fn compact_base_level_rgba32f_volume(texture: &StoredTexture) -> Result<Vec<f32>
     if layout.subresource.mip_level != 0
         || layout.subresource.array_layer != 0
         || layout.region.offset != [0, 0, 0]
-        || layout.region.extent != [
-            texture.desc.width,
-            texture.desc.height,
-            texture.desc.depth_or_layers,
-        ]
+        || layout.region.extent
+            != [
+                texture.desc.width,
+                texture.desc.height,
+                texture.desc.depth_or_layers,
+            ]
     {
         return Err(RendererError::Validation(
             "generate_mips requires a complete base level upload".to_owned(),
@@ -20859,15 +20881,20 @@ fn compact_base_level_rgba32f_volume(texture: &StoredTexture) -> Result<Vec<f32>
     )?;
     let bytes_per_row = usize::try_from(layout.bytes_per_row)
         .map_err(|_| RendererError::Validation("texture bytes_per_row is invalid".to_owned()))?;
-    let layer_stride = usize::try_from(layout.rows_per_image)
-        .and_then(|rows| rows.checked_mul(usize::try_from(layout.bytes_per_row).map_err(|_| 0)?))
-        .map_err(|_| RendererError::Validation("texture layout stride is invalid".to_owned()))?;
-    let bytes_per_texel = usize::from(texture_format_bytes_per_pixel(texture.desc.format));
+    let rows_per_image = usize::try_from(layout.rows_per_image)
+        .map_err(|_| RendererError::Validation("texture rows_per_image is invalid".to_owned()))?;
+    let layer_stride = rows_per_image
+        .checked_mul(bytes_per_row)
+        .ok_or_else(|| RendererError::Validation("texture layout stride is invalid".to_owned()))?;
+    let bytes_per_texel = usize::try_from(texture_format_bytes_per_pixel(texture.desc.format))
+        .map_err(|_| RendererError::Validation("texture format byte size is invalid".to_owned()))?;
     let mut texels = Vec::with_capacity(
         usize::try_from(texture.desc.width)
             .unwrap_or(0)
             .checked_mul(usize::try_from(texture.desc.height).unwrap_or(0))
-            .and_then(|pixels| pixels.checked_mul(usize::try_from(texture.desc.depth_or_layers).unwrap_or(0)))
+            .and_then(|pixels| {
+                pixels.checked_mul(usize::try_from(texture.desc.depth_or_layers).unwrap_or(0))
+            })
             .unwrap_or(0)
             * 4,
     );
@@ -20875,22 +20902,44 @@ fn compact_base_level_rgba32f_volume(texture: &StoredTexture) -> Result<Vec<f32>
         let layer_offset = usize::try_from(layer)
             .unwrap_or(0)
             .checked_mul(layer_stride)
-            .ok_or_else(|| RendererError::Validation("texture layout stride is invalid".to_owned()))?;
+            .ok_or_else(|| {
+                RendererError::Validation("texture layout stride is invalid".to_owned())
+            })?;
         for y in 0..texture.desc.height {
             let row_start = layer_offset
-                .checked_add(usize::try_from(y).ok().and_then(|y| y.checked_mul(bytes_per_row)).ok_or_else(
-                    || RendererError::Validation("texture base mip row offset overflows".to_owned()),
-                )?)
-                .ok_or_else(|| RendererError::Validation("texture base mip stride overflow".to_owned()))?;
+                .checked_add(
+                    usize::try_from(y)
+                        .ok()
+                        .and_then(|y| y.checked_mul(bytes_per_row))
+                        .ok_or_else(|| {
+                            RendererError::Validation(
+                                "texture base mip row offset overflows".to_owned(),
+                            )
+                        })?,
+                )
+                .ok_or_else(|| {
+                    RendererError::Validation("texture base mip stride overflow".to_owned())
+                })?;
             for x in 0..texture.desc.width {
                 let byte_start = row_start
-                    .checked_add(usize::try_from(x).ok().and_then(|x| x.checked_mul(bytes_per_texel)).ok_or_else(
-                        || RendererError::Validation("texture base mip width offset overflows".to_owned()),
-                    )?)
-                    .ok_or_else(|| RendererError::Validation("texture base mip texel offset overflowed".to_owned()))?;
-                let byte_end = byte_start
-                    .checked_add(bytes_per_texel)
-                    .ok_or_else(|| RendererError::Validation("texture base mip texel range overflowed".to_owned()))?;
+                    .checked_add(
+                        usize::try_from(x)
+                            .ok()
+                            .and_then(|x| x.checked_mul(bytes_per_texel))
+                            .ok_or_else(|| {
+                                RendererError::Validation(
+                                    "texture base mip width offset overflows".to_owned(),
+                                )
+                            })?,
+                    )
+                    .ok_or_else(|| {
+                        RendererError::Validation(
+                            "texture base mip texel offset overflowed".to_owned(),
+                        )
+                    })?;
+                let byte_end = byte_start.checked_add(bytes_per_texel).ok_or_else(|| {
+                    RendererError::Validation("texture base mip texel range overflowed".to_owned())
+                })?;
                 let texel = texture
                     .bytes
                     .get(byte_start..byte_end)
@@ -20935,19 +20984,18 @@ fn generate_next_rgba32f_volume_mip(
                 for source_z in source_z_start..source_z_end {
                     for source_y in source_y_start..source_y_end {
                         for source_x in source_x_start..source_x_end {
-                            let source_offset =
-                                (((source_z * previous_height + source_y) * previous_width + source_x) * 4)
-                                    as usize;
+                            let source_offset = (((source_z * previous_height + source_y)
+                                * previous_width
+                                + source_x)
+                                * 4) as usize;
                             for channel in 0..4 {
-                                channel_sums[channel] +=
-                                    previous[source_offset + channel];
+                                channel_sums[channel] += previous[source_offset + channel];
                             }
                             sample_count += 1.0;
                         }
                     }
                 }
-                let destination_offset =
-                    (((z * next_height + y) * next_width + x) * 4) as usize;
+                let destination_offset = (((z * next_height + y) * next_width + x) * 4) as usize;
                 let inv = 1.0 / sample_count.max(1.0);
                 next[destination_offset] = channel_sums[0] * inv;
                 next[destination_offset + 1] = channel_sums[1] * inv;
@@ -21797,9 +21845,18 @@ fn add_debug_editor_gizmo(
         Color::rgba(0.1, 0.9, 0.1, 1.0),
         Color::rgba(0.2, 0.45, 1.0, 1.0),
     ];
-    let axes = [(x_axis, axis_colors[0]), (y_axis, axis_colors[1]), (z_axis, axis_colors[2])];
+    let axes = [
+        (x_axis, axis_colors[0]),
+        (y_axis, axis_colors[1]),
+        (z_axis, axis_colors[2]),
+    ];
     for (axis, color) in axes {
-        add_debug_line(scene, origin, add_vec3(origin, scale_vec3(axis, size)), color);
+        add_debug_line(
+            scene,
+            origin,
+            add_vec3(origin, scale_vec3(axis, size)),
+            color,
+        );
     }
     match kind {
         EditorGizmoKind::Translate => {}
@@ -24007,8 +24064,7 @@ fn debug_draw_command_counts(
             } => {
                 editor_gizmo_count = editor_gizmo_count.saturating_add(1);
                 if let (Some(scene), Some(object)) = (*target_scene, *target_object) {
-                    pickable_editor_gizmo_count =
-                        pickable_editor_gizmo_count.saturating_add(1);
+                    pickable_editor_gizmo_count = pickable_editor_gizmo_count.saturating_add(1);
                     pickable_editor_gizmos.push(FrameEditorGizmoOutput {
                         scene,
                         object,
@@ -24041,8 +24097,7 @@ fn debug_draw_output(renderer: &Renderer, view: &ViewDesc) -> Option<FrameDebugD
         editor_gizmo_count,
         pickable_editor_gizmo_count,
         pickable_editor_gizmos,
-    ) =
-        debug_draw_command_counts(&renderer.debug_draw_commands);
+    ) = debug_draw_command_counts(&renderer.debug_draw_commands);
     debug_draw_enabled(renderer, view).then(|| FrameDebugDrawOutput {
         view_label: view.label.clone(),
         command_count: renderer.debug_draw_commands.len() as u32,
@@ -26974,9 +27029,8 @@ fn texture_info_from_stored(
         renderer_graph_texture_export_subresources_from_stored(stored).unwrap_or_default();
     let (complete_mip_coverage, complete_layer_coverage, complete_subresource_coverage) =
         renderer_graph_texture_export_coverage_for_desc(&stored.desc, &graph_subresources);
-    let backend_gpu_mip_generation_eligible =
-        stored.desc.usage.contains(TextureUsage::SAMPLED)
-            && wgpu_material_texture_gpu_mip_generation_supported(&stored.desc);
+    let backend_gpu_mip_generation_eligible = stored.desc.usage.contains(TextureUsage::SAMPLED)
+        && wgpu_material_texture_gpu_mip_generation_supported(&stored.desc);
     let backend_gpu_mip_generation_active = backend_gpu_mip_generation_active
         && stored.mips_generated
         && backend_gpu_mip_generation_eligible;
@@ -29386,14 +29440,14 @@ mod tests {
         WindowId,
     };
     use raw_window_handle::{
-        DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle, WindowHandle,
-        XlibWindowHandle,
+        DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawWindowHandle,
+        WindowHandle, XlibWindowHandle,
     };
     use std::{
         future::Future,
         pin::pin,
-        sync::Arc,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+        sync::Arc,
         task::{Context, Poll, Wake, Waker},
     };
 
@@ -29635,8 +29689,7 @@ mod tests {
 
     impl HasDisplayHandle for DummySurfaceWindowInvalidWindowCallsDisplay {
         fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
-            self.display_called
-                .store(true, Ordering::SeqCst);
+            self.display_called.store(true, Ordering::SeqCst);
             panic!("display handle should not be queried when window handle validation fails");
         }
     }
@@ -30164,9 +30217,7 @@ mod tests {
                 supported: false,
                 tier: RendererFeatureTier::Optional,
                 implementation: RendererFeatureImplementation::ConfigGate,
-                reason: Some(
-                    "backend-wgpu runtime is not active"
-                ),
+                reason: Some("backend-wgpu runtime is not active"),
             }
         );
         assert_eq!(
@@ -31178,7 +31229,9 @@ mod tests {
                         .features
                         .contains(RendererFeatures::SURFACE));
                 }
-                Err(RendererError::Backend(error)) if error.contains("graphics adapter not found") => {
+                Err(RendererError::Backend(error))
+                    if error.contains("graphics adapter not found") =>
+                {
                     eprintln!("skipping Renderer::new(BackendPreference::Wgpu) assertion without graphics adapter");
                 }
                 Err(error) => panic!("unexpected wgpu backend creation error: {error:?}"),
@@ -31257,7 +31310,9 @@ mod tests {
                 },
                 &window
             )),
-            Err(RendererError::UnsupportedFeature(RendererFeature::BackendWgpu))
+            Err(RendererError::UnsupportedFeature(
+                RendererFeature::BackendWgpu
+            ))
         );
         assert_eq!(
             block_on_ready(Renderer::with_surface(
@@ -31267,7 +31322,9 @@ mod tests {
                 },
                 &window
             )),
-            Err(RendererError::UnsupportedFeature(RendererFeature::BackendWgpu))
+            Err(RendererError::UnsupportedFeature(
+                RendererFeature::BackendWgpu
+            ))
         );
     }
 
@@ -31552,45 +31609,91 @@ mod tests {
         let graph_extension = renderer.register_graph_extension(NoopExtension).unwrap();
 
         assert_eq!(renderer.resource_status(mesh), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(buffer), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(texture), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(sampler), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(shader), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(template), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(material), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(environment), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(skeleton), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(morph_weights), Some(ResourceStatus::Ready));
+        assert_eq!(
+            renderer.resource_status(buffer),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(texture),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(sampler),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(shader),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(template),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(material),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(environment),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(skeleton),
+            Some(ResourceStatus::Ready)
+        );
+        assert_eq!(
+            renderer.resource_status(morph_weights),
+            Some(ResourceStatus::Ready)
+        );
         assert_eq!(renderer.resource_status(scene), Some(ResourceStatus::Ready));
-        assert_eq!(renderer.resource_status(camera), Some(ResourceStatus::Ready));
+        assert_eq!(
+            renderer.resource_status(camera),
+            Some(ResourceStatus::Ready)
+        );
         assert_eq!(
             renderer.resource_status(graph_extension),
             Some(ResourceStatus::Ready)
         );
 
-        let stale_mesh: MeshHandle = make_handle(ResourceKind::Mesh, mesh.index(), mesh.generation() + 1);
-        let stale_buffer: BufferHandle =
-            make_handle(ResourceKind::Buffer, buffer.index(), buffer.generation() + 1);
-        let stale_texture: TextureHandle =
-            make_handle(ResourceKind::Texture, texture.index(), texture.generation() + 1);
-        let stale_sampler: SamplerHandle =
-            make_handle(ResourceKind::Sampler, sampler.index(), sampler.generation() + 1);
-        let stale_shader: ShaderHandle =
-            make_handle(ResourceKind::Shader, shader.index(), shader.generation() + 1);
+        let stale_mesh: MeshHandle =
+            make_handle(ResourceKind::Mesh, mesh.index(), mesh.generation() + 1);
+        let stale_buffer: BufferHandle = make_handle(
+            ResourceKind::Buffer,
+            buffer.index(),
+            buffer.generation() + 1,
+        );
+        let stale_texture: TextureHandle = make_handle(
+            ResourceKind::Texture,
+            texture.index(),
+            texture.generation() + 1,
+        );
+        let stale_sampler: SamplerHandle = make_handle(
+            ResourceKind::Sampler,
+            sampler.index(),
+            sampler.generation() + 1,
+        );
+        let stale_shader: ShaderHandle = make_handle(
+            ResourceKind::Shader,
+            shader.index(),
+            shader.generation() + 1,
+        );
         let stale_template: MaterialTemplateHandle = make_handle(
             ResourceKind::MaterialTemplate,
             template.index(),
             template.generation() + 1,
         );
-        let stale_material: MaterialHandle =
-            make_handle(ResourceKind::Material, material.index(), material.generation() + 1);
+        let stale_material: MaterialHandle = make_handle(
+            ResourceKind::Material,
+            material.index(),
+            material.generation() + 1,
+        );
         let stale_environment: EnvironmentHandle = make_handle(
             ResourceKind::Environment,
             environment.index(),
             environment.generation() + 1,
         );
         let stale_skeleton: SkeletonInstanceHandle = make_handle(
-            ResourceKind::Skeleton,
+            ResourceKind::SkeletonInstance,
             skeleton.index(),
             skeleton.generation() + 1,
         );
@@ -31599,9 +31702,13 @@ mod tests {
             morph_weights.index(),
             morph_weights.generation() + 1,
         );
-        let stale_scene: SceneHandle = make_handle(ResourceKind::Scene, scene.index(), scene.generation() + 1);
-        let stale_camera: CameraHandle =
-            make_handle(ResourceKind::Camera, camera.index(), camera.generation() + 1);
+        let stale_scene: SceneHandle =
+            make_handle(ResourceKind::Scene, scene.index(), scene.generation() + 1);
+        let stale_camera: CameraHandle = make_handle(
+            ResourceKind::Camera,
+            camera.index(),
+            camera.generation() + 1,
+        );
         let stale_graph_extension: RenderGraphExtensionHandle = make_handle(
             ResourceKind::RenderGraphExtension,
             graph_extension.index(),
@@ -31636,7 +31743,7 @@ mod tests {
         assert_stale_generation_rejected!(stale_template, ResourceKind::MaterialTemplate);
         assert_stale_generation_rejected!(stale_material, ResourceKind::Material);
         assert_stale_generation_rejected!(stale_environment, ResourceKind::Environment);
-        assert_stale_generation_rejected!(stale_skeleton, ResourceKind::Skeleton);
+        assert_stale_generation_rejected!(stale_skeleton, ResourceKind::SkeletonInstance);
         assert_stale_generation_rejected!(stale_morph_weights, ResourceKind::MorphWeights);
         assert_stale_generation_rejected!(stale_scene, ResourceKind::Scene);
         assert_stale_generation_rejected!(stale_camera, ResourceKind::Camera);
@@ -32660,7 +32767,11 @@ mod tests {
             })
             .unwrap();
 
-        let stale_buffer = make_handle(ResourceKind::Buffer, buffer.index(), buffer.generation() + 1);
+        let stale_buffer = make_handle(
+            ResourceKind::Buffer,
+            buffer.index(),
+            buffer.generation() + 1,
+        );
         assert_eq!(
             renderer.update_buffer(
                 stale_buffer,
@@ -32683,12 +32794,7 @@ mod tests {
         let stale_mesh = make_handle(ResourceKind::Mesh, mesh.index(), mesh.generation() + 1);
 
         assert_eq!(
-            renderer.update_mesh_vertices(
-                stale_mesh,
-                0,
-                0,
-                &[1, 2, 3, 4, 5, 6],
-            ),
+            renderer.update_mesh_vertices(stale_mesh, 0, 0, &[1, 2, 3, 4, 5, 6],),
             Err(RendererError::InvalidHandle {
                 kind: ResourceKind::Mesh,
                 raw: stale_mesh.raw().get(),
@@ -32725,8 +32831,11 @@ mod tests {
             })
             .unwrap();
 
-        let stale_texture =
-            make_handle(ResourceKind::Texture, texture.index(), texture.generation() + 1);
+        let stale_texture = make_handle(
+            ResourceKind::Texture,
+            texture.index(),
+            texture.generation() + 1,
+        );
         assert_eq!(
             renderer.update_texture(
                 stale_texture,
@@ -32769,7 +32878,11 @@ mod tests {
                 initial_data: None,
             })
             .unwrap();
-        let stale_buffer = make_handle(ResourceKind::Buffer, buffer.index(), buffer.generation() + 1);
+        let stale_buffer = make_handle(
+            ResourceKind::Buffer,
+            buffer.index(),
+            buffer.generation() + 1,
+        );
         assert_eq!(renderer.buffer_info(stale_buffer), None);
         assert_eq!(renderer.buffer_bytes(stale_buffer), None);
 
@@ -32791,8 +32904,11 @@ mod tests {
                 }),
             })
             .unwrap();
-        let stale_texture =
-            make_handle(ResourceKind::Texture, texture.index(), texture.generation() + 1);
+        let stale_texture = make_handle(
+            ResourceKind::Texture,
+            texture.index(),
+            texture.generation() + 1,
+        );
         assert_eq!(renderer.texture_info(stale_texture), None);
         assert_eq!(renderer.texture_bytes(stale_texture), None);
 
@@ -32810,8 +32926,11 @@ mod tests {
                 lod_max: OrderedF32::new(16.0),
             })
             .unwrap();
-        let stale_sampler =
-            make_handle(ResourceKind::Sampler, sampler.index(), sampler.generation() + 1);
+        let stale_sampler = make_handle(
+            ResourceKind::Sampler,
+            sampler.index(),
+            sampler.generation() + 1,
+        );
         assert_eq!(renderer.sampler_info(stale_sampler), None);
     }
 
@@ -32909,10 +33028,12 @@ mod tests {
             })
             .unwrap();
 
-        assert!(!renderer
-            .texture_info(texture)
-            .unwrap()
-            .backend_gpu_mip_generation_eligible);
+        assert!(
+            !renderer
+                .texture_info(texture)
+                .unwrap()
+                .backend_gpu_mip_generation_eligible
+        );
         renderer.generate_mips(texture).unwrap();
 
         let info = renderer.texture_info(texture).unwrap();
@@ -32924,7 +33045,10 @@ mod tests {
         assert_eq!(stats.generated_mip_textures, 1);
         assert_eq!(stats.backend_gpu_mip_generation_eligible_textures, 1);
         assert_eq!(stats.backend_gpu_mip_generation_active_textures, 1);
-        assert_eq!(renderer.backend_material_resource_stats().texture_bindings, 1);
+        assert_eq!(
+            renderer.backend_material_resource_stats().texture_bindings,
+            1
+        );
     }
 
     #[test]
@@ -32932,7 +33056,12 @@ mod tests {
         let mut renderer = Renderer::new_headless(RendererConfig::default());
         let mut base = Vec::new();
         for value in 0..16_u32 {
-            base.push([value as f32, value as f32 + 10.0, value as f32 + 20.0, 255.0]);
+            base.push([
+                value as f32,
+                value as f32 + 10.0,
+                value as f32 + 20.0,
+                255.0,
+            ]);
         }
         let base_bytes: Vec<u8> = base
             .iter()
@@ -33001,7 +33130,6 @@ mod tests {
         assert!(!renderer.texture_info(texture).unwrap().mips_generated);
     }
 
-
     #[test]
     fn generate_mips_builds_retained_rgba32f_volume_chain() {
         let mut renderer = Renderer::new_headless(RendererConfig::default());
@@ -33017,7 +33145,10 @@ mod tests {
         let base_bytes: Vec<u8> = base
             .chunks_exact(4)
             .flat_map(|texel| {
-                encode_texel_color(TextureFormat::Rgba32Float, [texel[0], texel[1], texel[2], texel[3]])
+                encode_texel_color(
+                    TextureFormat::Rgba32Float,
+                    [texel[0], texel[1], texel[2], texel[3]],
+                )
             })
             .collect();
         let encode = |mip: &[f32]| -> Vec<u8> {
@@ -34415,7 +34546,10 @@ mod tests {
                 .and_then(|runtime| runtime.material_texture_generated_mips(prefiltered)),
             Some(2)
         );
-        assert_eq!(renderer.backend_material_resource_stats().texture_bindings, 1);
+        assert_eq!(
+            renderer.backend_material_resource_stats().texture_bindings,
+            1
+        );
         assert_eq!(
             renderer
                 .texture_configuration_stats()
@@ -34865,7 +34999,10 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(renderer.resource_status(texture), Some(ResourceStatus::Ready));
+        assert_eq!(
+            renderer.resource_status(texture),
+            Some(ResourceStatus::Ready)
+        );
         renderer.destroy(texture).unwrap();
         assert_eq!(
             renderer.resource_status(texture),
@@ -36204,13 +36341,12 @@ mod tests {
 
     #[cfg(feature = "backend-wgpu")]
     #[test]
-    fn nonblocking_backend_submission_completion_poll_reports_user_visible_error_without_trackers() {
+    fn nonblocking_backend_submission_completion_poll_reports_user_visible_error_without_trackers()
+    {
         let mut renderer = match Renderer::new_wgpu(RendererConfig::default()) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!(
-                    "skipping renderer nonblocking completion tracker error test: {error}"
-                );
+                eprintln!("skipping renderer nonblocking completion tracker error test: {error}");
                 return;
             }
         };
@@ -36248,9 +36384,8 @@ mod tests {
         assert!(!initial_support.true_nonblocking_poll_supported());
         let initial_unsupported = initial_support.unsupported_features();
         assert_eq!(initial_unsupported.len(), 1);
-        assert!(initial_unsupported.contains(
-            &BackendSynchronizationFeature::NonblockingSubmissionIndexPoll
-        ));
+        assert!(initial_unsupported
+            .contains(&BackendSynchronizationFeature::NonblockingSubmissionIndexPoll));
 
         let scene = renderer.create_scene(SceneDesc::default()).unwrap();
         let mut frame = renderer.begin_frame(FrameInput::default()).unwrap();
@@ -36305,14 +36440,13 @@ mod tests {
         let mut renderer = match Renderer::new_wgpu(RendererConfig::default()) {
             Ok(renderer) => renderer,
             Err(error) => {
-                eprintln!(
-                    "skipping renderer nonblocking feature support transition test: {error}"
-                );
+                eprintln!("skipping renderer nonblocking feature support transition test: {error}");
                 return;
             }
         };
 
-        let initial_feature = renderer.feature_info(RendererFeature::NonblockingResourceRetirementPoll);
+        let initial_feature =
+            renderer.feature_info(RendererFeature::NonblockingResourceRetirementPoll);
         assert!(!initial_feature.supported);
         assert!(initial_feature.reason.is_some());
 
@@ -36359,7 +36493,8 @@ mod tests {
         );
 
         renderer.poll_resource_retirements();
-        let tracked_feature = renderer.feature_info(RendererFeature::NonblockingResourceRetirementPoll);
+        let tracked_feature =
+            renderer.feature_info(RendererFeature::NonblockingResourceRetirementPoll);
         assert!(tracked_feature.supported);
         assert_eq!(tracked_feature.reason, None);
         assert!(renderer.supports_feature(RendererFeature::NonblockingResourceRetirementPoll));
@@ -36386,9 +36521,7 @@ mod tests {
             })) {
                 Ok(renderer) => renderer,
                 Err(error) => {
-                    eprintln!(
-                        "skipping backend submission completion poll fallback test: {error}"
-                    );
+                    eprintln!("skipping backend submission completion poll fallback test: {error}");
                     return;
                 }
             };
@@ -36405,7 +36538,9 @@ mod tests {
                 .is_some_and(|reason| reason.contains("queue-empty polling")));
             assert_eq!(
                 report.backend_active,
-                renderer.backend_submission_completion_report().backend_active
+                renderer
+                    .backend_submission_completion_report()
+                    .backend_active
             );
         }
     }
@@ -38508,10 +38643,7 @@ mod tests {
         assert_eq!(stats.shader_variants_without_backend_module, 1);
         assert_eq!(stats.shader_variant_interface_layouts, 1);
         let report = renderer.frame_debug_report().unwrap();
-        assert_eq!(
-            report.shader_variant_cache,
-            expected_shader_variant_cache
-        );
+        assert_eq!(report.shader_variant_cache, expected_shader_variant_cache);
         assert_eq!(report.shader_variant_cache_entries, 1);
         assert_eq!(report.shader_variants_used_this_frame, 0);
         assert_eq!(report.shader_variants_ready_unused, 1);
@@ -38519,10 +38651,7 @@ mod tests {
         assert_eq!(report.shader_variants_without_backend_module, 1);
         assert_eq!(report.shader_variant_interface_layouts, 1);
         let capture = stats.capture.as_ref().expect("capture is attached");
-        assert_eq!(
-            capture.shader_variant_cache,
-            expected_shader_variant_cache
-        );
+        assert_eq!(capture.shader_variant_cache, expected_shader_variant_cache);
         assert_eq!(
             capture
                 .resource_dump
@@ -39273,7 +39402,7 @@ mod tests {
                 available: true,
                 requires_external_hook: true,
                 integration: FrameCaptureIntegration::ExternalHookRegistered,
-                sdk_name: Some("RenderDoc".to_owned()),
+                sdk_name: Some("RenderDoc"),
                 registered_hook_label: None,
                 registered_sdk_name: Some("RenderDoc".to_owned()),
                 unavailable_reason: None,
@@ -39484,7 +39613,8 @@ mod tests {
         let mut renderer = Renderer::new_headless(RendererConfig::default());
         let scene = renderer.create_scene(SceneDesc::default()).unwrap();
         let destroyed_mesh = test_mesh(&mut renderer, 2.0);
-        let destroyed_texture = test_sampled_texture(&mut renderer, "capture_destroyed_texture_only");
+        let destroyed_texture =
+            test_sampled_texture(&mut renderer, "capture_destroyed_texture_only");
 
         renderer.destroy(destroyed_mesh).unwrap();
         renderer.destroy(destroyed_texture).unwrap();
@@ -39526,8 +39656,14 @@ mod tests {
         assert_eq!(dump.textures, 0);
         assert_eq!(dump.generated_mip_textures, 0);
         assert_eq!(dump.delayed_destroy_count + dump.reclaimed_this_frame, 2);
-        assert_eq!(dump.delayed_destroy_count, stats.memory.delayed_destroy_count);
-        assert_eq!(dump.delayed_destroy_bytes, stats.memory.delayed_destroy_bytes);
+        assert_eq!(
+            dump.delayed_destroy_count,
+            stats.memory.delayed_destroy_count
+        );
+        assert_eq!(
+            dump.delayed_destroy_bytes,
+            stats.memory.delayed_destroy_bytes
+        );
         assert_eq!(dump.reclaimed_this_frame, stats.memory.reclaimed_this_frame);
         assert_eq!(
             dump.reclaimed_bytes_this_frame,
@@ -39536,7 +39672,8 @@ mod tests {
     }
 
     #[test]
-    fn frame_capture_resource_dump_excludes_destroyed_inactive_resources_when_active_resources_remain() {
+    fn frame_capture_resource_dump_excludes_destroyed_inactive_resources_when_active_resources_remain(
+    ) {
         let mut renderer = Renderer::new_headless(RendererConfig::default());
         let scene = renderer.create_scene(SceneDesc::default()).unwrap();
         let active_mesh = test_mesh(&mut renderer, 0.0);
@@ -39558,7 +39695,8 @@ mod tests {
             .unwrap();
 
         let retained_mesh = test_mesh(&mut renderer, 1.0);
-        let retained_texture = test_sampled_texture(&mut renderer, "capture_retained_destroyed_texture");
+        let retained_texture =
+            test_sampled_texture(&mut renderer, "capture_retained_destroyed_texture");
         renderer.destroy(retained_mesh).unwrap();
         renderer.destroy(retained_texture).unwrap();
         assert_eq!(
@@ -39606,7 +39744,10 @@ mod tests {
         assert_eq!(dump.meshes, 1);
         assert_eq!(dump.textures, 1);
         assert_eq!(dump.delayed_destroy_count + dump.reclaimed_this_frame, 2);
-        assert_eq!(dump.delayed_destroy_bytes, stats.memory.delayed_destroy_bytes);
+        assert_eq!(
+            dump.delayed_destroy_bytes,
+            stats.memory.delayed_destroy_bytes
+        );
         assert_eq!(dump.reclaimed_this_frame, stats.memory.reclaimed_this_frame);
         assert_eq!(
             dump.reclaimed_bytes_this_frame,
@@ -42811,7 +42952,10 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.frame_capture_support, stats.frame_capture_support);
         assert_eq!(report.debug_tooling_support, stats.debug_tooling_support);
         assert_eq!(report.rhi_support, stats.rhi_support);
-        assert_eq!(report.material_backend_support, stats.material_backend_support);
+        assert_eq!(
+            report.material_backend_support,
+            stats.material_backend_support
+        );
         assert_eq!(
             report.material_reflection_coverage,
             stats.material_reflection_coverage
@@ -43695,9 +43839,18 @@ fn fs_main() -> @location(0) vec4<f32> {
         );
         assert_eq!(resource_dump.lighting_support, stats.lighting_support);
         assert_eq!(resource_dump.deformation_support, stats.deformation_support);
-        assert_eq!(resource_dump.post_process_support, stats.post_process_support);
-        assert_eq!(resource_dump.frame_capture_support, stats.frame_capture_support);
-        assert_eq!(resource_dump.debug_tooling_support, stats.debug_tooling_support);
+        assert_eq!(
+            resource_dump.post_process_support,
+            stats.post_process_support
+        );
+        assert_eq!(
+            resource_dump.frame_capture_support,
+            stats.frame_capture_support
+        );
+        assert_eq!(
+            resource_dump.debug_tooling_support,
+            stats.debug_tooling_support
+        );
         assert!(resource_dump.meshes >= 1);
         assert!(resource_dump.materials >= 1);
         assert!(resource_dump.scenes >= 1);
@@ -56710,7 +56863,8 @@ fn fs_main() -> @location(0) vec4<f32> {
                         value
                     );
                 }
-            "#.to_owned(),
+            "#
+            .to_owned(),
         };
         let pass_shader = shader;
         graph
@@ -56730,7 +56884,10 @@ fn fs_main() -> @location(0) vec4<f32> {
             .expect("wgpu MSAA graph-created custom resolved texture export is promoted");
         assert!(texture_export.promoted);
         assert_eq!(texture_export.label, "wgpu_custom_msaa_resolve_output");
-        assert_eq!(texture_export.source, RendererGraphExportSource::PromotedTransient);
+        assert_eq!(
+            texture_export.source,
+            RendererGraphExportSource::PromotedTransient
+        );
         assert_eq!(texture_export.dimension, TextureDimension::D2);
         assert_eq!(texture_export.width, 2);
         assert_eq!(texture_export.height, 2);
@@ -59015,9 +59172,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                 mip_levels: 2,
                 samples: 1,
                 format: TextureFormat::Rgba8Unorm,
-                usage: TextureUsage::RENDER_TARGET
-                    | TextureUsage::SAMPLED
-                    | TextureUsage::COPY_SRC,
+                usage: TextureUsage::RENDER_TARGET | TextureUsage::SAMPLED | TextureUsage::COPY_SRC,
                 initial_data: None,
             })
             .unwrap();
@@ -63532,9 +63687,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             Vec3::new(1.0, 0.0, 0.0),
             Color::rgba(1.0, 0.0, 0.0, 0.75),
         );
-        renderer
-            .debug_draw()
-            .translation_gizmo(IDENTITY_MAT4, 1.0);
+        renderer.debug_draw().translation_gizmo(IDENTITY_MAT4, 1.0);
         renderer.debug_draw().rotation_gizmo(IDENTITY_MAT4, 1.0);
         renderer.debug_draw().scale_gizmo(IDENTITY_MAT4, 1.0);
 

@@ -4,19 +4,18 @@ use engine_render::{RenderQueue, RenderQueueStats, RenderScene};
 use graphics_wgpu::{
     wgpu, WgpuFrameReadback, WgpuGraphics, WgpuGraphicsOptions, WgpuSurface, WgpuSurfaceOptions,
 };
-use render_wgpu::{MeshRenderStats, MeshRenderer, WgpuPostProcessOptions, WgpuRenderScene};
 use render_wgpu::WgpuEnvironmentProbe;
+use render_wgpu::{MeshRenderStats, MeshRenderer, WgpuPostProcessOptions, WgpuRenderScene};
 
 use crate::{
     AddressMode, BackendNativePassDrawStats, BackendPreference, BindingClass, BindingType,
-    CompareFunc, DepthFormat, DeviceStatus, EnvironmentProbeCapture,
-    EnvironmentProbeCaptureDesc, EnvironmentProbeCaptureMip, FilterMode, FormatCaps, FrameStats,
-    MaterialHandle, MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
-    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig,
-    RendererError, RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc,
-    SamplerHandle, ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages,
-    StorageTextureAccess, TextureDimension, TextureFormat, TextureHandle, VSyncMode,
-    WgpuRhiDevice,
+    CompareFunc, DepthFormat, DeviceStatus, EnvironmentProbeCapture, EnvironmentProbeCaptureDesc,
+    EnvironmentProbeCaptureMip, FilterMode, FormatCaps, FrameStats, MaterialHandle,
+    MaterialParameter, MaterialParameterValue, MaterialTemplateHandle, MemoryStats,
+    PipelineCacheStats, PipelineKey, RenderGraphStats, RendererCaps, RendererConfig, RendererError,
+    RendererFeatures, RendererLimits, ResourceReclaimPolicy, SamplerDesc, SamplerHandle,
+    ShaderHandle, ShaderInterfaceDesc, ShaderSource, ShaderStages, StorageTextureAccess,
+    TextureDimension, TextureFormat, TextureHandle, VSyncMode, WgpuRhiDevice,
 };
 
 #[derive(Clone, Debug)]
@@ -391,8 +390,10 @@ pub struct WgpuRendererRuntime {
     queued_native_pipeline_draws: Vec<WgpuQueuedNativePipelineDraw>,
     last_stats: Option<FrameStats>,
     last_submission_index: Option<wgpu::SubmissionIndex>,
-    last_submission_fence_index: Option<wgpu::SubmissionIndex>,
+    last_submission_serial: Option<u64>,
+    last_submission_fence_serial: Option<u64>,
     last_submission_fence_order: Option<u64>,
+    next_backend_submission_serial: u64,
     next_backend_submission_order: u64,
     latest_completed_submission_order: Option<u64>,
     device_status: DeviceStatus,
@@ -422,8 +423,10 @@ impl WgpuRendererRuntime {
             queued_native_pipeline_draws: Vec::new(),
             last_stats: None,
             last_submission_index: None,
-            last_submission_fence_index: None,
+            last_submission_serial: None,
+            last_submission_fence_serial: None,
             last_submission_fence_order: None,
+            next_backend_submission_serial: 1,
             next_backend_submission_order: 1,
             latest_completed_submission_order: None,
             device_status: DeviceStatus::Ok,
@@ -458,10 +461,10 @@ impl WgpuRendererRuntime {
                 .map_err(map_backend_error)?;
         }
         let runtime_caps = wgpu_renderer_caps(&config, &graphics);
-        validate_surface_runtime_formats(
+        Self::validate_surface_runtime_formats(
             &config,
             surface.format(),
-            surface.depth_format(),
+            Some(surface.depth_format()),
             &runtime_caps,
         )?;
         let renderer = MeshRenderer::new_with_sample_count(
@@ -490,8 +493,10 @@ impl WgpuRendererRuntime {
             queued_native_pipeline_draws: Vec::new(),
             last_stats: None,
             last_submission_index: None,
-            last_submission_fence_index: None,
+            last_submission_serial: None,
+            last_submission_fence_serial: None,
             last_submission_fence_order: None,
+            next_backend_submission_serial: 1,
             next_backend_submission_order: 1,
             latest_completed_submission_order: None,
             device_status: DeviceStatus::Ok,
@@ -499,54 +504,56 @@ impl WgpuRendererRuntime {
         })
     }
 
-fn validate_surface_runtime_formats(
-    config: &RendererConfig,
-    surface_format: wgpu::TextureFormat,
-    depth_format: Option<wgpu::TextureFormat>,
-    caps: &RendererCaps,
-) -> Result<(), RendererError> {
-    if let Some(requested_surface_format) = config.surface_format {
-        let requested = wgpu_surface_format(requested_surface_format);
-        if requested != surface_format {
+    fn validate_surface_runtime_formats(
+        config: &RendererConfig,
+        surface_format: wgpu::TextureFormat,
+        depth_format: Option<wgpu::TextureFormat>,
+        caps: &RendererCaps,
+    ) -> Result<(), RendererError> {
+        if let Some(requested_surface_format) = config.surface_format {
+            let requested = wgpu_surface_format(requested_surface_format);
+            if requested != surface_format {
+                return Err(RendererError::Validation(format!(
+                    "renderer surface_format {:?} does not match runtime surface format {:?}",
+                    requested_surface_format, surface_format
+                )));
+            }
+            if !caps.formats.color.contains(&requested_surface_format) {
+                return Err(RendererError::Validation(
+                    "renderer surface_format is not supported by runtime capabilities".to_owned(),
+                ));
+            }
+        } else if !caps.formats.color.is_empty() {
+            let actual_surface_format = texture_format_from_wgpu_surface(surface_format)
+                .ok_or_else(|| {
+                    RendererError::Validation("runtime surface format is unsupported".to_owned())
+                })?;
+            if !caps.formats.color.contains(&actual_surface_format) {
+                return Err(RendererError::Validation(
+                    "runtime surface format is not supported by runtime capabilities".to_owned(),
+                ));
+            }
+        }
+
+        let requested_depth_format = wgpu_depth_format(config.depth_format);
+        if depth_format != Some(requested_depth_format) {
             return Err(RendererError::Validation(format!(
-                "renderer surface_format {:?} does not match runtime surface format {:?}",
-                requested_surface_format, surface_format
+                "renderer depth_format {:?} does not match runtime depth format {:?}",
+                config.depth_format, depth_format
             )));
         }
-        if !caps.formats.color.contains(&requested_surface_format) {
+        let Some(runtime_depth_format) = depth_format.and_then(depth_format_from_wgpu) else {
             return Err(RendererError::Validation(
-                "renderer surface_format is not supported by runtime capabilities".to_owned(),
+                "runtime surface depth format is unsupported".to_owned(),
+            ));
+        };
+        if !caps.formats.depth.contains(&runtime_depth_format) {
+            return Err(RendererError::Validation(
+                "renderer depth_format is not supported by runtime capabilities".to_owned(),
             ));
         }
-    } else if !caps.formats.color.is_empty() {
-        let actual_surface_format = texture_format_from_wgpu_surface(surface_format)
-            .ok_or_else(|| RendererError::Validation("runtime surface format is unsupported".to_owned()))?;
-        if !caps.formats.color.contains(&actual_surface_format) {
-            return Err(RendererError::Validation(
-                "runtime surface format is not supported by runtime capabilities".to_owned(),
-            ));
-        }
+        Ok(())
     }
-
-    let requested_depth_format = wgpu_depth_format(config.depth_format);
-    if depth_format != Some(requested_depth_format) {
-        return Err(RendererError::Validation(format!(
-            "renderer depth_format {:?} does not match runtime depth format {:?}",
-            config.depth_format, depth_format
-        )));
-    }
-    let Some(runtime_depth_format) = depth_format.and_then(depth_format_from_wgpu) else {
-        return Err(RendererError::Validation(
-            "runtime surface depth format is unsupported".to_owned(),
-        ));
-    };
-    if !caps.formats.depth.contains(&runtime_depth_format) {
-        return Err(RendererError::Validation(
-            "renderer depth_format is not supported by runtime capabilities".to_owned(),
-        ));
-    }
-    Ok(())
-}
 
     pub fn graphics(&self) -> &WgpuGraphics {
         &self.graphics
@@ -824,7 +831,7 @@ fn validate_surface_runtime_formats(
         if let Err(error) = render_result {
             return Err(record_backend_error(&mut self.device_status, error));
         }
-        self.last_submission_index = surface.last_submission_index();
+        let last_submission_index = surface.last_submission_index();
 
         let queue_stats = queue.stats();
         let gpu_stats = renderer.last_stats();
@@ -850,6 +857,7 @@ fn validate_surface_runtime_formats(
             &mut stats.pipeline_cache,
             self.native_pipeline_cache.stats(),
         );
+        self.record_last_submission_index(last_submission_index);
         self.queue_post_pass_buffer_tombstones(native_post_pass_submissions);
         self.frame_index += 1;
         self.last_stats = Some(stats.clone());
@@ -976,7 +984,8 @@ fn validate_surface_runtime_formats(
             completed_submission_order = Some(completed_submission_order.unwrap_or(0).max(order));
         }
         if queue_empty {
-            if let Some(latest_submission_order) = self.latest_backend_tombstone_submission_order() {
+            if let Some(latest_submission_order) = self.latest_backend_tombstone_submission_order()
+            {
                 completed_submission_order = Some(
                     completed_submission_order
                         .unwrap_or(0)
@@ -1276,37 +1285,55 @@ fn validate_surface_runtime_formats(
             let _ = device.poll(wgpu::Maintain::WaitForSubmissionIndex(wait_index));
             let _ = completion_sender.send(());
         });
-        self.backend_submission_completions.push(WgpuBackendSubmissionCompletion {
-            max_tombstone_submission_order: submission_order,
-            completion_receiver,
-        });
-        self.backend_resource_retirement_stats.nonblocking_submission_index_poll_supported = true;
+        self.backend_submission_completions
+            .push(WgpuBackendSubmissionCompletion {
+                max_tombstone_submission_order: submission_order,
+                completion_receiver,
+            });
+        self.backend_resource_retirement_stats
+            .nonblocking_submission_index_poll_supported = true;
     }
 
-    fn ensure_submission_fence_order_for_index(&mut self, submission_index: &wgpu::SubmissionIndex) -> u64 {
-        if let Some(last_fence_index) = self.last_submission_fence_index.as_ref() {
-            if last_fence_index == submission_index {
-                if let Some(last_fence_order) = self.last_submission_fence_order {
-                    return last_fence_order;
-                }
+    fn ensure_submission_fence_order_for_index(
+        &mut self,
+        submission_index: &wgpu::SubmissionIndex,
+        submission_serial: u64,
+    ) -> u64 {
+        if self.last_submission_fence_serial == Some(submission_serial) {
+            if let Some(last_fence_order) = self.last_submission_fence_order {
+                return last_fence_order;
             }
         }
         let order = self.next_backend_submission_order;
         self.next_backend_submission_order = self.next_backend_submission_order.saturating_add(1);
         self.register_submission_completion_tracker(submission_index.clone(), order);
-        self.last_submission_fence_index = Some(submission_index.clone());
+        self.last_submission_fence_serial = Some(submission_serial);
         self.last_submission_fence_order = Some(order);
         order
     }
 
     fn current_backend_fence(&mut self) -> WgpuBackendFence {
         let submission_index = self.last_submission_index.clone();
-        let submission_order = submission_index
-            .as_ref()
-            .map(|submission_index| self.ensure_submission_fence_order_for_index(submission_index));
+        let submission_order = submission_index.as_ref().and_then(|submission_index| {
+            self.last_submission_serial.map(|submission_serial| {
+                self.ensure_submission_fence_order_for_index(submission_index, submission_serial)
+            })
+        });
         WgpuBackendFence {
             submission_index,
             submission_order,
+        }
+    }
+
+    fn record_last_submission_index(&mut self, submission_index: Option<wgpu::SubmissionIndex>) {
+        self.last_submission_index = submission_index;
+        if self.last_submission_index.is_some() {
+            let serial = self.next_backend_submission_serial;
+            self.next_backend_submission_serial =
+                self.next_backend_submission_serial.saturating_add(1);
+            self.last_submission_serial = Some(serial);
+        } else {
+            self.last_submission_serial = None;
         }
     }
 
@@ -1551,8 +1578,9 @@ fn validate_surface_runtime_formats(
             tombstones: self.backend_resource_tombstones.len(),
             ..retired
         };
-        stats.nonblocking_submission_index_poll_supported =
-            self.backend_resource_retirement_stats.nonblocking_submission_index_poll_supported;
+        stats.nonblocking_submission_index_poll_supported = self
+            .backend_resource_retirement_stats
+            .nonblocking_submission_index_poll_supported;
         stats.queue_empty_poll_fallback = true;
         for tombstone in &self.backend_resource_tombstones {
             accumulate_backend_tombstone_stats(tombstone, &mut stats, false);
@@ -1991,7 +2019,8 @@ fn validate_surface_runtime_formats(
             pass.draw(desc.vertices, desc.instances);
             info
         };
-        self.last_submission_index = Some(self.graphics.queue().submit(Some(encoder.finish())));
+        let submission_index = self.graphics.queue().submit(Some(encoder.finish()));
+        self.record_last_submission_index(Some(submission_index));
         Ok(info)
     }
 }
@@ -2750,7 +2779,9 @@ fn validate_wgpu_material_texture_gpu_mip_generation_desc(
     }
     if !matches!(
         desc.format,
-        TextureFormat::Rgba8Unorm | TextureFormat::Rgba8UnormSrgb | TextureFormat::Bgra8UnormSrgb
+        TextureFormat::Rgba8Unorm
+            | TextureFormat::Rgba8UnormSrgb
+            | TextureFormat::Bgra8UnormSrgb
             | TextureFormat::Rgba16Float
             | TextureFormat::Rgba32Float
     ) {
@@ -4780,8 +4811,8 @@ mod tests {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Neo indexed tombstone fence encoder"),
                 });
-        runtime.last_submission_index =
-            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+        let submission_index = runtime.graphics().queue().submit(Some(encoder.finish()));
+        runtime.record_last_submission_index(Some(submission_index));
         let indexed = create_module(&runtime, "Neo indexed tombstone module");
         runtime.queue_shader_variant_module_tombstone(vec![indexed]);
         let live_indexed = runtime.backend_resource_retirement_stats();
@@ -4920,8 +4951,8 @@ mod tests {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Neo completed submission gate invalidation encoder"),
                 });
-        runtime.last_submission_index =
-            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+        let submission_index = runtime.graphics().queue().submit(Some(encoder.finish()));
+        runtime.record_last_submission_index(Some(submission_index));
 
         runtime.queue_shader_variant_module_tombstone(vec![create_module(
             &runtime,
@@ -4994,8 +5025,8 @@ mod tests {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Neo later unrelated submission"),
                 });
-        runtime.last_submission_index =
-            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+        let submission_index = runtime.graphics().queue().submit(Some(encoder.finish()));
+        runtime.record_last_submission_index(Some(submission_index));
         runtime.wait_for_gpu();
 
         let retired = runtime.poll_backend_resource_retirements();
@@ -5059,8 +5090,8 @@ mod tests {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Neo mixed tombstone indexed submission"),
                 });
-        runtime.last_submission_index =
-            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+        let submission_index = runtime.graphics().queue().submit(Some(encoder.finish()));
+        runtime.record_last_submission_index(Some(submission_index));
         runtime.queue_shader_variant_module_tombstone(vec![create_module(
             &runtime,
             "Neo mixed tombstone indexed module",
@@ -5134,7 +5165,7 @@ mod tests {
             .graphics()
             .queue()
             .submit(Some(first_encoder.finish()));
-        runtime.last_submission_index = Some(first_submission.clone());
+        runtime.record_last_submission_index(Some(first_submission.clone()));
         runtime.queue_shader_variant_module_tombstone(vec![create_module(
             &runtime,
             "Neo per-fence first tombstone",
@@ -5156,7 +5187,7 @@ mod tests {
             .graphics()
             .queue()
             .submit(Some(second_encoder.finish()));
-        runtime.last_submission_index = Some(second_submission.clone());
+        runtime.record_last_submission_index(Some(second_submission.clone()));
         runtime.queue_shader_variant_module_tombstone(vec![create_module(
             &runtime,
             "Neo per-fence second tombstone",
@@ -5223,9 +5254,7 @@ mod tests {
         let mut runtime = match WgpuRendererRuntime::new(RendererConfig::default()) {
             Ok(runtime) => runtime,
             Err(error) => {
-                eprintln!(
-                    "skipping wgpu repeated-submission-index tracker reuse test: {error}"
-                );
+                eprintln!("skipping wgpu repeated-submission-index tracker reuse test: {error}");
                 return;
             }
         };
@@ -5248,8 +5277,8 @@ mod tests {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Neo reused tracker same submission encoder"),
                 });
-        runtime.last_submission_index =
-            Some(runtime.graphics().queue().submit(Some(encoder.finish())));
+        let submission_index = runtime.graphics().queue().submit(Some(encoder.finish()));
+        runtime.record_last_submission_index(Some(submission_index));
 
         runtime.queue_shader_variant_module_tombstone(vec![create_module(
             &runtime,
@@ -5275,7 +5304,9 @@ mod tests {
 
         assert_eq!(runtime.backend_resource_retirement_stats().tombstones, 2);
         assert_eq!(
-            runtime.backend_resource_retirement_stats().tombstone_submission_index_coverage,
+            runtime
+                .backend_resource_retirement_stats()
+                .tombstone_submission_index_coverage,
             WgpuTombstoneSubmissionIndexCoverage::All
         );
         assert_eq!(first_pending, 1);
@@ -5285,9 +5316,11 @@ mod tests {
         runtime.wait_for_gpu();
         let retired = runtime.poll_backend_resource_retirements();
         assert_eq!(retired.retired_tombstones_this_poll, 2);
-        assert!(!runtime
-            .backend_resource_retirement_stats
-            .nonblocking_submission_index_poll_supported);
+        assert!(
+            !runtime
+                .backend_resource_retirement_stats
+                .nonblocking_submission_index_poll_supported
+        );
         assert_eq!(runtime.backend_submission_completions.len(), 0);
     }
 
@@ -5357,9 +5390,7 @@ mod tests {
         let runtime = match WgpuRendererRuntime::new(RendererConfig::default()) {
             Ok(runtime) => runtime,
             Err(error) => {
-                eprintln!(
-                    "skipping wgpu material float texture GPU mip generation test: {error}"
-                );
+                eprintln!("skipping wgpu material float texture GPU mip generation test: {error}");
                 return;
             }
         };
@@ -6205,7 +6236,8 @@ mod tests {
 
     #[test]
     fn validate_surface_runtime_formats_rejects_configured_color_format_mismatch() {
-        let mut caps = RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
+        let mut caps =
+            RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
         caps.formats = FormatCaps {
             color: vec![TextureFormat::Rgba8Unorm],
             depth: vec![DepthFormat::D32Float],
@@ -6217,7 +6249,7 @@ mod tests {
         };
 
         assert!(matches!(
-            validate_surface_runtime_formats(
+            WgpuRendererRuntime::validate_surface_runtime_formats(
                 &config,
                 wgpu::TextureFormat::Bgra8UnormSrgb,
                 Some(wgpu::TextureFormat::Depth32Float),
@@ -6229,7 +6261,8 @@ mod tests {
 
     #[test]
     fn validate_surface_runtime_formats_rejects_configured_depth_format_mismatch() {
-        let mut caps = RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
+        let mut caps =
+            RendererCaps::for_backend(&RendererConfig::default(), "validation", "validation");
         caps.formats = FormatCaps {
             color: vec![TextureFormat::Rgba8Unorm],
             depth: vec![DepthFormat::D24Plus],
@@ -6241,7 +6274,7 @@ mod tests {
         };
 
         assert!(matches!(
-            validate_surface_runtime_formats(
+            WgpuRendererRuntime::validate_surface_runtime_formats(
                 &config,
                 wgpu::TextureFormat::Rgba8Unorm,
                 Some(wgpu::TextureFormat::Depth24Plus),
