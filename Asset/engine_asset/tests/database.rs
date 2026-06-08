@@ -2069,7 +2069,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2594,7 +2594,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 50);
+    assert_eq!(physics_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2750,7 +2750,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2843,6 +2843,177 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 }
 
 #[test]
+fn database_model_importer_records_physics_mesh_target_mesh_metadata() {
+    let config = database_config("builtin_model_physics_mesh_target_mesh");
+    let model_path = AssetPath::parse("models/physics_target_mesh.model");
+    let mesh_path = AssetPath::parse("models/physics_target_mesh.Body.mesh");
+    let physics_path = AssetPath::parse("models/physics_target_mesh.Collision.physics");
+    let model_source = b"NGA_MODEL_V1
+mesh=Body
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+physics_mesh=Collision
+target_mesh=Body
+NGA_PHYSICS_MESH_V1
+kind=trimesh
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let physics_metadata = database.registry().metadata_by_path(&physics_path).unwrap();
+    let physics_id = physics_metadata.id;
+
+    assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
+    assert_eq!(physics_metadata.labels, vec!["Collision"]);
+    assert_eq!(physics_metadata.importer_version, 51);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id, physics_id]
+    );
+
+    database.save_all_metadata_sidecars().unwrap();
+    let mut loaded_sidecars = AssetDatabase::new(config.clone());
+    loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&physics_path)
+            .unwrap()
+            .dependencies,
+        vec![mesh_id]
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let physics_output = database
+        .cook_asset(physics_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "physics_target_mesh",
+            vec![mesh_id, physics_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(physics_id),
+        Some([mesh_id].as_slice())
+    );
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+    assert_eq!(
+        reader.read_path(&physics_path).unwrap(),
+        physics_output.bytes
+    );
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(physics_id),
+        vec![mesh_id]
+    );
+    assert_eq!(server.state_by_id(mesh_id), AssetLoadState::Ready);
+    assert_eq!(server.state_by_id(physics_id), AssetLoadState::Ready);
+
+    let unknown_config = database_config("builtin_model_physics_target_unknown_mesh");
+    let model_path = AssetPath::parse("models/unknown_physics_target.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nphysics_mesh=Collision\ntarget_mesh=Missing\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(unknown_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/unknown_physics_target.model")
+                && message.contains("model physics_mesh `Collision`")
+                && message.contains("references unknown target mesh `Missing`")
+    ));
+
+    let wrong_kind_config = database_config("builtin_model_physics_target_wrong_kind");
+    let model_path = AssetPath::parse("models/wrong_kind_physics_target.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmaterial=HeroMaterial\nname=hero\nend\nphysics_mesh=Collision\ntarget_mesh=HeroMaterial\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(wrong_kind_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/wrong_kind_physics_target.model")
+                && message.contains("target mesh `HeroMaterial`")
+                && message.contains("references generated material `HeroMaterial` instead of a mesh")
+    ));
+
+    let repeated_config = database_config("builtin_model_physics_target_repeated");
+    let model_path = AssetPath::parse("models/repeated_physics_target.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=Body\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\nphysics_mesh=Collision\nmesh=Body\ntarget_mesh=Body\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(repeated_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/repeated_physics_target.model")
+                && message.contains("model physics_mesh `Collision`")
+                && message.contains("repeats target mesh metadata")
+    ));
+}
+
+#[test]
 fn database_model_importer_records_material_mesh_target_metadata() {
     let config = database_config("builtin_model_material_mesh_target");
     let model_path = AssetPath::parse("models/material_mesh.model");
@@ -2867,7 +3038,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 50);
+    assert_eq!(material_metadata.importer_version, 51);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3126,7 +3297,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3222,7 +3393,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3340,7 +3511,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3512,7 +3683,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 50);
+    assert_eq!(mesh_metadata.importer_version, 51);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]

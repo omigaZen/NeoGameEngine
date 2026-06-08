@@ -2886,7 +2886,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        50
+        51
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -2932,6 +2932,7 @@ impl AssetImporter for ModelImporter {
         validate_model_mesh_lod_bindings(&subresources)?;
         validate_model_mesh_material_bindings(&subresources)?;
         validate_model_mesh_physics_mesh_bindings(&subresources)?;
+        validate_model_physics_mesh_mesh_bindings(&subresources)?;
         validate_model_material_mesh_bindings(&subresources)?;
         validate_model_material_payloads(&subresources)?;
         validate_model_skin_bindings(&subresources)?;
@@ -3028,6 +3029,7 @@ struct ModelSubresource {
     skin_root_bone: Option<String>,
     animation_skeleton_label: Option<String>,
     material_mesh_label: Option<String>,
+    physics_mesh_mesh_label: Option<String>,
     material_labels: Vec<String>,
     physics_mesh_labels: Vec<String>,
     lod_mesh_labels: Vec<String>,
@@ -3131,6 +3133,13 @@ fn apply_model_import_settings(
         {
             subresource.material_mesh_label = None;
         }
+        if subresource
+            .physics_mesh_mesh_label
+            .as_ref()
+            .is_some_and(|label| original_labels.contains(label) && !kept_labels.contains(label))
+        {
+            subresource.physics_mesh_mesh_label = None;
+        }
     }
     filtered
 }
@@ -3175,6 +3184,7 @@ fn model_lod_subresource(mesh: &ModelSubresource) -> Result<Option<ModelSubresou
         skin_root_bone: mesh.skin_root_bone.clone(),
         animation_skeleton_label: None,
         material_mesh_label: None,
+        physics_mesh_mesh_label: None,
         material_labels: mesh.material_labels.clone(),
         physics_mesh_labels: mesh.physics_mesh_labels.clone(),
         lod_mesh_labels: mesh.lod_mesh_labels.clone(),
@@ -3221,6 +3231,7 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
                 skin_root_bone: None,
                 animation_skeleton_label: None,
                 material_mesh_label: None,
+                physics_mesh_mesh_label: None,
                 material_labels: Vec::new(),
                 physics_mesh_labels: Vec::new(),
                 lod_mesh_labels: Vec::new(),
@@ -3240,6 +3251,7 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
             skin_root_bone,
             animation_skeleton_label,
             material_mesh_label,
+            physics_mesh_mesh_label,
             material_labels,
             physics_mesh_labels,
             lod_mesh_labels,
@@ -3256,6 +3268,7 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
             skin_root_bone,
             animation_skeleton_label,
             material_mesh_label,
+            physics_mesh_mesh_label,
             material_labels,
             physics_mesh_labels,
             lod_mesh_labels,
@@ -3331,6 +3344,7 @@ fn parse_model_block_payload(
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
         Vec<String>,
         Vec<String>,
         Vec<String>,
@@ -3345,6 +3359,7 @@ fn parse_model_block_payload(
     let mut skin_root_bone = None;
     let mut animation_skeleton_label = None;
     let mut material_mesh_label = None;
+    let mut physics_mesh_mesh_label = None;
     let mut material_labels = Vec::new();
     let mut physics_mesh_labels = Vec::new();
     let mut lod_mesh_labels = Vec::new();
@@ -3372,6 +3387,7 @@ fn parse_model_block_payload(
                 skin_root_bone,
                 animation_skeleton_label,
                 material_mesh_label,
+                physics_mesh_mesh_label,
                 material_labels,
                 physics_mesh_labels,
                 lod_mesh_labels,
@@ -3565,14 +3581,42 @@ fn parse_model_block_payload(
                         continue;
                     }
                     "mesh" | "target_mesh" if key == "material" => {
-                        let mesh_label = parse_model_material_mesh_label(
+                        let mesh_label = parse_model_target_mesh_label(
                             metadata_value.trim(),
                             current_line_number,
+                            "material",
                         )?;
                         if material_mesh_label.replace(mesh_label.clone()).is_some() {
                             return Err(AssetError::Import {
                                 message: format!(
                                     "model material `{label}` block on line {line_number} repeats target mesh metadata"
+                                ),
+                            });
+                        }
+                        push_model_dependency_label(
+                            &mut dependency_labels,
+                            ModelDependencyLabel::new(mesh_label, Some("mesh")),
+                            key,
+                            label,
+                            line_number,
+                            current_line_number,
+                        )?;
+                        index += 1;
+                        continue;
+                    }
+                    "mesh" | "target_mesh" if key == "physics_mesh" => {
+                        let mesh_label = parse_model_target_mesh_label(
+                            metadata_value.trim(),
+                            current_line_number,
+                            "physics_mesh",
+                        )?;
+                        if physics_mesh_mesh_label
+                            .replace(mesh_label.clone())
+                            .is_some()
+                        {
+                            return Err(AssetError::Import {
+                                message: format!(
+                                    "model physics_mesh `{label}` block on line {line_number} repeats target mesh metadata"
                                 ),
                             });
                         }
@@ -3784,12 +3828,16 @@ fn parse_model_animation_skeleton_label(
 }
 
 #[cfg(feature = "model_importer")]
-fn parse_model_material_mesh_label(value: &str, line_number: usize) -> Result<String, ImportError> {
+fn parse_model_target_mesh_label(
+    value: &str,
+    line_number: usize,
+    owner_kind: &str,
+) -> Result<String, ImportError> {
     let labels = parse_model_plain_dependency_labels(value, line_number)?;
     if labels.len() != 1 {
         return Err(AssetError::Import {
             message: format!(
-                "model material target mesh on line {line_number} must name exactly one generated mesh label"
+                "model {owner_kind} target mesh on line {line_number} must name exactly one generated mesh label"
             ),
         });
     }
@@ -3897,6 +3945,43 @@ fn validate_model_mesh_physics_mesh_bindings(
                     ),
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn validate_model_physics_mesh_mesh_bindings(
+    subresources: &[ModelSubresource],
+) -> Result<(), ImportError> {
+    for physics_mesh in subresources
+        .iter()
+        .filter(|subresource| subresource.kind == "physics_mesh")
+    {
+        let Some(mesh_label) = &physics_mesh.physics_mesh_mesh_label else {
+            continue;
+        };
+        let Some(target) = subresources
+            .iter()
+            .find(|subresource| subresource.label == *mesh_label)
+        else {
+            return Err(AssetError::Import {
+                message: format!(
+                    "model physics_mesh `{}` on line {} references unknown target mesh `{mesh_label}`",
+                    physics_mesh.label, physics_mesh.line_number
+                ),
+            });
+        };
+        if target.kind != "mesh" {
+            return Err(AssetError::Import {
+                message: format!(
+                    "model physics_mesh `{}` on line {} target mesh `{mesh_label}` references generated {} `{}` instead of a mesh",
+                    physics_mesh.label,
+                    physics_mesh.line_number,
+                    target.kind,
+                    target.label
+                ),
+            });
         }
     }
     Ok(())
@@ -4695,6 +4780,7 @@ fn parse_model_obj_source(
                 skin_root_bone: None,
                 animation_skeleton_label: None,
                 material_mesh_label: None,
+                physics_mesh_mesh_label: None,
                 material_labels: Vec::new(),
                 physics_mesh_labels: Vec::new(),
                 lod_mesh_labels: Vec::new(),
@@ -4718,6 +4804,7 @@ fn parse_model_obj_source(
             skin_root_bone: None,
             animation_skeleton_label: None,
             material_mesh_label: None,
+            physics_mesh_mesh_label: None,
             material_labels: Vec::new(),
             physics_mesh_labels: Vec::new(),
             lod_mesh_labels: Vec::new(),
