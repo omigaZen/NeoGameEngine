@@ -13,11 +13,11 @@ fn shader_bytes() -> Vec<u8> {
 }
 
 fn scene_bytes() -> Vec<u8> {
-    b"NGA_SCENE_V1\nname=hero_scene\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec()
+    b"NGA_SCENE_V1\nname=hero_scene\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=Tag|value=hero\n".to_vec()
 }
 
 fn prefab_bytes() -> Vec<u8> {
-    b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec()
+    b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=Tag|value=weapon\n".to_vec()
 }
 
 fn animation_source_bytes() -> Vec<u8> {

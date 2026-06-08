@@ -201,6 +201,7 @@ pub fn run_smoke() -> SmokeReport {
 pub fn run_editor_smoke() -> EditorSmokeReport {
     let root = smoke_temp_root("editor");
     let texture_path = AssetPath::parse("textures/editor.texture");
+    let mesh_path = AssetPath::parse("meshes/editor.mesh");
     let material_path = AssetPath::parse("materials/editor.material");
     let scene_path = AssetPath::parse("scenes/editor.scene");
     let prefab_path = AssetPath::parse("prefabs/editor.prefab");
@@ -208,15 +209,16 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         b"name=editor\ntexture.albedo=textures/editor.texture\nbase_color=0.25,0.5,1,1\n".to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(texture_path.path(), texture_bytes(1, 1));
+    io.insert(mesh_path.path(), mesh_bytes());
     io.insert(material_path.path(), material_source);
     io.insert(
         scene_path.path(),
-        b"NGA_SCENE_V1\nname=editor_scene\ndependency=textures/editor.texture\ndependency=materials/editor.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Child;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n"
+        b"NGA_SCENE_V1\nname=editor_scene\ndependency=textures/editor.texture\ndependency=materials/editor.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Child;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\n"
             .to_vec(),
     );
     io.insert(
         prefab_path.path(),
-        b"NGA_PREFAB_V1\ndependency=textures/editor.texture\ndependency=materials/editor.material\nroot=EditorRoot\ncomponent=Transform|translation=1,0,0\nchild=EditorChild;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n"
+        b"NGA_PREFAB_V1\ndependency=textures/editor.texture\ndependency=materials/editor.material\nroot=EditorRoot\ncomponent=Transform|translation=1,0,0\nchild=EditorChild;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\n"
             .to_vec(),
     );
 
@@ -232,16 +234,17 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
 
     let scanned_sources = database.scan().unwrap().len();
     let texture_id = database.import_asset_path(&texture_path).unwrap();
+    let mesh_id = database.import_asset_path(&mesh_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
     let scene_id = database.import_asset_path(&scene_path).unwrap();
     let prefab_id = database.import_asset_path(&prefab_path).unwrap();
-    for id in [texture_id, material_id, scene_id, prefab_id] {
+    for id in [texture_id, mesh_id, material_id, scene_id, prefab_id] {
         database.cook_asset(id, TargetPlatform::Windows).unwrap();
     }
     let bundle = database
         .build_bundle(&AssetDatabaseBundleBuild::new(
             "editor_smoke",
-            vec![material_id, prefab_id, scene_id, texture_id],
+            vec![material_id, mesh_id, prefab_id, scene_id, texture_id],
         ))
         .unwrap();
 
@@ -298,8 +301,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
 
     let report = EditorSmokeReport {
         scanned_sources,
-        imported_assets: 4,
-        cooked_assets: 4,
+        imported_assets: 5,
+        cooked_assets: 5,
         bundled_assets: bundle.asset_count,
         bundle_group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&material),
@@ -576,17 +579,17 @@ mod tests {
     fn editor_smoke_imports_cooks_bundles_and_loads_runtime_output() {
         let report = run_editor_smoke();
 
-        assert_eq!(report.scanned_sources, 4);
-        assert_eq!(report.imported_assets, 4);
-        assert_eq!(report.cooked_assets, 4);
-        assert_eq!(report.bundled_assets, 4);
+        assert_eq!(report.scanned_sources, 5);
+        assert_eq!(report.imported_assets, 5);
+        assert_eq!(report.cooked_assets, 5);
+        assert_eq!(report.bundled_assets, 5);
         assert!(report.bundle_group_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.scene_ready_with_dependencies);
         assert!(report.prefab_ready_with_dependencies);
         assert_eq!(report.runtime_dependencies, 1);
-        assert_eq!(report.scene_dependencies, 2);
-        assert_eq!(report.prefab_dependencies, 2);
+        assert_eq!(report.scene_dependencies, 3);
+        assert_eq!(report.prefab_dependencies, 3);
         assert_eq!(report.scene_commands, 4);
         assert_eq!(report.prefab_commands, 4);
         assert!(report.ready_events >= 2);

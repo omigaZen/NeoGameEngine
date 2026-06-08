@@ -8,7 +8,8 @@ use crate::{
 };
 
 use super::scene::{
-    dependency_type_for_path, parse_serialized_component, parse_serialized_entity, SerializedEntity,
+    dependency_type_for_path, parse_serialized_component, parse_serialized_entity,
+    serialized_component_asset_dependencies, SerializedEntity,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +96,7 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
     let mut root = None;
     let mut children = Vec::new();
     let mut dependencies = Vec::new();
+    let mut dependency_keys = Vec::new();
     let mut current_entity = None;
 
     for (line_index, line) in lines.enumerate() {
@@ -114,8 +116,13 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
             "dependency" => {
                 let path = AssetPath::parse(value);
                 let asset_type = dependency_type_for_path(&path, line_number, "prefab")?;
-                let id = ctx.add_dependency(path, asset_type);
-                dependencies.push(UntypedHandle::new(id, asset_type, HandleStrength::Weak));
+                add_prefab_dependency(
+                    ctx,
+                    &mut dependencies,
+                    &mut dependency_keys,
+                    path,
+                    asset_type,
+                );
             }
             "root" => {
                 if root.is_some() {
@@ -144,6 +151,17 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
             }
             "component" => {
                 let component = parse_serialized_component(value, line_number, "prefab")?;
+                for (path, asset_type) in
+                    serialized_component_asset_dependencies(&component, line_number, "prefab")?
+                {
+                    add_prefab_dependency(
+                        ctx,
+                        &mut dependencies,
+                        &mut dependency_keys,
+                        path,
+                        asset_type,
+                    );
+                }
                 match current_entity {
                     Some(PrefabEntityTarget::Root) => {
                         if let Some(root) = root.as_mut() {
@@ -178,4 +196,24 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
         children,
         dependencies,
     })
+}
+
+fn add_prefab_dependency(
+    ctx: &mut LoadContext<'_>,
+    dependencies: &mut Vec<UntypedHandle>,
+    dependency_keys: &mut Vec<(AssetPath, AssetTypeId)>,
+    path: AssetPath,
+    asset_type: AssetTypeId,
+) {
+    if dependency_keys
+        .iter()
+        .any(|(existing_path, existing_type)| {
+            existing_path == &path && *existing_type == asset_type
+        })
+    {
+        return;
+    }
+    let id = ctx.add_dependency(path.clone(), asset_type);
+    dependencies.push(UntypedHandle::new(id, asset_type, HandleStrength::Weak));
+    dependency_keys.push((path, asset_type));
 }

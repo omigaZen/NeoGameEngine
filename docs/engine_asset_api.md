@@ -4409,10 +4409,15 @@ component=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material
 第一行必须是 `NGA_SCENE_V1`，`name` 必填。`dependency=<path>` 会通过
 `LoadContext` 注册依赖并在 `SceneAsset.dependencies` 中保存弱 `UntypedHandle`；
 当前按路径扩展名识别 `texture`/`tex`/`rgba`、`mesh`、`wgsl`/`glsl`/`shader`、
-`material`/`mat`、`audio`/`wav`/`ogg`、`scene` 和 `prefab`。`entity=<name>` 创建实体，
+`material`/`mat`、`audio`/`wav`/`ogg`、`scene`、`prefab`、`skeleton`/`skel` 和
+`physics`/`physicsmesh`/`pmesh`。`entity=<name>` 创建实体，
 可用 `entity=<name>;parent=<index>` 指向父实体索引。`component=<type>|<data>`
-会追加到最近声明的实体，`data` 以 UTF-8 字节保存。非法 header、缺失 `name`、
-未知 key、组件出现在实体之前、非法 parent、缺失 `|` 或不支持的依赖扩展名都会返回
+会追加到最近声明的实体，`data` 以 UTF-8 字节保存。已知组件 schema 中的 asset 字段也会
+注册同样的运行时依赖并写入 `SceneAsset.dependencies`：`MeshRenderer.mesh/material`、
+`SkinnedMeshRenderer.mesh/skeleton/material`、`AudioSource.clip`、`PhysicsCollider.mesh`
+或 `physics_mesh`、`SceneInstance.scene` 和 `PrefabInstance.prefab`。未知组件类型和非 asset
+字段仍按原始字节透传。非法 header、缺失 `name`、未知 key、组件出现在实体之前、非法 parent、
+缺失 `|`、已知组件字段不是 `key=value`、asset 字段为空、字段扩展名类型不匹配或不支持的依赖扩展名都会返回
 `AssetError::Decode`。
 
 ---
@@ -4443,9 +4448,11 @@ component=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material
 第一行必须是 `NGA_PREFAB_V1`，`root=<name>` 必填且只能出现一次。`dependency=<path>`
 按与 `SceneLoader` 相同的扩展名规则注册依赖，并在 `Prefab.dependencies` 中保存弱
 `UntypedHandle`。`child=<name>` 创建子实体，可用 `child=<name>;parent=<index>`
-保存父实体索引。`component=<type>|<data>` 追加到最近声明的 root 或 child。非法
-header、缺失 root、重复 root、root 带 parent、child 出现在 root 之前、组件出现在实体之前、
-非法 parent、缺失 `|` 或不支持的依赖扩展名都会返回 `AssetError::Decode`。
+保存父实体索引。`component=<type>|<data>` 追加到最近声明的 root 或 child，并按与
+`SceneLoader` 相同的已知组件 asset 字段规则注册依赖。非法 header、缺失 root、重复 root、
+root 带 parent、child 出现在 root 之前、组件出现在实体之前、非法 parent、缺失 `|`、
+已知组件字段不是 `key=value`、asset 字段为空、字段扩展名类型不匹配或不支持的依赖扩展名都会返回
+`AssetError::Decode`。
 
 ---
 
@@ -4960,8 +4967,8 @@ impl SceneLoader {
 ```
 
 `SceneLoader` 注册 `scene` 扩展名，解析文档中的 `NGA_SCENE_V1` 文本 payload。
-`dependency=<path>` 行会注册运行时依赖，场景本体在所有直接和传递依赖 Ready 后才会
-进入 Ready。Scene 当前是 CPU-only 资源，不会产生 GPU upload command。
+`dependency=<path>` 行和已知组件 schema 的 asset 字段会注册运行时依赖，场景本体在所有直接和传递依赖
+Ready 后才会进入 Ready。Scene 当前是 CPU-only 资源，不会产生 GPU upload command。
 
 ---
 
@@ -4976,11 +4983,12 @@ impl PrefabLoader {
 ```
 
 `PrefabLoader` 注册 `prefab` 扩展名，解析文档中的 `NGA_PREFAB_V1` 文本 payload。
-`dependency=<path>` 行会注册运行时依赖，Prefab 本体在所有直接和传递依赖 Ready 后才会
-进入 Ready。Prefab 当前是 CPU-only 资源，不会产生 GPU upload command。
+`dependency=<path>` 行和已知组件 schema 的 asset 字段会注册运行时依赖，Prefab 本体在所有直接和传递依赖
+Ready 后才会进入 Ready。Prefab 当前是 CPU-only 资源，不会产生 GPU upload command。
 
 `AssetDatabase::register_builtin_importers()` 默认也会注册 `SceneImporter` 与 `PrefabImporter`，
-它们会把 `NGA_SCENE_V1` / `NGA_PREFAB_V1` 源文档导入成 runtime 资源并保留依赖路径。
+它们会把 `NGA_SCENE_V1` / `NGA_PREFAB_V1` 源文档导入成 runtime 资源，并把显式依赖路径与
+已知组件 asset 字段都写入 metadata dependencies。
 `AssetDatabase::register_builtin_cookers()` 默认也会注册 `SceneCooker` 与 `PrefabCooker`，
 它们会把 scene/prefab runtime 文档写入 cooked bundle，供 `SceneLoader` / `PrefabLoader`
 在运行时直接加载。

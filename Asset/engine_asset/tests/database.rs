@@ -10511,12 +10511,14 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
     let config = database_config("builtin_scene_prefab_import_cook_load");
     let shader_path = AssetPath::parse("shaders/pbr.wgsl");
     let texture_path = AssetPath::parse("textures/hero.texture");
+    let mesh_path = AssetPath::parse("meshes/tri.mesh");
     let material_path = AssetPath::parse("materials/hero.material");
     let scene_path = AssetPath::parse("scenes/hero.scene");
     let prefab_path = AssetPath::parse("prefabs/hero.prefab");
     let mut io = MemoryAssetIo::new();
     io.insert(shader_path.path(), shader_bytes());
     io.insert(texture_path.path(), texture_bytes(1, 1, 17));
+    io.insert(mesh_path.path(), mesh_bytes());
     io.insert(
         material_path.path(),
         b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/hero.texture\n".to_vec(),
@@ -10537,24 +10539,32 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
 
     let shader_id = database.import_asset_path(&shader_path).unwrap();
     let texture_id = database.import_asset_path(&texture_path).unwrap();
+    let mesh_id = database.import_asset_path(&mesh_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
     let scene_id = database.import_asset_path(&scene_path).unwrap();
     let prefab_id = database.import_asset_path(&prefab_path).unwrap();
 
     assert_eq!(
         database.registry().get(scene_id).unwrap().dependencies,
-        vec![texture_id, material_id]
+        vec![texture_id, material_id, mesh_id]
     );
     assert_eq!(
         database.registry().get(prefab_id).unwrap().dependencies,
-        vec![texture_id, material_id]
+        vec![texture_id, material_id, mesh_id]
     );
     assert_eq!(
         database.registry().get(material_id).unwrap().dependencies,
         vec![shader_id, texture_id]
     );
 
-    for id in [shader_id, texture_id, material_id, scene_id, prefab_id] {
+    for id in [
+        shader_id,
+        texture_id,
+        mesh_id,
+        material_id,
+        scene_id,
+        prefab_id,
+    ] {
         database.cook_asset(id, TargetPlatform::Windows).unwrap();
     }
 
@@ -10574,6 +10584,7 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
     server.register_builtin_loaders();
     let shader: Handle<Shader> = server.load(shader_path);
     let texture: Handle<Texture> = server.load(texture_path);
+    let mesh: Handle<Mesh> = server.load(mesh_path);
     let material: Handle<Material> = server.load(material_path);
     let scene: Handle<SceneAsset> = server.load(scene_path);
     let prefab: Handle<Prefab> = server.load(prefab_path);
@@ -10586,6 +10597,7 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
         }));
         if server.is_ready_with_dependencies(&shader)
             && server.is_ready_with_dependencies(&texture)
+            && server.is_ready_with_dependencies(&mesh)
             && server.is_ready_with_dependencies(&material)
             && server.is_ready_with_dependencies(&scene)
             && server.is_ready_with_dependencies(&prefab)
@@ -10596,6 +10608,7 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
 
     assert!(server.is_ready_with_dependencies(&shader));
     assert!(server.is_ready_with_dependencies(&texture));
+    assert!(server.is_ready_with_dependencies(&mesh));
     assert!(server.is_ready_with_dependencies(&material));
     assert!(server.is_ready_with_dependencies(&scene));
     assert!(server.is_ready_with_dependencies(&prefab));
@@ -10604,14 +10617,14 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
             .dependency_graph()
             .direct_dependencies(scene.id())
             .len(),
-        2
+        3
     );
     assert_eq!(
         server
             .dependency_graph()
             .direct_dependencies(prefab.id())
             .len(),
-        2
+        3
     );
 }
 

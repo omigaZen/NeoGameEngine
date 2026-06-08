@@ -1580,6 +1580,65 @@ fn invalid_scene_payload_fails_with_decode_error_and_event() {
         "NGA_SCENE_V1\nname=broken\ncomponent=Transform|translation=0,0,0\n",
         "scene component on line 3 has no entity",
     );
+    assert_scene_decode_error(
+        "NGA_SCENE_V1\nname=broken\nentity=Hero\ncomponent=MeshRenderer|mesh=materials/hero.material\n",
+        "scene MeshRenderer component field `mesh` on line 4 expects Mesh but `materials/hero.material` resolves to Material",
+    );
+}
+
+#[test]
+fn scene_component_asset_fields_register_runtime_dependencies() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/tri.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert("audio/click.audio", audio_bytes());
+    io.insert("physics/hero.physics", physics_mesh_bytes());
+    io.insert(
+        "scenes/component_deps.scene",
+        b"NGA_SCENE_V1\nname=level\nentity=Hero\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\ncomponent=AudioSource|clip=audio/click.audio;looping=true\ncomponent=PhysicsCollider|mesh=physics/hero.physics;dynamic=false\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let scene: Handle<SceneAsset> = server.load("scenes/component_deps.scene");
+    server.update_loading();
+
+    assert_eq!(server.state(&scene), AssetLoadState::WaitingForDependencies);
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/tri.mesh"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    let audio_id = server
+        .id_from_path(&AssetPath::parse("audio/click.audio"))
+        .unwrap();
+    let physics_id = server
+        .id_from_path(&AssetPath::parse("physics/hero.physics"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(scene.id()),
+        &[mesh_id, material_id, audio_id, physics_id]
+    );
+
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready_with_dependencies(&scene) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&scene));
+    let loaded = server.get(&scene).unwrap();
+    assert_eq!(loaded.dependencies.len(), 4);
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![mesh_id, material_id, audio_id, physics_id]);
 }
 
 #[test]
@@ -1651,6 +1710,64 @@ fn invalid_prefab_payload_fails_with_decode_error_and_event() {
         "NGA_PREFAB_V1\ncomponent=Transform|translation=0,0,0\n",
         "prefab component on line 2 has no entity",
     );
+    assert_prefab_decode_error(
+        "NGA_PREFAB_V1\nroot=Hero\ncomponent=AudioSource|clip=\n",
+        "prefab AudioSource component asset field `clip` is empty on line 3",
+    );
+}
+
+#[test]
+fn prefab_component_asset_fields_register_runtime_dependencies() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/skinned.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert("skeletons/hero.skeleton", skeleton_bytes());
+    io.insert(
+        "prefabs/component_deps.prefab",
+        b"NGA_PREFAB_V1\nroot=Hero\ncomponent=SkinnedMeshRenderer|mesh=meshes/skinned.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let prefab: Handle<Prefab> = server.load("prefabs/component_deps.prefab");
+    server.update_loading();
+
+    assert_eq!(
+        server.state(&prefab),
+        AssetLoadState::WaitingForDependencies
+    );
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/skinned.mesh"))
+        .unwrap();
+    let skeleton_id = server
+        .id_from_path(&AssetPath::parse("skeletons/hero.skeleton"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(prefab.id()),
+        &[mesh_id, skeleton_id, material_id]
+    );
+
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready_with_dependencies(&prefab) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&prefab));
+    let loaded = server.get(&prefab).unwrap();
+    assert_eq!(loaded.dependencies.len(), 3);
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![mesh_id, skeleton_id, material_id]);
 }
 
 #[test]

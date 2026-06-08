@@ -2458,6 +2458,7 @@ where
 
     let mut name = None;
     let mut entities = Vec::new();
+    let mut dependency_keys = Vec::new();
     let mut current_entity = None;
 
     for (line_index, line) in lines.enumerate() {
@@ -2486,7 +2487,12 @@ where
                 let path = AssetPath::parse(value);
                 let asset_type =
                     crate::assets::scene::dependency_type_for_path(&path, line_number, "scene")?;
-                on_dependency(path, asset_type)?;
+                register_scene_prefab_document_dependency(
+                    &mut dependency_keys,
+                    path,
+                    asset_type,
+                    &mut on_dependency,
+                )?;
             }
             "entity" => {
                 let entity =
@@ -2500,9 +2506,23 @@ where
                         message: format!("scene component on line {line_number} has no entity"),
                     });
                 };
-                entities[entity_index].components.push(
-                    crate::assets::scene::parse_serialized_component(value, line_number, "scene")?,
-                );
+                let component =
+                    crate::assets::scene::parse_serialized_component(value, line_number, "scene")?;
+                for (path, asset_type) in
+                    crate::assets::scene::serialized_component_asset_dependencies(
+                        &component,
+                        line_number,
+                        "scene",
+                    )?
+                {
+                    register_scene_prefab_document_dependency(
+                        &mut dependency_keys,
+                        path,
+                        asset_type,
+                        &mut on_dependency,
+                    )?;
+                }
+                entities[entity_index].components.push(component);
             }
             other => {
                 return Err(AssetError::Import {
@@ -2545,6 +2565,7 @@ where
 
     let mut root = None;
     let mut children = Vec::new();
+    let mut dependency_keys = Vec::new();
     let mut current_entity = None;
 
     for (line_index, line) in lines.enumerate() {
@@ -2565,7 +2586,12 @@ where
                 let path = AssetPath::parse(value);
                 let asset_type =
                     crate::assets::scene::dependency_type_for_path(&path, line_number, "prefab")?;
-                on_dependency(path, asset_type)?;
+                register_scene_prefab_document_dependency(
+                    &mut dependency_keys,
+                    path,
+                    asset_type,
+                    &mut on_dependency,
+                )?;
             }
             "root" => {
                 if root.is_some() {
@@ -2597,6 +2623,20 @@ where
             "component" => {
                 let component =
                     crate::assets::scene::parse_serialized_component(value, line_number, "prefab")?;
+                for (path, asset_type) in
+                    crate::assets::scene::serialized_component_asset_dependencies(
+                        &component,
+                        line_number,
+                        "prefab",
+                    )?
+                {
+                    register_scene_prefab_document_dependency(
+                        &mut dependency_keys,
+                        path,
+                        asset_type,
+                        &mut on_dependency,
+                    )?;
+                }
                 match current_entity {
                     Some(PrefabEntityTarget::Root) => {
                         if let Some(root) = root.as_mut() {
@@ -2630,6 +2670,28 @@ where
 }
 
 #[cfg(feature = "importers")]
+fn register_scene_prefab_document_dependency<F>(
+    dependency_keys: &mut Vec<(AssetPath, AssetTypeId)>,
+    path: AssetPath,
+    asset_type: AssetTypeId,
+    on_dependency: &mut F,
+) -> Result<(), ImportError>
+where
+    F: FnMut(AssetPath, AssetTypeId) -> Result<(), ImportError>,
+{
+    if dependency_keys
+        .iter()
+        .any(|(existing_path, existing_type)| {
+            existing_path == &path && *existing_type == asset_type
+        })
+    {
+        return Ok(());
+    }
+    dependency_keys.push((path.clone(), asset_type));
+    on_dependency(path, asset_type)
+}
+
+#[cfg(feature = "importers")]
 fn register_import_dependency(
     ctx: &mut ImportContext,
     path: AssetPath,
@@ -2650,6 +2712,12 @@ fn register_import_dependency(
         }
         t if t == crate::assets::AudioClip::TYPE_ID => {
             ctx.dependency::<crate::assets::AudioClip>(path)?;
+        }
+        t if t == Skeleton::TYPE_ID => {
+            ctx.dependency::<Skeleton>(path)?;
+        }
+        t if t == PhysicsMesh::TYPE_ID => {
+            ctx.dependency::<PhysicsMesh>(path)?;
         }
         t if t == SceneAsset::TYPE_ID => {
             ctx.dependency::<SceneAsset>(path)?;
