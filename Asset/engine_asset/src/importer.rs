@@ -2955,7 +2955,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        64
+        65
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -5075,9 +5075,10 @@ fn parse_obj_smoothing_group<'a>(
             message: format!("too many OBJ smoothing group values on line {line_number}"),
         });
     }
-    Ok(match value {
+    let normalized = value.to_ascii_lowercase();
+    Ok(match normalized.as_str() {
         "off" | "0" => ObjSmoothingGroup::Off,
-        group => ObjSmoothingGroup::Group(group.to_owned()),
+        _ => ObjSmoothingGroup::Group(value.to_owned()),
     })
 }
 
