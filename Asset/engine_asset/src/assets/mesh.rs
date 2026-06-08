@@ -34,6 +34,7 @@ pub struct Mesh {
     pub joints: Vec<[u16; 4]>,
     pub weights: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
+    pub index_format: MeshIndexFormat,
     pub vertex_buffer: MeshVertexBuffer,
     pub gpu: Option<GpuResourceHandle>,
 }
@@ -61,7 +62,8 @@ impl AssetMemoryUsage for Mesh {
     }
 
     fn gpu_bytes(&self) -> u64 {
-        (self.vertex_buffer.bytes.len() + self.indices.len() * std::mem::size_of::<u32>()) as u64
+        self.vertex_buffer.bytes.len() as u64
+            + self.indices.len() as u64 * u64::from(self.index_format.byte_size())
     }
 }
 
@@ -205,7 +207,15 @@ fn decode_mesh_with_options(bytes: &[u8], options: MeshDecodeOptions) -> Result<
         }
     }
     mesh_from_components(
-        vertices, normals, uvs, uv_sets, tangents, joints, weights, indices,
+        vertices,
+        normals,
+        uvs,
+        uv_sets,
+        tangents,
+        joints,
+        weights,
+        indices,
+        MeshIndexFormat::Uint32,
     )
 }
 
@@ -218,6 +228,7 @@ fn mesh_from_components(
     joints: Vec<[u16; 4]>,
     weights: Vec<[f32; 4]>,
     indices: Vec<u32>,
+    index_format: MeshIndexFormat,
 ) -> Result<Mesh, AssetError> {
     if !uv_sets.is_empty() && uvs.is_empty() {
         return Err(AssetError::Decode {
@@ -280,6 +291,7 @@ fn mesh_from_components(
         joints,
         weights,
         indices,
+        index_format,
         vertex_buffer,
         gpu: None,
     })
@@ -368,7 +380,12 @@ fn decode_binary_mesh(payload: &[u8], options: MeshDecodeOptions) -> Result<Mesh
         (Vec::new(), Vec::new())
     };
     validate_binary_skin_weights(&weights, options.validate_skin_weight_totals)?;
-    let indices = if flags & MESH_BINARY_FLAG_INDEX_U16 != 0 {
+    let index_format = if flags & MESH_BINARY_FLAG_INDEX_U16 != 0 {
+        MeshIndexFormat::Uint16
+    } else {
+        MeshIndexFormat::Uint32
+    };
+    let indices = if index_format == MeshIndexFormat::Uint16 {
         reader
             .read_u16s(index_count, "index")?
             .into_iter()
@@ -379,7 +396,15 @@ fn decode_binary_mesh(payload: &[u8], options: MeshDecodeOptions) -> Result<Mesh
     };
 
     mesh_from_components(
-        vertices, normals, uvs, uv_sets, tangents, joints, weights, indices,
+        vertices,
+        normals,
+        uvs,
+        uv_sets,
+        tangents,
+        joints,
+        weights,
+        indices,
+        index_format,
     )
 }
 
@@ -805,17 +830,29 @@ fn mesh_upload_metadata(mesh: &Mesh) -> GpuUploadMetadata {
     GpuUploadMetadata::Mesh(MeshUploadMetadata {
         layout: mesh.vertex_buffer.layout.clone(),
         vertex_buffer_bytes: mesh.vertex_buffer.bytes.len() as u32,
-        index_buffer_bytes: (mesh.indices.len() * std::mem::size_of::<u32>()) as u32,
+        index_buffer_bytes: mesh.indices.len() as u32 * mesh.index_format.byte_size(),
         index_count: mesh.indices.len() as u32,
-        index_format: MeshIndexFormat::Uint32,
+        index_format: mesh.index_format,
     })
 }
 
 fn mesh_upload_bytes(mesh: &Mesh) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(mesh.vertex_buffer.bytes.len() + mesh.indices.len() * 4);
+    let mut bytes = Vec::with_capacity(
+        mesh.vertex_buffer.bytes.len()
+            + mesh.indices.len() * mesh.index_format.byte_size() as usize,
+    );
     bytes.extend_from_slice(&mesh.vertex_buffer.bytes);
-    for index in &mesh.indices {
-        bytes.extend_from_slice(&index.to_le_bytes());
+    match mesh.index_format {
+        MeshIndexFormat::Uint16 => {
+            for index in &mesh.indices {
+                bytes.extend_from_slice(&(*index as u16).to_le_bytes());
+            }
+        }
+        MeshIndexFormat::Uint32 => {
+            for index in &mesh.indices {
+                bytes.extend_from_slice(&index.to_le_bytes());
+            }
+        }
     }
     bytes
 }

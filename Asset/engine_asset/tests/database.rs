@@ -11022,7 +11022,12 @@ fn database_mesh_cooker_uses_u16_indices_for_mobile_and_web_targets() {
     let GpuUploadMetadata::Mesh(upload_metadata) = &uploads[0].metadata else {
         panic!("u16-index cooked mesh should expose mesh upload metadata");
     };
+    assert_eq!(upload_metadata.vertex_buffer_bytes, 36);
+    assert_eq!(upload_metadata.index_buffer_bytes, 6);
     assert_eq!(upload_metadata.index_count, 3);
+    assert_eq!(upload_metadata.index_format, MeshIndexFormat::Uint16);
+    assert_eq!(uploads[0].bytes.len(), 42);
+    assert_eq!(&uploads[0].bytes[36..], &[0, 0, 1, 0, 2, 0]);
 
     server.finish_gpu_uploads(
         uploads
@@ -11033,6 +11038,8 @@ fn database_mesh_cooker_uses_u16_indices_for_mobile_and_web_targets() {
     assert!(server.is_ready(&mesh));
     let loaded = server.get(&mesh).unwrap();
     assert_eq!(loaded.indices, vec![0, 1, 2]);
+    assert_eq!(loaded.index_format, MeshIndexFormat::Uint16);
+    assert_eq!(loaded.gpu_bytes(), 42);
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(3)));
 }
 

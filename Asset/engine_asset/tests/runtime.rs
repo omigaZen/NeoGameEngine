@@ -93,6 +93,21 @@ fn binary_mesh_bytes() -> Vec<u8> {
     ])
 }
 
+fn binary_u16_mesh_bytes() -> Vec<u8> {
+    let mut bytes = b"NGA_MESH_BINARY_V1\n".to_vec();
+    push_u32(&mut bytes, 3);
+    push_u32(&mut bytes, 3);
+    push_u32(&mut bytes, 16);
+    push_u32(&mut bytes, 0);
+    for vertex in [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]] {
+        push_f32s(&mut bytes, &vertex);
+    }
+    for index in [0u16, 1u16, 2u16] {
+        bytes.extend_from_slice(&index.to_le_bytes());
+    }
+    bytes
+}
+
 fn binary_mesh_bytes_with_weights(weights: [[f32; 4]; 3]) -> Vec<u8> {
     let mut bytes = b"NGA_MESH_BINARY_V1\n".to_vec();
     push_u32(&mut bytes, 3);
@@ -754,6 +769,7 @@ fn mesh_load_reaches_ready_after_renderer_upload_handoff() {
     assert_eq!(metadata.vertex_buffer_bytes, 36);
     assert_eq!(metadata.index_buffer_bytes, 12);
     assert_eq!(metadata.index_count, 3);
+    assert_eq!(metadata.index_format, MeshIndexFormat::Uint32);
     assert_eq!(
         metadata.layout.attributes,
         vec![MeshVertexAttribute {
@@ -828,6 +844,7 @@ i 0 1 2
     assert_eq!(metadata.vertex_buffer_bytes, 156);
     assert_eq!(metadata.index_buffer_bytes, 12);
     assert_eq!(metadata.index_count, 3);
+    assert_eq!(metadata.index_format, MeshIndexFormat::Uint32);
     assert_eq!(
         metadata.layout.attributes,
         vec![
@@ -905,6 +922,7 @@ fn binary_mesh_load_reaches_ready_with_layout_metadata() {
     assert_eq!(metadata.vertex_buffer_bytes, 192);
     assert_eq!(metadata.index_buffer_bytes, 12);
     assert_eq!(metadata.index_count, 3);
+    assert_eq!(metadata.index_format, MeshIndexFormat::Uint32);
     assert_eq!(
         metadata.layout.attributes,
         vec![
@@ -962,6 +980,36 @@ fn binary_mesh_load_reaches_ready_with_layout_metadata() {
     assert_eq!(loaded.indices, vec![0, 1, 2]);
     assert_eq!(loaded.vertex_buffer.layout, metadata.layout);
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(14)));
+}
+
+#[test]
+fn binary_u16_mesh_load_uploads_uint16_indices() {
+    let io = MemoryAssetIo::new().with_file("meshes/binary_u16.mesh", binary_u16_mesh_bytes());
+    let mut server = server_with_io(io);
+
+    let mesh: Handle<Mesh> = server.load("meshes/binary_u16.mesh");
+    server.update_loading();
+
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    let GpuUploadMetadata::Mesh(metadata) = &uploads[0].metadata else {
+        panic!("u16 binary mesh upload should expose mesh metadata");
+    };
+    assert_eq!(metadata.layout.vertex_count, 3);
+    assert_eq!(metadata.vertex_buffer_bytes, 36);
+    assert_eq!(metadata.index_buffer_bytes, 6);
+    assert_eq!(metadata.index_count, 3);
+    assert_eq!(metadata.index_format, MeshIndexFormat::Uint16);
+    assert_eq!(uploads[0].bytes.len(), 42);
+    assert_eq!(&uploads[0].bytes[36..], &[0, 0, 1, 0, 2, 0]);
+
+    server.finish_gpu_uploads(vec![GpuUploadResult::ok(mesh.id(), GpuResourceHandle(16))]);
+
+    assert!(server.is_ready(&mesh));
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.indices, vec![0, 1, 2]);
+    assert_eq!(loaded.index_format, MeshIndexFormat::Uint16);
+    assert_eq!(loaded.gpu_bytes(), 42);
 }
 
 #[test]

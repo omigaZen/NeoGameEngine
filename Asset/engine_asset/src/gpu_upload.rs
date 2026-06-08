@@ -88,7 +88,17 @@ impl MeshVertexFormat {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MeshIndexFormat {
+    Uint16,
     Uint32,
+}
+
+impl MeshIndexFormat {
+    pub fn byte_size(self) -> u32 {
+        match self {
+            Self::Uint16 => std::mem::size_of::<u16>() as u32,
+            Self::Uint32 => std::mem::size_of::<u32>() as u32,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
