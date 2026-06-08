@@ -2886,7 +2886,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        53
+        54
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -7380,8 +7380,14 @@ fn model_lod_mesh_payload_text(mesh: &ModelSubresource) -> Result<Option<String>
     let mut source_indices = Vec::new();
     let mut remap = vec![u32::MAX; mesh_asset.vertices.len()];
     let mut lod_indices = Vec::new();
-    for (triangle_index, triangle) in mesh_asset.indices.chunks_exact(3).enumerate() {
-        if triangle_index % 2 != 0 {
+    let mut non_degenerate_triangle_index = 0usize;
+    let mut chunks = mesh_asset.indices.chunks_exact(3);
+    for triangle in &mut chunks {
+        if model_mesh_triangle_is_degenerate(&mesh_asset, triangle) {
+            continue;
+        }
+        if non_degenerate_triangle_index % 2 != 0 {
+            non_degenerate_triangle_index += 1;
             continue;
         }
         for index in triangle {
@@ -7398,6 +7404,23 @@ fn model_lod_mesh_payload_text(mesh: &ModelSubresource) -> Result<Option<String>
             }
             lod_indices.push(remap[source_index]);
         }
+        non_degenerate_triangle_index += 1;
+    }
+    if !chunks.remainder().is_empty() {
+        return Err(AssetError::Import {
+            message: format!(
+                "model mesh `{}` on line {} LOD input has a non-triangle index count",
+                mesh.label, mesh.line_number
+            ),
+        });
+    }
+    if lod_indices.is_empty() {
+        return Err(AssetError::Import {
+            message: format!(
+                "model mesh `{}` on line {} LOD generation removed all triangles as degenerate",
+                mesh.label, mesh.line_number
+            ),
+        });
     }
 
     model_mesh_payload_text_from_mesh(&mesh_asset, &source_indices, &lod_indices).map(Some)

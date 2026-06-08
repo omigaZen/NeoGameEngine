@@ -2029,9 +2029,9 @@ fn database_model_importer_generates_lod_meshes_when_enabled() {
     let mesh_path = AssetPath::parse("models/lods.Body.mesh");
     let lod_mesh_path = AssetPath::parse("models/lods.Body_LOD1.mesh");
     let material_path = AssetPath::parse("models/lods.HeroMaterial.material");
-    let model_source = b"NGA_MODEL_V1\nmesh=Body\nmaterial=HeroMaterial\n---\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nn 0 0 1\nn 0 0 1\nn 0 0 1\nn 0 0 1\nuv 0 0\nuv 1 0\nuv 0 1\nuv 1 1\ni 0 1 2\ni 1 3 2\nend\nmaterial=HeroMaterial\nname=hero\nbase_color=1,1,1,1\nend\n".to_vec();
+    let model_source = b"NGA_MODEL_V1\nmesh=Body\nmaterial=HeroMaterial\n---\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nv 2 0 0\nn 0 0 1\nn 0 0 1\nn 0 0 1\nn 0 0 1\nn 0 1 0\nuv 0 0\nuv 1 0\nuv 0 1\nuv 1 1\nuv 2 0\ni 0 1 2\ni 1 3 2\ni 0 1 4\ni 0 2 3\nend\nmaterial=HeroMaterial\nname=hero\nbase_color=1,1,1,1\nend\n".to_vec();
     let expected_lod_mesh =
-        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nn 0 0 1\nn 0 0 1\nn 0 0 1\nuv 0 0\nuv 1 0\nuv 0 1\ni 0 1 2\n"
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\nn 0 0 1\nn 0 0 1\nn 0 0 1\nn 0 0 1\nuv 0 0\nuv 1 0\nuv 0 1\nuv 1 1\ni 0 1 2\ni 0 2 3\n"
             .to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(model_path.path(), model_source);
@@ -2094,7 +2094,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2223,6 +2223,34 @@ fn database_model_importer_reports_invalid_lod_generation_input() {
             && message.contains("models/bad_lod.model")
             && message.contains("model mesh `Body` on line 2 LOD input is invalid")
             && message.contains("index 3 references missing vertex")),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn database_model_importer_rejects_all_degenerate_generated_lod_triangles() {
+    let config = database_config("builtin_model_generate_lods_all_degenerate");
+    let model_path = AssetPath::parse("models/all_degenerate_lod.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=Body\nv 0 0 0\nv 1 0 0\nv 2 0 0\ni 0 1 1\ni 0 1 2\nend\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let mut settings = ImporterSettings::default();
+    settings.set("generate_lods", "true");
+    let error = database
+        .import_asset_path_with_settings(&model_path, &settings)
+        .unwrap_err();
+    assert!(
+        matches!(error, AssetError::Import { ref message } if message.contains("ModelImporter")
+        && message.contains("models/all_degenerate_lod.model")
+        && message.contains(
+            "model mesh `Body` on line 2 LOD generation removed all triangles as degenerate"
+        )),
         "{error:?}"
     );
 }
@@ -2619,7 +2647,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 53);
+    assert_eq!(physics_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2775,7 +2803,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2905,7 +2933,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 53);
+    assert_eq!(physics_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3063,7 +3091,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 53);
+    assert_eq!(material_metadata.importer_version, 54);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3322,7 +3350,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3418,7 +3446,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3536,7 +3564,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3708,7 +3736,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4686,7 +4714,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 53);
+    assert_eq!(mesh_metadata.importer_version, 54);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4694,7 +4722,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 53);
+    assert_eq!(material_metadata.importer_version, 54);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
