@@ -5331,7 +5331,9 @@ generated path collision diagnostics、duplicate generated dependency metadata v
 dependency metadata、mesh LOD binding metadata、mesh physics mesh binding metadata、skin joint limit validation、skin influence limit validation、duplicate active skin joint validation、multi-root skin skeleton root-scope validation、skin root bone subtree validation、standalone generated material/skeleton/animation payload validation、explicit animation skeleton target metadata、model generated physics mesh subresource validation、skin binding validation、explicit inverse-bind validation、duplicate MTL material diagnostics、MTL emissive color canonicalization、OBJ `usemtl` state persistence across `o`/`g` labels、OBJ homogeneous vertex coordinate parsing、OBJ smoothing-group normal generation、OBJ `d`/`Tr` alpha-to-`alpha_mode=blend` material state mapping、OBJ `map_d` alpha texture-to-`alpha_mode=blend` material state mapping、OBJ `d -halo` dissolve-halo alpha/custom material state mapping、OBJ `sharpness` custom material property, `map_bump` alias mapping, `map_aat` texture antialias custom bool preservation, and `map_Tf`/`map_Ni` transmission/IOR texture dependency mapping、OBJ Exocortex PBR scalar/texture material extension mapping、OBJ `Pr`/`roughness` scalar roughness and `map_Ns` roughness texture mapping、OBJ legacy `disp`/`decal`/`refl` texture map dependencies、MTL `Ka`/`Ks`/`Tf`/`Ni`/`illum` typed custom material property preservation、model import settings filtering/scale/tangent/mesh optimization/LOD generation control、OBJ per-material mesh splitting、loaded-MTL `usemtl` validation，以及 skeleton-dependent animation bone/node/index target、track shape 和 keyframe time validation。
 `skeleton` 和 `animation` payload 使用对应 `NGA_SKELETON_V1` 与
 `NGA_ANIMATION_V1` 文本格式，生成的 bytes 会写入 imported 目录，随后可通过内建
-pass-through cooker 烘焙并由运行时 loader 加载。
+`SkeletonCooker` / `AnimationCooker` 验证 runtime payload 后烘焙；直接输入
+`NGA_SKELETON_SOURCE_V1` / `NGA_ANIMATION_SOURCE_V1` source document 时会规范化为
+runtime header（当前 cooker version 为 2），随后可由运行时 loader 加载。
 
 ---
 

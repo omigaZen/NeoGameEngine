@@ -27,8 +27,16 @@ fn animation_source_bytes() -> Vec<u8> {
     b"NGA_ANIMATION_SOURCE_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
 }
 
+fn animation_runtime_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+}
+
 fn skeleton_source_bytes() -> Vec<u8> {
     b"NGA_SKELETON_SOURCE_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
+}
+
+fn skeleton_runtime_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
 }
 
 fn wav_pcm16_bytes(sample_rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> {
@@ -10151,7 +10159,7 @@ fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtim
 
     assert_eq!(
         fs::read(config.imported_root.join(animation_path.path())).unwrap(),
-        b"NGA_ANIMATION_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+        animation_runtime_bytes()
     );
     assert_eq!(
         fs::read(config.cooked_root.join(animation_path.path())).unwrap(),
@@ -10177,6 +10185,106 @@ fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtim
     let animation: Handle<AnimationClip> = server.load(animation_path);
     let skeleton: Handle<Skeleton> = server.load(skeleton_path);
 
+    for _ in 0..4 {
+        server.update_loading();
+        if server.is_ready(&animation) && server.is_ready(&skeleton) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready(&animation));
+    assert!(server.is_ready(&skeleton));
+}
+
+#[test]
+fn database_animation_and_skeleton_cookers_canonicalize_source_documents() {
+    let config = database_config("animation_skeleton_cooker_source_conversion");
+    let animation_path = AssetPath::parse("animations/source.animation");
+    let skeleton_path = AssetPath::parse("skeletons/source.skeleton");
+    let invalid_animation_path = AssetPath::parse("animations/invalid.animation");
+    let invalid_skeleton_path = AssetPath::parse("skeletons/invalid.skeleton");
+    let mut io = MemoryAssetIo::new();
+    io.insert(animation_path.path(), animation_source_bytes());
+    io.insert(skeleton_path.path(), skeleton_source_bytes());
+    io.insert(
+        invalid_animation_path.path(),
+        b"NGA_ANIMATION_SOURCE_V1\nduration=-1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\n"
+            .to_vec(),
+    );
+    io.insert(
+        invalid_skeleton_path.path(),
+        b"NGA_SKELETON_SOURCE_V1\nbone=Root\nbone=Root\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_cookers();
+
+    let animation_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_a111);
+    let skeleton_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_a112);
+    let invalid_animation_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_a113);
+    let invalid_skeleton_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_a114);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        animation_id,
+        animation_path.clone(),
+        AnimationClip::TYPE_ID,
+    ));
+    database.registry_mut().insert(AssetMetadata::runtime(
+        skeleton_id,
+        skeleton_path.clone(),
+        Skeleton::TYPE_ID,
+    ));
+    database.registry_mut().insert(AssetMetadata::runtime(
+        invalid_animation_id,
+        invalid_animation_path,
+        AnimationClip::TYPE_ID,
+    ));
+    database.registry_mut().insert(AssetMetadata::runtime(
+        invalid_skeleton_id,
+        invalid_skeleton_path,
+        Skeleton::TYPE_ID,
+    ));
+
+    let animation_output = database
+        .cook_asset(animation_id, TargetPlatform::Windows)
+        .unwrap();
+    let skeleton_output = database
+        .cook_asset(skeleton_id, TargetPlatform::Windows)
+        .unwrap();
+
+    assert_eq!(animation_output.bytes, animation_runtime_bytes());
+    assert_eq!(animation_output.version_hash, VersionHash(2));
+    assert_eq!(skeleton_output.bytes, skeleton_runtime_bytes());
+    assert_eq!(skeleton_output.version_hash, VersionHash(2));
+    assert_eq!(
+        fs::read(config.cooked_root.join(animation_path.path())).unwrap(),
+        animation_runtime_bytes()
+    );
+    assert_eq!(
+        fs::read(config.cooked_root.join(skeleton_path.path())).unwrap(),
+        skeleton_runtime_bytes()
+    );
+    assert!(matches!(
+        database.cook_asset(invalid_animation_id, TargetPlatform::Windows),
+        Err(AssetError::Cook { message })
+            if message.contains("AnimationCooker")
+                && message.contains("failed to validate animation source")
+                && message.contains("duration must be greater than zero")
+    ));
+    assert!(matches!(
+        database.cook_asset(invalid_skeleton_id, TargetPlatform::Windows),
+        Err(AssetError::Cook { message })
+            if message.contains("SkeletonCooker")
+                && message.contains("failed to validate skeleton source")
+                && message.contains("duplicates an earlier bone name")
+    ));
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let animation: Handle<AnimationClip> = server.load(animation_path);
+    let skeleton: Handle<Skeleton> = server.load(skeleton_path);
     for _ in 0..4 {
         server.update_loading();
         if server.is_ready(&animation) && server.is_ready(&skeleton) {

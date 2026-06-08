@@ -551,9 +551,149 @@ impl AssetCooker for AudioCooker {
     }
 }
 #[cfg(feature = "model_cooker")]
-define_passthrough_cooker!(SkeletonCooker, Skeleton, 1);
+pub struct SkeletonCooker;
+
 #[cfg(feature = "model_cooker")]
-define_passthrough_cooker!(AnimationCooker, AnimationClip, 1);
+impl SkeletonCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+impl Default for SkeletonCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+impl AssetCooker for SkeletonCooker {
+    fn name(&self) -> &'static str {
+        "SkeletonCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Skeleton::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "SkeletonCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = canonical_skeleton_cook_bytes(&ctx.source_bytes)?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+pub struct AnimationCooker;
+
+#[cfg(feature = "model_cooker")]
+impl AnimationCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+impl Default for AnimationCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+impl AssetCooker for AnimationCooker {
+    fn name(&self) -> &'static str {
+        "AnimationCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        AnimationClip::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "AnimationCooker requires source bytes".to_owned(),
+            });
+        }
+        let bytes = canonical_animation_cook_bytes(&ctx.source_bytes)?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
+
+#[cfg(feature = "model_cooker")]
+fn canonical_skeleton_cook_bytes(bytes: &[u8]) -> Result<Vec<u8>, CookError> {
+    let text = std::str::from_utf8(bytes).map_err(|error| CookError::Cook {
+        message: format!("SkeletonCooker failed to canonicalize skeleton source: {error}"),
+    })?;
+    let header = text.lines().next().unwrap_or("").trim();
+    let cooked = match header {
+        "NGA_SKELETON_SOURCE_V1" => text
+            .replacen("NGA_SKELETON_SOURCE_V1", "NGA_SKELETON_V1", 1)
+            .into_bytes(),
+        "NGA_SKELETON_V1" => bytes.to_vec(),
+        _ => {
+            return Err(CookError::Cook {
+                message: "SkeletonCooker source must start with NGA_SKELETON_V1 or NGA_SKELETON_SOURCE_V1"
+                    .to_owned(),
+            });
+        }
+    };
+    crate::assets::skeleton::parse_skeleton(&cooked).map_err(|error| CookError::Cook {
+        message: format!("SkeletonCooker failed to validate skeleton source: {error}"),
+    })?;
+    Ok(cooked)
+}
+
+#[cfg(feature = "model_cooker")]
+fn canonical_animation_cook_bytes(bytes: &[u8]) -> Result<Vec<u8>, CookError> {
+    let text = std::str::from_utf8(bytes).map_err(|error| CookError::Cook {
+        message: format!("AnimationCooker failed to canonicalize animation source: {error}"),
+    })?;
+    let header = text.lines().next().unwrap_or("").trim();
+    let cooked = match header {
+        "NGA_ANIMATION_SOURCE_V1" => text
+            .replacen("NGA_ANIMATION_SOURCE_V1", "NGA_ANIMATION_V1", 1)
+            .into_bytes(),
+        "NGA_ANIMATION_V1" => bytes.to_vec(),
+        _ => {
+            return Err(CookError::Cook {
+                message: "AnimationCooker source must start with NGA_ANIMATION_V1 or NGA_ANIMATION_SOURCE_V1"
+                    .to_owned(),
+            });
+        }
+    };
+    crate::assets::animation::parse_animation_clip(&cooked).map_err(|error| CookError::Cook {
+        message: format!("AnimationCooker failed to validate animation source: {error}"),
+    })?;
+    Ok(cooked)
+}
+
 #[cfg(feature = "cookers")]
 define_passthrough_cooker!(SceneCooker, SceneAsset, 1);
 #[cfg(feature = "cookers")]

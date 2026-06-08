@@ -24,8 +24,16 @@ fn animation_source_bytes() -> Vec<u8> {
     b"NGA_ANIMATION_SOURCE_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
 }
 
+fn animation_runtime_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\nrotation=0.0:0,0,0,1\nscale=0.0:1,1,1\n".to_vec()
+}
+
 fn skeleton_source_bytes() -> Vec<u8> {
     b"NGA_SKELETON_SOURCE_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
+}
+
+fn skeleton_runtime_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_V1\nbone=Root;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\nbone=Child;parent=0;bind=1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec()
 }
 
 fn database_config(name: &str) -> AssetDatabaseConfig {
@@ -390,8 +398,8 @@ fn cooker_feature_gates_match_registration_paths() {
             .unwrap();
         assert_eq!(scene_output.bytes, scene_bytes());
         assert_eq!(prefab_output.bytes, prefab_bytes());
-        assert_eq!(animation_output.bytes, animation_source_bytes());
-        assert_eq!(skeleton_output.bytes, skeleton_source_bytes());
+        assert_eq!(animation_output.bytes, animation_runtime_bytes());
+        assert_eq!(skeleton_output.bytes, skeleton_runtime_bytes());
     } else {
         assert!(matches!(
             database.cook_asset(scene_id, TargetPlatform::Windows),
