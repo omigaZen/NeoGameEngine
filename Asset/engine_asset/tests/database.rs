@@ -11832,6 +11832,64 @@ fn database_shader_importer_validates_stage_and_entry_metadata() {
 }
 
 #[test]
+fn database_shader_importer_case_insensitive_keys_and_duplicate_rejection() {
+    let config = database_config("shader_importer_case_insensitive_source");
+    let path = AssetPath::parse("shaders/case_insensitive.glsl");
+    let source =
+        b"NGA_SHADER_SOURCE_V1\nLANGUAGE=GLSL\nStAgE=vertex\nENTRY=Main\n---\n#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n"
+            .to_vec();
+    let expected =
+        b"#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let error_paths = [
+        (
+            "shader_importer_duplicate_stage",
+            "shaders/duplicate_stage.glsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nstage=vertex\nstage=compute\nsource=0".to_vec(),
+            "shader source key `stage` is repeated on line 4",
+        ),
+        (
+            "shader_importer_duplicate_entry",
+            "shaders/duplicate_entry.glsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nentry=main\nentry=main\nsource=0".to_vec(),
+            "shader source key `entry` is repeated on line 4",
+        ),
+    ];
+    for (config_name, path, source, expected_message) in error_paths {
+        let config = database_config(config_name);
+        let path = AssetPath::parse(path);
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), source);
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&path).unwrap_err();
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `ShaderImporter` failed")
+                    && message.contains(expected_message)
+                    && message.contains(path.path())
+        ));
+    }
+}
+
+#[test]
 fn database_builtin_audio_import_cook_and_runtime_load_preserves_payload() {
     let config = database_config("builtin_audio_runtime_load");
     let path = AssetPath::parse("audio/click.audio");

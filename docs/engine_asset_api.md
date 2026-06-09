@@ -5619,7 +5619,7 @@ stage=fragment
 @fragment fn main() {}
 ```
 
-`language` 当前支持 `wgsl`、`glsl` 和 `spv`。`source=` 可用于单行 body，也可用 `---` 后的多行 body；
+`language` 当前支持 `wgsl`、`glsl` 和 `spv`。`source=` 可用于单行 body，也可用 `---` 后的多行 body；文档键名不区分大小写，`language`、`stage`、`entry`、`source` 最多各出现一次；重复声明会返回导入错误。
 `stage` 和 `entry` 作为导入侧描述字段保留校验入口：`stage` 必须是
 `vertex`/`fragment`/`compute`，`entry` 必须是 ASCII 标识符；运行时 stage 仍由 path label
 `#vertex`/`#fragment`/`#compute` 决定。`ShaderImporter::version()` 当前为 `3`。Importer 会拒绝缺失 language、缺失 body、空 body、
@@ -6233,3 +6233,4 @@ GC          ：资源卸载与内存预算
 一句话：
 
 **Asset 管理系统是游戏引擎的资源港口，它不只读文件，而是给每个资源发身份证、查族谱、排船期、管仓库、修航线、补货、卸货，还要保证码头不被纹理箱子堵死。**
+

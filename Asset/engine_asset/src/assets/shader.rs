@@ -94,7 +94,10 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
         });
     }
     let mut language = None;
+    let mut seen_language = false;
     let mut inline_source = None;
+    let mut seen_stage = false;
+    let mut seen_entry = false;
     let mut body_lines = Vec::new();
     let mut in_body = false;
     for (line_index, line) in lines.enumerate() {
@@ -116,8 +119,19 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
                 message: format!("invalid shader source line {line_number}"),
             });
         };
-        match key.trim() {
-            "language" => language = Some(parse_shader_source_language(value.trim(), line_number)?),
+        let key = key.trim().to_ascii_lowercase();
+        match key.as_str() {
+            "language" => {
+                if seen_language {
+                    return Err(AssetError::Import {
+                        message: format!(
+                            "shader source key `language` is repeated on line {line_number}"
+                        ),
+                    });
+                }
+                seen_language = true;
+                language = Some(parse_shader_source_language(value.trim(), line_number)?);
+            }
             "source" => {
                 if inline_source.is_some() || !body_lines.is_empty() {
                     return Err(AssetError::Import {
@@ -126,8 +140,26 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
                 }
                 inline_source = Some(value.trim().to_owned());
             }
-            "stage" => validate_shader_source_stage(value.trim(), line_number)?,
-            "entry" => validate_shader_source_entry(value.trim(), line_number)?,
+            "stage" => {
+                if seen_stage {
+                    return Err(AssetError::Import {
+                        message: format!(
+                            "shader source key `stage` is repeated on line {line_number}"
+                        ),
+                    });
+                }
+                seen_stage = true;
+                validate_shader_source_stage(value.trim(), line_number)?;
+            }
+            "entry" => {
+                if seen_entry {
+                    return Err(AssetError::Import {
+                        message: format!("shader source key `entry` is repeated on line {line_number}"),
+                    });
+                }
+                seen_entry = true;
+                validate_shader_source_entry(value.trim(), line_number)?;
+            }
             other => {
                 return Err(AssetError::Import {
                     message: format!("unknown shader source key `{other}` on line {line_number}"),
@@ -302,7 +334,7 @@ fn parse_shader_source_language(
     value: &str,
     line_number: usize,
 ) -> Result<ShaderSourceLanguage, AssetError> {
-    match value {
+    match value.to_ascii_lowercase().as_str() {
         "wgsl" => Ok(ShaderSourceLanguage::Wgsl),
         "glsl" => Ok(ShaderSourceLanguage::Glsl),
         "spv" => Ok(ShaderSourceLanguage::Spv),
