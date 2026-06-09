@@ -11857,6 +11857,12 @@ fn database_shader_importer_case_insensitive_keys_and_duplicate_rejection() {
 
     let error_paths = [
         (
+            "shader_importer_duplicate_language",
+            "shaders/duplicate_language.glsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nlanguage=wgsl\nsource=0\n".to_vec(),
+            "shader source key `language` is repeated on line 3",
+        ),
+        (
             "shader_importer_duplicate_stage",
             "shaders/duplicate_stage.glsl",
             b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nstage=vertex\nstage=compute\nsource=0".to_vec(),
@@ -11867,6 +11873,12 @@ fn database_shader_importer_case_insensitive_keys_and_duplicate_rejection() {
             "shaders/duplicate_entry.glsl",
             b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nentry=main\nentry=main\nsource=0".to_vec(),
             "shader source key `entry` is repeated on line 4",
+        ),
+        (
+            "shader_importer_duplicate_source",
+            "shaders/duplicate_source.glsl",
+            b"NGA_SHADER_SOURCE_V1\nlanguage=glsl\nsource=0\nsource=1".to_vec(),
+            "shader source body is repeated on line 4",
         ),
     ];
     for (config_name, path, source, expected_message) in error_paths {
