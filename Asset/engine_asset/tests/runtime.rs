@@ -691,6 +691,11 @@ fn invalid_shader_payload_fails_with_decode_error_and_event() {
             "shader resource binding on line 1 must include both @group and @binding",
         ),
         (
+            "shaders/naga_compile_error.wgsl",
+            b"@fragment fn main() { let x = 1 + ; }\n".to_vec(),
+            "WGSL compile failed",
+        ),
+        (
             "shaders/unclosed_block_comment.wgsl",
             b"/* unclosed shader comment with } brace\n@fragment fn main() {}\n".to_vec(),
             "shader source has unclosed block comment",

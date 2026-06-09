@@ -155,7 +155,9 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
             "entry" => {
                 if seen_entry {
                     return Err(AssetError::Import {
-                        message: format!("shader source key `entry` is repeated on line {line_number}"),
+                        message: format!(
+                            "shader source key `entry` is repeated on line {line_number}"
+                        ),
                     });
                 }
                 seen_entry = true;
@@ -200,9 +202,11 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
         }
     }
     match language {
-        ShaderSourceLanguage::Wgsl | ShaderSourceLanguage::Glsl => {
+        ShaderSourceLanguage::Wgsl => {
+            validate_wgsl_shader_source(source)?;
             Ok(format!("{source}\n").into_bytes())
         }
+        ShaderSourceLanguage::Glsl => Ok(format!("{source}\n").into_bytes()),
         ShaderSourceLanguage::Spv => canonical_shader_spirv_source(source),
     }
 }
@@ -270,6 +274,8 @@ impl AssetLoader for ShaderLoader {
             ShaderSource::Wgsl(source) => {
                 let uncommented_lines = shader_source_lines_without_comments(source)?;
                 validate_shader_source_structure(&uncommented_lines)?;
+                #[cfg(feature = "shader_importer")]
+                validate_wgsl_shader_source(source)?;
                 Some(uncommented_lines)
             }
         };
@@ -395,6 +401,23 @@ fn canonical_shader_spirv_source(source_text: &str) -> Result<Vec<u8>, AssetErro
         });
     }
     Ok(bytes)
+}
+
+#[cfg(feature = "shader_importer")]
+fn validate_wgsl_shader_source(source: &str) -> Result<(), AssetError> {
+    let module = naga::front::wgsl::parse_str(source).map_err(|error| AssetError::Decode {
+        message: format!("WGSL compile failed: {error}"),
+    })?;
+    let mut validator = naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::empty(),
+    );
+    validator
+        .validate(&module)
+        .map_err(|error| AssetError::Decode {
+            message: format!("WGSL validation failed: {error}"),
+        })?;
+    Ok(())
 }
 
 #[cfg(feature = "shader_importer")]
@@ -709,7 +732,8 @@ fn shader_source_has_entry_definition(source: &str, entry: &str) -> bool {
         Err(_) => return false,
     };
     let flattened = lines.join("\n");
-    let mut tokens = flattened.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+    let mut tokens = flattened
+        .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
         .filter(|token| !token.is_empty())
         .peekable();
     while let Some(token) = tokens.next() {
