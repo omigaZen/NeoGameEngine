@@ -11794,6 +11794,29 @@ fn database_shader_importer_reports_invalid_empty_source() {
 }
 
 #[test]
+fn database_shader_importer_validates_entry_presence() {
+    let config = database_config("shader_importer_missing_entry");
+    let path = AssetPath::parse("shaders/missing_entry.wgsl");
+    let source = b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nentry=main\nsource=@fragment fn no_entry() {}\n"
+        .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ShaderImporter` failed")
+                && message.contains("shader source entry `main` is not defined in source body")
+                && message.contains(path.path())
+    ));
+}
+
+#[test]
 fn database_shader_importer_validates_stage_and_entry_metadata() {
     for (config_name, path, source, expected_message) in [
         (

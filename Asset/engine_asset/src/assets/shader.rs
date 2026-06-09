@@ -94,6 +94,7 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
         });
     }
     let mut language = None;
+    let mut entry = None;
     let mut seen_language = false;
     let mut inline_source = None;
     let mut seen_stage = false;
@@ -158,6 +159,7 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
                     });
                 }
                 seen_entry = true;
+                entry = Some(value.trim().to_owned());
                 validate_shader_source_entry(value.trim(), line_number)?;
             }
             other => {
@@ -189,6 +191,13 @@ pub fn canonical_shader_source_document(source_text: &str) -> Result<Vec<u8>, As
         return Err(AssetError::Import {
             message: "shader source body is empty".to_owned(),
         });
+    }
+    if let Some(entry) = entry.as_deref() {
+        if !shader_source_has_entry_definition(&source, entry) {
+            return Err(AssetError::Import {
+                message: format!("shader source entry `{entry}` is not defined in source body"),
+            });
+        }
     }
     match language {
         ShaderSourceLanguage::Wgsl | ShaderSourceLanguage::Glsl => {
@@ -692,6 +701,30 @@ fn shader_identifier_prefix(value: &str) -> Option<&str> {
 
 fn is_shader_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
+}
+
+fn shader_source_has_entry_definition(source: &str, entry: &str) -> bool {
+    let lines = match shader_source_lines_without_comments(source) {
+        Ok(lines) => lines,
+        Err(_) => return false,
+    };
+    let flattened = lines.join("\n");
+    let mut tokens = flattened.split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+        .filter(|token| !token.is_empty())
+        .peekable();
+    while let Some(token) = tokens.next() {
+        if token != "fn" {
+            continue;
+        }
+        if matches!(
+            tokens.peek(),
+            Some(token) if *token == entry
+        ) {
+            return true;
+        }
+        let _ = tokens.next();
+    }
+    false
 }
 
 fn push_unique(values: &mut Vec<String>, value: String) {
