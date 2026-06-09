@@ -40,7 +40,7 @@ texture_importer = []
 model_importer = []
 material_importer = []
 audio_importer = []
-shader_importer = []
+shader_importer = ["dep:naga"]
 texture_cooker = []
 model_cooker = []
 material_cooker = []
@@ -50,6 +50,7 @@ parallel = []
 zstd = ["dep:ruzstd"]
 
 [dependencies]
+naga = { version = "24", optional = true }
 ruzstd = { version = "0.8", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = "2"
