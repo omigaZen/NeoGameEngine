@@ -11876,6 +11876,7 @@ fn database_shader_importer_reports_wgsl_compile_validation_failure() {
             && (message.contains("WGSL compile failed")
                 || message.contains("WGSL validation failed"))
             && message.contains(path.path())
+            && message.contains("line 1, column")
     ));
 }
 

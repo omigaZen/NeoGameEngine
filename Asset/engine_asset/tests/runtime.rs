@@ -725,10 +725,15 @@ fn invalid_shader_payload_fails_with_decode_error_and_event() {
         server.update_loading();
 
         assert_eq!(server.state(&shader), AssetLoadState::Failed);
-        assert!(matches!(
-            server.error_by_id(shader.id()),
-            Some(AssetError::Decode { message }) if message.contains(expected_message)
-        ));
+        let message = match server.error_by_id(shader.id()) {
+            Some(AssetError::Decode { message }) => message,
+            _ => panic!("expected decode error"),
+        };
+        assert!(message.contains(expected_message));
+        if path == "shaders/naga_compile_error.wgsl" {
+            assert!(message.contains("line 1, column"));
+            assert!(message.contains("error"));
+        }
         assert!(server
             .events()
             .iter()

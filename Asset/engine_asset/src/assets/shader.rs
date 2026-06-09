@@ -406,7 +406,7 @@ fn canonical_shader_spirv_source(source_text: &str) -> Result<Vec<u8>, AssetErro
 #[cfg(feature = "shader_importer")]
 fn validate_wgsl_shader_source(source: &str) -> Result<(), AssetError> {
     let module = naga::front::wgsl::parse_str(source).map_err(|error| AssetError::Decode {
-        message: format!("WGSL compile failed: {error}"),
+        message: format_wgsl_compile_error(source, &error),
     })?;
     let mut validator = naga::valid::Validator::new(
         naga::valid::ValidationFlags::all(),
@@ -418,6 +418,20 @@ fn validate_wgsl_shader_source(source: &str) -> Result<(), AssetError> {
             message: format!("WGSL validation failed: {error}"),
         })?;
     Ok(())
+}
+
+#[cfg(feature = "shader_importer")]
+fn format_wgsl_compile_error(source: &str, error: &naga::front::wgsl::ParseError) -> String {
+    let mut message = format!("WGSL compile failed: {error}");
+    if let Some(location) = error.location(source) {
+        message.push_str(&format!(
+            " (line {}, column {})",
+            location.line_number, location.line_position
+        ));
+    }
+    message.push('\n');
+    message.push_str(&error.emit_to_string(source));
+    message
 }
 
 #[cfg(feature = "shader_importer")]
