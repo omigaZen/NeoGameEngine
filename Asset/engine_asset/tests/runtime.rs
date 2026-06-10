@@ -688,7 +688,7 @@ fn invalid_shader_payload_fails_with_decode_error_and_event() {
         (
             "shaders/malformed_binding.wgsl",
             b"@group(0) var<uniform> camera: mat4x4<f32>;\n@fragment fn main() {}\n".to_vec(),
-            "shader resource binding on line 1 must include both @group and @binding",
+            "needs a 'binding' attribute",
         ),
         (
             "shaders/naga_compile_error.wgsl",
@@ -729,8 +729,11 @@ fn invalid_shader_payload_fails_with_decode_error_and_event() {
             Some(AssetError::Decode { message }) => message,
             _ => panic!("expected decode error"),
         };
-        assert!(message.contains(expected_message));
-        if path == "shaders/naga_compile_error.wgsl" {
+        assert!(
+            message.contains(expected_message),
+            "expected message `{expected_message}`, got `{message}`"
+        );
+        if path == "shaders/naga_compile_error.wgsl" || path == "shaders/malformed_binding.wgsl" {
             assert!(message.contains("line 1, column"));
             assert!(message.contains("error"));
         }

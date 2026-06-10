@@ -50,7 +50,7 @@ parallel = []
 zstd = ["dep:ruzstd"]
 
 [dependencies]
-naga = { version = "24", optional = true }
+naga = { version = "24", optional = true, features = ["wgsl-in"] }
 ruzstd = { version = "0.8", optional = true }
 serde = { version = "1.0", features = ["derive"], optional = true }
 thiserror = "2"
