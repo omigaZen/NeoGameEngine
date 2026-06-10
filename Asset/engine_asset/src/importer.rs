@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        77
+        81
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3176,6 +3176,66 @@ fn parse_model_source(
 #[cfg(feature = "model_importer")]
 fn strip_model_source_comment(line: &str) -> &str {
     line.split_once('#').map(|(value, _)| value).unwrap_or(line)
+}
+
+#[cfg(feature = "model_importer")]
+fn obj_logical_source_lines(
+    source_text: &str,
+    context: &str,
+) -> Result<Vec<(usize, String)>, ImportError> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut current_start = 0usize;
+    let mut pending_continuation = false;
+    let mut last_line_number = 0usize;
+
+    for (line_index, line) in source_text.lines().enumerate() {
+        let line_number = line_index + 1;
+        last_line_number = line_number;
+        let line = strip_model_source_comment(line);
+        let trimmed_end = line.trim_end();
+        let continues = trimmed_end.ends_with('\\');
+        let segment = if continues {
+            trimmed_end
+                .strip_suffix('\\')
+                .expect("continuation suffix was checked")
+                .trim_end()
+        } else {
+            line
+        };
+        let segment = segment.trim();
+
+        if current_start == 0 && (continues || !segment.is_empty()) {
+            current_start = line_number;
+        }
+        if !segment.is_empty() {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(segment);
+        }
+
+        if continues {
+            pending_continuation = true;
+            continue;
+        }
+
+        if pending_continuation || !current.is_empty() {
+            lines.push((current_start.max(1), std::mem::take(&mut current)));
+            current_start = 0;
+            pending_continuation = false;
+        }
+    }
+
+    if pending_continuation {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ {context} line continuation is missing a following line after line {last_line_number}"
+            ),
+        });
+    }
+
+    Ok(lines)
 }
 
 #[cfg(feature = "model_importer")]
@@ -4735,6 +4795,9 @@ fn parse_model_obj_source(
     let mut meshes = Vec::new();
     let mut material_uses = Vec::<ObjMaterialUse>::new();
     let mut material_libraries = Vec::new();
+    let mut parameter_vertex_count = 0;
+    let mut curve2_count = 0;
+    let mut surface_count = 0;
     let mut current = ObjMeshSource {
         label: "Mesh0".to_owned(),
         material_groups: Vec::new(),
@@ -4743,12 +4806,10 @@ fn parse_model_obj_source(
     let mut current_material_label = None;
     let mut current_smoothing_group = ObjSmoothingGroup::Unspecified;
 
-    for (line_index, line) in source_text.lines().enumerate() {
-        let line_number = line_index + 1;
+    for (line_number, line) in obj_logical_source_lines(source_text, "source")? {
         if has_header && line_number == 1 {
             continue;
         }
-        let line = strip_model_source_comment(line);
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -4775,13 +4836,16 @@ fn parse_model_obj_source(
             }
             "v" => vertices.push(parse_obj_vertex(parts, line_number)?),
             "vt" => texture_coords.push(parse_obj_texture_coord(parts, line_number)?),
-            "vp" => parse_obj_parameter_vertex(parts, line_number)?,
+            "vp" => {
+                parse_obj_parameter_vertex(parts, line_number)?;
+                parameter_vertex_count += 1;
+            }
             "vn" => normals.push(parse_obj_normal(parts, line_number)?),
             "p" => parse_obj_point_element(parts, vertices.len(), line_number)?,
             "l" => {
                 parse_obj_line_element(parts, vertices.len(), texture_coords.len(), line_number)?
             }
-            "f" => {
+            "f" | "fo" => {
                 let triangles = parse_obj_face(
                     parts,
                     vertices.len(),
@@ -4836,6 +4900,37 @@ fn parse_model_obj_source(
                 directive_key.as_str(),
                 line_number,
             )?,
+            "cstype" => parse_obj_curve_surface_type(parts, line_number)?,
+            "deg" => parse_obj_positive_integer_attribute(parts, "deg", line_number)?,
+            "bmat" => parse_obj_basis_matrix_attribute(parts, line_number)?,
+            "step" => parse_obj_positive_integer_attribute(parts, "step", line_number)?,
+            "curv" => parse_obj_curve_element(parts, vertices.len(), line_number)?,
+            "curv2" => {
+                parse_obj_curve2_element(parts, parameter_vertex_count, line_number)?;
+                curve2_count += 1;
+            }
+            "surf" => {
+                parse_obj_surface_element(
+                    parts,
+                    vertices.len(),
+                    texture_coords.len(),
+                    normals.len(),
+                    line_number,
+                )?;
+                surface_count += 1;
+            }
+            "parm" => parse_obj_parameter_values(parts, line_number)?,
+            "trim" | "hole" | "scrv" => parse_obj_curve_reference_groups(
+                parts,
+                directive_key.as_str(),
+                curve2_count,
+                line_number,
+            )?,
+            "con" => {
+                parse_obj_connection_statement(parts, surface_count, curve2_count, line_number)?
+            }
+            "sp" => parse_obj_special_point_element(parts, parameter_vertex_count, line_number)?,
+            "end" => parse_obj_end_statement(parts, line_number)?,
             _ => {
                 return Err(AssetError::Import {
                     message: format!("unknown OBJ directive `{directive}` on line {line_number}"),
@@ -5372,6 +5467,391 @@ fn parse_obj_approximation_values<'a>(
         });
     }
     Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_curve_surface_type<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let first = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ cstype value on line {line_number}"),
+    })?;
+    let value = if first.eq_ignore_ascii_case("rat") {
+        parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ cstype value on line {line_number}"),
+        })?
+    } else {
+        first
+    };
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ cstype values on line {line_number}"),
+        });
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "bmatrix" | "bezier" | "bspline" | "cardinal" | "taylor" => Ok(()),
+        _ => Err(AssetError::Import {
+            message: format!("unknown OBJ cstype value `{value}` on line {line_number}"),
+        }),
+    }
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_positive_integer_attribute<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut count = 0;
+    for value in parts {
+        count += 1;
+        if count > 2 {
+            return Err(AssetError::Import {
+                message: format!("too many OBJ {directive} values on line {line_number}"),
+            });
+        }
+        let parsed = value.parse::<i64>().map_err(|error| AssetError::Import {
+            message: format!("invalid OBJ {directive} value on line {line_number}: {error}"),
+        })?;
+        if parsed <= 0 {
+            return Err(AssetError::Import {
+                message: format!("OBJ {directive} value on line {line_number} must be positive"),
+            });
+        }
+    }
+    if count == 0 {
+        return Err(AssetError::Import {
+            message: format!("missing OBJ {directive} value on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_basis_matrix_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let direction = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ bmat direction on line {line_number}"),
+    })?;
+    match direction.to_ascii_lowercase().as_str() {
+        "u" | "v" => {}
+        _ => {
+            return Err(AssetError::Import {
+                message: format!("unknown OBJ bmat direction `{direction}` on line {line_number}"),
+            })
+        }
+    }
+    for _ in 0..16 {
+        let value = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ bmat value on line {line_number}"),
+        })?;
+        parse_obj_free_form_number(value, "bmat", "value", line_number)?;
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ bmat values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_curve_element<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    vertex_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    for _ in 0..2 {
+        let value = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ curv range value on line {line_number}"),
+        })?;
+        parse_obj_free_form_number(value, "curv", "range", line_number)?;
+    }
+    let mut control_points = 0;
+    for token in parts {
+        parse_obj_index_reference(token, token, "curv", "vertex", vertex_count, line_number)?;
+        control_points += 1;
+    }
+    if control_points < 2 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ curv on line {line_number} must contain at least 2 control points"
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_curve2_element<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    parameter_vertex_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut control_points = 0;
+    for token in parts {
+        parse_obj_index_reference(
+            token,
+            token,
+            "curv2",
+            "parameter vertex",
+            parameter_vertex_count,
+            line_number,
+        )?;
+        control_points += 1;
+    }
+    if control_points < 2 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ curv2 on line {line_number} must contain at least 2 parameter vertices"
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_surface_element<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    vertex_count: usize,
+    texture_coord_count: usize,
+    normal_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    for _ in 0..4 {
+        let value = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ surf range value on line {line_number}"),
+        })?;
+        parse_obj_free_form_number(value, "surf", "range", line_number)?;
+    }
+    let mut control_points = 0;
+    for token in parts {
+        parse_obj_surface_index(
+            token,
+            vertex_count,
+            texture_coord_count,
+            normal_count,
+            line_number,
+        )?;
+        control_points += 1;
+    }
+    if control_points < 4 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ surf on line {line_number} must contain at least 4 control points"
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_surface_index(
+    token: &str,
+    vertex_count: usize,
+    texture_coord_count: usize,
+    normal_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let parts = token.split('/').collect::<Vec<_>>();
+    if parts.len() > 3 {
+        return Err(AssetError::Import {
+            message: format!("invalid OBJ surf tuple `{token}` on line {line_number}"),
+        });
+    }
+    parse_obj_index_reference(
+        parts.first().copied().unwrap_or(""),
+        token,
+        "surf",
+        "vertex",
+        vertex_count,
+        line_number,
+    )?;
+    if let Some(texture_coord) = parts.get(1).copied().filter(|part| !part.is_empty()) {
+        parse_obj_index_reference(
+            texture_coord,
+            token,
+            "surf texture coordinate",
+            "texture coordinate",
+            texture_coord_count,
+            line_number,
+        )?;
+    }
+    if let Some(normal) = parts.get(2).copied().filter(|part| !part.is_empty()) {
+        parse_obj_index_reference(
+            normal,
+            token,
+            "surf normal",
+            "normal",
+            normal_count,
+            line_number,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_parameter_values<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let direction = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ parm direction on line {line_number}"),
+    })?;
+    match direction.to_ascii_lowercase().as_str() {
+        "u" | "v" => {}
+        _ => {
+            return Err(AssetError::Import {
+                message: format!("unknown OBJ parm direction `{direction}` on line {line_number}"),
+            })
+        }
+    }
+    let mut values = 0;
+    for value in parts {
+        parse_obj_free_form_number(value, "parm", "value", line_number)?;
+        values += 1;
+    }
+    if values == 0 {
+        return Err(AssetError::Import {
+            message: format!("missing OBJ parm value on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_curve_reference_groups<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    curve2_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let tokens = parts.collect::<Vec<_>>();
+    if tokens.is_empty() {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ {directive} on line {line_number} must contain at least 1 curve reference"
+            ),
+        });
+    }
+    if tokens.len() % 3 != 0 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ {directive} on line {line_number} requires complete `<u0> <u1> <curv2>` groups"
+            ),
+        });
+    }
+    for group in tokens.chunks(3) {
+        parse_obj_free_form_number(group[0], directive, "range", line_number)?;
+        parse_obj_free_form_number(group[1], directive, "range", line_number)?;
+        parse_obj_index_reference(
+            group[2],
+            group[2],
+            directive,
+            "curve2",
+            curve2_count,
+            line_number,
+        )?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_connection_statement<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    surface_count: usize,
+    curve2_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    for _ in 0..2 {
+        let surface = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ con surface reference on line {line_number}"),
+        })?;
+        parse_obj_index_reference(
+            surface,
+            surface,
+            "con",
+            "surface",
+            surface_count,
+            line_number,
+        )?;
+        for _ in 0..2 {
+            let value = parts.next().ok_or_else(|| AssetError::Import {
+                message: format!("missing OBJ con range value on line {line_number}"),
+            })?;
+            parse_obj_free_form_number(value, "con", "range", line_number)?;
+        }
+        let curve = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ con curve2 reference on line {line_number}"),
+        })?;
+        parse_obj_index_reference(curve, curve, "con", "curve2", curve2_count, line_number)?;
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ con values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_special_point_element<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    parameter_vertex_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut special_points = 0;
+    for token in parts {
+        parse_obj_index_reference(
+            token,
+            token,
+            "sp",
+            "parameter vertex",
+            parameter_vertex_count,
+            line_number,
+        )?;
+        special_points += 1;
+    }
+    if special_points == 0 {
+        return Err(AssetError::Import {
+            message: format!("OBJ sp on line {line_number} must contain at least 1 special point"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_end_statement<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ end values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_free_form_number(
+    value: &str,
+    directive: &str,
+    field: &str,
+    line_number: usize,
+) -> Result<f32, ImportError> {
+    let value = value.parse::<f32>().map_err(|error| AssetError::Import {
+        message: format!("invalid OBJ {directive} {field} value on line {line_number}: {error}"),
+    })?;
+    if !value.is_finite() {
+        return Err(AssetError::Import {
+            message: format!("OBJ {directive} {field} value must be finite on line {line_number}"),
+        });
+    }
+    Ok(value)
 }
 
 #[cfg(feature = "model_importer")]
@@ -6073,9 +6553,12 @@ fn parse_obj_material_library_text(
     let mut defined_names = Vec::<String>::new();
     let mut current_name = None;
     let mut current_properties = ObjMaterialProperties::default();
-    for (line_index, line) in source_text.lines().enumerate() {
-        let line_number = line_index + 1;
-        let line = line.split_once('#').map(|(value, _)| value).unwrap_or(line);
+    let context = format!(
+        "material library `{}` at `{}`",
+        library.name,
+        path.display_string()
+    );
+    for (line_number, line) in obj_logical_source_lines(source_text, &context)? {
         let line = line.trim();
         if line.is_empty() {
             continue;
