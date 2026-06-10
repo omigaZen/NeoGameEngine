@@ -1818,6 +1818,16 @@ fn import_audio_bytes(
         match options.compression {
             Some(AudioCompression::None) | None => {}
             Some(AudioCompression::Vorbis) | Some(AudioCompression::Opus) => {
+                if !source.bytes.starts_with(b"OggS") {
+                    return Err(AssetError::Import {
+                        message: format!(
+                            "audio source is not a supported Ogg payload for `compression`={:?}",
+                            options
+                                .compression
+                                .expect("compression already validated as vorbis/opus"),
+                        ),
+                    });
+                }
                 crate::assets::audio::canonical_audio_runtime_bytes(&source.bytes).map_err(
                     |error| AssetError::Import {
                         message: format!(

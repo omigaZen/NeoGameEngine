@@ -12419,6 +12419,33 @@ fn database_audio_importer_rejects_ogg_compression_for_non_ogg_binary_source() {
 }
 
 #[test]
+fn database_audio_importer_rejects_ogg_compression_for_binary_wav_source() {
+    let config = database_config("audio_importer_ogg_wav_source_validation");
+    let path = AssetPath::parse("audio/raw.wav");
+    let source = wav_pcm16_bytes(44_100, 1, &[0, 1000, -1000, 0]);
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "opus");
+
+    let error = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `AudioImporter` failed")
+                && message.contains("audio/raw.wav")
+                && message.contains("compression=opus")
+                && message.contains("supported Ogg payload")
+    ));
+}
+
+#[test]
 fn database_ogg_audio_import_cook_and_runtime_load_preserves_payload() {
     let config = database_config("builtin_ogg_audio_runtime_load");
     let path = AssetPath::parse("audio/callout.ogg");
