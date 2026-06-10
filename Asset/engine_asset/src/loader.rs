@@ -70,6 +70,12 @@ impl LoadScheduler {
         Some(self.queue.remove(index))
     }
 
+    pub fn set_priority(&mut self, id: AssetId, priority: LoadPriority) {
+        if let Some(request) = self.queue.iter_mut().find(|request| request.id == id) {
+            request.priority = priority;
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.queue.len()
     }

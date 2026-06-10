@@ -1350,12 +1350,32 @@ impl AssetServer {
         id: StreamingRegionId,
         priority: LoadPriority,
     ) -> AssetResult<LoadPriority> {
+        let asset_ids = {
+            let region = self
+                .streaming_regions
+                .get(&id)
+                .ok_or_else(|| streaming_region_not_found(id))?;
+            region
+                .assets
+                .iter()
+                .map(|handle| handle.id())
+                .collect::<Vec<_>>()
+        };
         let region = self
             .streaming_regions
             .get_mut(&id)
             .ok_or_else(|| streaming_region_not_found(id))?;
         let previous = region.priority;
         region.priority = priority;
+
+        for asset_id in &asset_ids {
+            self.scheduler.set_priority(*asset_id, priority);
+            #[cfg(feature = "async_loading")]
+            if let Some(request) = self.async_in_flight.get_mut(asset_id) {
+                request.priority = priority;
+            }
+        }
+
         Ok(previous)
     }
 
