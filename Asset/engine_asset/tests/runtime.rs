@@ -89,6 +89,11 @@ fn ogg_opus_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
     make_ogg_page(packet)
 }
 
+fn ogg_unknown_codec_audio_bytes() -> Vec<u8> {
+    let packet = vec![b'U', b'n', b'k', b'n', b'o', b'w', b'n'];
+    make_ogg_page(packet)
+}
+
 fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"OggS");
@@ -1364,6 +1369,26 @@ fn invalid_ogg_audio_payload_fails_with_decode_error() {
         server.error_by_id(audio.id()),
         Some(AssetError::Decode { message })
             if message.contains("OGG source must start with OggS and include a complete page header")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_ogg_audio_codec_fails_with_decode_error() {
+    let io = MemoryAssetIo::new().with_file("audio/unknown_codec.ogg", ogg_unknown_codec_audio_bytes());
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/unknown_codec.ogg");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("audio source is OggS but codec header is unsupported for runtime decode")
     ));
     assert!(server
         .events()

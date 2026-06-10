@@ -12237,6 +12237,37 @@ fn database_audio_importer_reports_invalid_audio_settings() {
 }
 
 #[test]
+fn database_audio_importer_reports_invalid_audio_compression_setting() {
+    let config = database_config("audio_importer_invalid_compression_setting");
+    let path = AssetPath::parse("audio/invalid_compression.audio");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        path.path(),
+        b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=i16\nsamples=0,1\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "flac");
+
+    let error = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `AudioImporter` failed")
+                && message.contains("audio/invalid_compression.audio")
+                && message.contains("compression=flac")
+                && message.contains(
+                    "invalid audio import setting `compression` value `flac`; expected none, vorbis, or opus"
+                )
+    ));
+}
+
+#[test]
 fn database_audio_importer_applies_streaming_setting_override() {
     let config = database_config("audio_importer_streaming_override");
     let path = AssetPath::parse("audio/override.audio");
