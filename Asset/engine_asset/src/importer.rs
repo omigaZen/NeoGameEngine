@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        72
+        74
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -7147,7 +7147,7 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
     match directive.to_ascii_lowercase().as_str() {
         "map_kd" => Some("albedo"),
         "map_ks" => Some("specular"),
-        "map_ka" => Some("occlusion"),
+        "map_ka" | "map_ao" | "map_occlusion" | "map_ambient_occlusion" => Some("occlusion"),
         "map_ke" => Some("emissive"),
         "map_tf" => Some("transmission_filter"),
         "map_d" | "map_tr" => Some("alpha"),
@@ -7157,6 +7157,9 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         "map_pm" => Some("metallic"),
         "map_rma" => Some("rma"),
         "map_orm" => Some("orm"),
+        "map_mr" | "map_metallicroughness" => Some("metallic_roughness"),
+        "map_mra" => Some("mra"),
+        "map_arm" => Some("arm"),
         "map_ps" | "map_sheen" => Some("sheen"),
         "map_pc" | "map_clearcoat" => Some("clearcoat"),
         "map_pcr" | "map_clearcoat_roughness" => Some("clearcoat_roughness"),
