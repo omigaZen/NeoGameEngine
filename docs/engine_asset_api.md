@@ -3427,6 +3427,12 @@ impl AssetServer {
         resident: bool,
     ) -> AssetResult<()>;
 
+    pub fn set_streaming_region_priority(
+        &mut self,
+        id: StreamingRegionId,
+        priority: LoadPriority,
+    ) -> AssetResult<LoadPriority>;
+
     pub fn preload_streaming_region(
         &mut self,
         id: StreamingRegionId,

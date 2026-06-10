@@ -156,6 +156,54 @@ fn streaming_region_priority_controls_scheduler_order() {
 }
 
 #[test]
+fn streaming_region_priority_can_be_updated_before_preload() {
+    let mut config = AssetServerConfig::default();
+    config.max_io_jobs_per_frame = 1;
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/low.texture", texture_bytes(1, 1, 1));
+    io.insert("textures/high.texture", texture_bytes(1, 1, 2));
+    let mut server = AssetServer::new(config);
+    server.set_io(io);
+    server.register_builtin_loaders();
+    let low = server
+        .register_streaming_region_paths(
+            "low",
+            LoadPriority::Background,
+            &[AssetPath::parse("textures/low.texture")],
+        )
+        .unwrap();
+    let high = server
+        .register_streaming_region_paths(
+            "high",
+            LoadPriority::Background,
+            &[AssetPath::parse("textures/high.texture")],
+        )
+        .unwrap();
+
+    assert_eq!(
+        server.set_streaming_region_priority(low, LoadPriority::Immediate).unwrap(),
+        LoadPriority::Background
+    );
+    assert_eq!(
+        server.streaming_region(low).unwrap().priority,
+        LoadPriority::Immediate
+    );
+
+    server.preload_streaming_region(low).unwrap();
+    server.preload_streaming_region(high).unwrap();
+    server.update_loading();
+
+    let high_id = server
+        .id_from_path(&AssetPath::parse("textures/high.texture"))
+        .unwrap();
+    let low_id = server
+        .id_from_path(&AssetPath::parse("textures/low.texture"))
+        .unwrap();
+    assert_eq!(server.state_by_id(low_id), AssetLoadState::UploadingGpu);
+    assert_eq!(server.state_by_id(high_id), AssetLoadState::Queued);
+}
+
+#[test]
 fn streaming_region_residency_protects_assets_from_region_unload() {
     let mut server = server_with_textures(&[("textures/resident.texture", 3)]);
     let path = AssetPath::parse("textures/resident.texture");

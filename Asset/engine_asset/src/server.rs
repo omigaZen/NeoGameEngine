@@ -1345,6 +1345,32 @@ impl AssetServer {
     }
 
     #[cfg(feature = "streaming")]
+    pub fn set_streaming_region_priority(
+        &mut self,
+        id: StreamingRegionId,
+        priority: LoadPriority,
+    ) -> AssetResult<LoadPriority> {
+        let region = self
+            .streaming_regions
+            .get_mut(&id)
+            .ok_or_else(|| streaming_region_not_found(id))?;
+        let previous = region.priority;
+        region.priority = priority;
+        Ok(previous)
+    }
+
+    #[cfg(not(feature = "streaming"))]
+    pub fn set_streaming_region_priority(
+        &mut self,
+        id: StreamingRegionId,
+        priority: LoadPriority,
+    ) -> AssetResult<LoadPriority> {
+        let _ = (id, priority);
+        require_asset_feature(AssetFeature::Streaming)?;
+        unreachable!("streaming feature is disabled")
+    }
+
+    #[cfg(feature = "streaming")]
     pub fn preload_streaming_region(
         &mut self,
         id: StreamingRegionId,

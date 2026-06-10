@@ -636,6 +636,12 @@ fn streaming_feature_entry_points_match_gate() {
                 "asset streaming feature is disabled"
             ))
         );
+        assert_eq!(
+            server.set_streaming_region_priority(missing_region, LoadPriority::Immediate),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
         assert!(matches!(
             server.preload_streaming_region(missing_region),
             Err(AssetError::Unsupported(
