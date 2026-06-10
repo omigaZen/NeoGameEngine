@@ -4920,8 +4920,10 @@ impl AudioLoader {
 ```
 
 `AudioLoader` 注册 `audio`、`wav`、`ogg` 扩展名，解析文档中的 `NGA_AUDIO_V1`
-文本 payload，也解析基础 RIFF/WAVE PCM16 和 IEEE-float32 payload，并直接生成
-CPU-only `AudioClip`。
+文本 payload，也解析基础 RIFF/WAVE PCM16 和 IEEE-float32 payload。对于 Ogg 数据封包，当
+`ogg` 页面头可识别为 Opus/Vorbis 标识头时，会返回 `AudioClip` 且 `streaming=true`，并在
+`AudioSamples` 中使用 `Streaming` 占位符。未识别的 Ogg payload 会返回可见 decode error。
+CPU-only `AudioClip` 仍适用于 `NGA_AUDIO_V1` 和 RIFF/WAVE。
 
 ---
 
@@ -5411,10 +5413,11 @@ streaming=true
 `samples=` 和 `frames=` 都可使用；逗号和分号都会作为 sample 分隔符。Importer 会验证
 `sample_rate`、`channels`、`format`、sample 类型、finite `f32` sample、以及 sample 数量是否为
 channel 数的非零倍数。`ImporterSettings` 可为 `NGA_AUDIO_SOURCE_V1` 转换设置
-`force_mono=true`、`normalize=true`、`streaming=true/false` 和 `compression=none`：`force_mono`
+`force_mono=true`、`normalize=true`、`streaming=true/false` 和 `compression`：`force_mono`
 会先按 frame 平均多声道采样并输出 `channels=1`，`normalize` 随后按峰值绝对振幅缩放
-`i16`/`f32` samples，`streaming` 会覆盖 source 文本中的同名字段，`compression` 当前只接受
-`none`，`vorbis`/`opus` 会返回 visible import error。非法 boolean settings 会作为 import
+`i16`/`f32` samples，`streaming` 会覆盖 source 文本中的同名字段，`compression` 支持
+`none`、`vorbis`、`opus`；当值为 `vorbis`/`opus` 且输入为 Ogg 封装时保留编码载荷并在
+runtime 阶段解析为 `AudioSamples::Streaming`。非法 boolean/压缩值设置会作为 import
 error 返回。导入错误会包含 `AudioImporter`、source path 和 settings 上下文。转换后的
 bytes 会写入 imported root，后续 `cook_asset`、bundle 和 runtime load 都使用该规范化 payload。
 

@@ -2,6 +2,7 @@ use crate::{
     asset::{Asset, AssetMemoryUsage},
     error::{AssetError, AssetLoadError},
     id::AssetTypeId,
+    io::stable_hash,
     loader::{AssetLoader, LoadContext, LoadedAsset, LoaderSettings},
 };
 
@@ -96,6 +97,9 @@ impl AssetLoader for AudioLoader {
 fn parse_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     if bytes.starts_with(b"RIFF") {
         return parse_wav_audio_clip(bytes);
+    }
+    if bytes.starts_with(b"OggS") {
+        return parse_ogg_audio_clip(bytes);
     }
 
     let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
@@ -254,6 +258,127 @@ fn validate_sample_count(sample_count: usize, channels: u16) -> Result<(), Asset
         });
     }
     Ok(())
+}
+
+fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
+    let header_size = 27usize;
+    if bytes.len() < header_size {
+        return Err(AssetError::Decode {
+            message: "OGG source must start with OggS and include a complete page header".to_owned(),
+        });
+    }
+    if &bytes[0..4] != b"OggS" {
+        return Err(AssetError::Decode {
+            message: "audio source must start with OggS".to_owned(),
+        });
+    }
+    if bytes[4] != 0 {
+        return Err(AssetError::Decode {
+            message: "unsupported OGG version".to_owned(),
+        });
+    }
+
+    let segment_count = usize::from(bytes[26]);
+    let segment_table_end = header_size
+        .checked_add(segment_count)
+        .ok_or_else(|| AssetError::Decode {
+            message: "OGG page segment table length overflow".to_owned(),
+        })?;
+    if bytes.len() < segment_table_end {
+        return Err(AssetError::Decode {
+            message: "OGG page segment table exceeds source size".to_owned(),
+        });
+    }
+
+    let mut packet_len = 0usize;
+    let mut has_terminal_segment = false;
+    for &segment in bytes[header_size..segment_table_end].iter() {
+        let segment_len = usize::from(segment);
+        packet_len = packet_len
+            .checked_add(segment_len)
+            .ok_or_else(|| AssetError::Decode {
+                message: "OGG page first packet size overflow".to_owned(),
+            })?;
+        if segment < 255 {
+            has_terminal_segment = true;
+            break;
+        }
+    }
+    if !has_terminal_segment {
+        return Err(AssetError::Decode {
+            message: "OGG first packet spans multiple pages; unsupported minimal parser".to_owned(),
+        });
+    }
+    if packet_len == 0 {
+        return Err(AssetError::Decode {
+            message: "OGG first packet length must be greater than zero".to_owned(),
+        });
+    }
+
+    let packet_end = segment_table_end
+        .checked_add(packet_len)
+        .ok_or_else(|| AssetError::Decode {
+            message: "OGG first packet length overflow".to_owned(),
+        })?;
+    if bytes.len() < packet_end {
+        return Err(AssetError::Decode {
+            message: "OGG page data is truncated".to_owned(),
+        });
+    }
+    let packet = &bytes[segment_table_end..packet_end];
+
+    let (channels, sample_rate) = parse_ogg_audio_packet(packet)?;
+    Ok(AudioClip {
+        sample_rate,
+        channels,
+        samples: AudioSamples::Streaming(AudioStreamHandle(stable_hash(bytes))),
+        duration_seconds: 0.0,
+        streaming: true,
+    })
+}
+
+fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(u16, u32), AssetError> {
+    if packet.len() >= 16 && packet.starts_with(b"OpusHead") {
+        let version = packet[8];
+        if version != 0 && version != 1 {
+            return Err(AssetError::Decode {
+                message: format!("unsupported OpusHead version {version}"),
+            });
+        }
+        let channels = u16::from(packet[9]);
+        let sample_rate = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
+        if channels == 0 {
+            return Err(AssetError::Decode {
+                message: "OGG Opus header has zero channels".to_owned(),
+            });
+        }
+        if sample_rate == 0 {
+            return Err(AssetError::Decode {
+                message: "OGG Opus header has zero sample rate".to_owned(),
+            });
+        }
+        return Ok((channels, sample_rate));
+    }
+
+    if packet.len() >= 16 && packet[0] == 0x01 && packet.get(1..7) == Some(b"vorbis") {
+        let channels = u16::from(packet[11]);
+        let sample_rate = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
+        if channels == 0 {
+            return Err(AssetError::Decode {
+                message: "OGG Vorbis header has zero channels".to_owned(),
+            });
+        }
+        if sample_rate == 0 {
+            return Err(AssetError::Decode {
+                message: "OGG Vorbis header has zero sample rate".to_owned(),
+            });
+        }
+        return Ok((channels, sample_rate));
+    }
+
+    Err(AssetError::Decode {
+        message: "audio source is OggS but codec header is unsupported for runtime decode".to_owned(),
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -441,6 +566,10 @@ fn read_wav_u32(bytes: &[u8], offset: usize, field: &str) -> Result<u32, AssetEr
 }
 
 pub fn canonical_audio_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError> {
+    if bytes.starts_with(b"OggS") {
+        parse_ogg_audio_clip(bytes)?;
+        return Ok(bytes.to_vec());
+    }
     let clip = parse_audio_clip(bytes)?;
     encode_audio_clip_runtime_bytes(&clip)
 }

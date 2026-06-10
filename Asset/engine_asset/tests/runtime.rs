@@ -64,6 +64,46 @@ fn wav_float32_bytes(sample_rate: u32, channels: u16, samples: &[f32]) -> Vec<u8
     bytes
 }
 
+fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.push(0x01);
+    packet.extend_from_slice(b"vorbis");
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.push(u8::try_from(channels).unwrap_or(u8::MAX));
+    packet.extend_from_slice(&sample_rate.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    make_ogg_page(packet)
+}
+
+fn ogg_opus_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.extend_from_slice(b"OpusHead");
+    packet.push(1);
+    packet.push(u8::try_from(channels).unwrap_or(u8::MAX));
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&sample_rate.to_le_bytes());
+    packet.extend_from_slice(&0i16.to_le_bytes());
+    packet.push(0);
+    make_ogg_page(packet)
+}
+
+fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"OggS");
+    bytes.push(0x00);
+    bytes.push(0x00);
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.push(1u8);
+    bytes.push(u8::try_from(packet.len()).expect("ogg test packet must be single-segment"));
+    bytes.extend_from_slice(&packet);
+    bytes
+}
+
 fn animation_bytes() -> Vec<u8> {
     b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntrack=bone:Root\ntranslation=0:0,0,0\nrotation=0:0,0,0,1\nscale=0:1,1,1\n"
         .to_vec()
@@ -1182,6 +1222,50 @@ fn audio_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn vorbis_ogg_audio_load_reaches_ready_as_streaming() {
+    let io = MemoryAssetIo::new().with_file("audio/voice.ogg", ogg_vorbis_audio_bytes(48_000, 2));
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/voice.ogg");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 48_000);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 0.0);
+    assert!(loaded.streaming);
+    assert!(matches!(loaded.samples, AudioSamples::Streaming(_)));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == audio.id())));
+}
+
+#[test]
+fn opus_ogg_audio_load_reaches_ready_as_streaming() {
+    let io = MemoryAssetIo::new().with_file("audio/dialogue.ogg", ogg_opus_audio_bytes(44_100, 1));
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/dialogue.ogg");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 44_100);
+    assert_eq!(loaded.channels, 1);
+    assert_eq!(loaded.duration_seconds, 0.0);
+    assert!(loaded.streaming);
+    assert!(matches!(loaded.samples, AudioSamples::Streaming(_)));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == audio.id())));
+}
+
+#[test]
 fn wav_audio_load_reaches_ready_without_renderer_upload() {
     let wav = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
     let io = MemoryAssetIo::new().with_file("audio/click.wav", wav);
@@ -1259,7 +1343,27 @@ fn invalid_wav_audio_payload_fails_with_decode_error_and_event() {
     assert!(matches!(
         server.error_by_id(audio.id()),
         Some(AssetError::Decode { message })
-            if message.contains("WAV audio source missing fmt chunk")
+        if message.contains("WAV audio source missing fmt chunk")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_ogg_audio_payload_fails_with_decode_error() {
+    let io = MemoryAssetIo::new().with_file("audio/broken.ogg", b"OggS".to_vec());
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/broken.ogg");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("OGG source must start with OggS and include a complete page header")
     ));
     assert!(server
         .events()

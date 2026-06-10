@@ -65,6 +65,46 @@ fn font_bytes() -> Vec<u8> {
     b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\n".to_vec()
 }
 
+fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.push(0x01);
+    packet.extend_from_slice(b"vorbis");
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.push(u8::try_from(channels).unwrap_or(u8::MAX));
+    packet.extend_from_slice(&sample_rate.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    make_ogg_page(packet)
+}
+
+fn ogg_opus_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.extend_from_slice(b"OpusHead");
+    packet.push(1);
+    packet.push(u8::try_from(channels).unwrap_or(u8::MAX));
+    packet.extend_from_slice(&0u16.to_le_bytes());
+    packet.extend_from_slice(&sample_rate.to_le_bytes());
+    packet.extend_from_slice(&0i16.to_le_bytes());
+    packet.push(0);
+    make_ogg_page(packet)
+}
+
+fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"OggS");
+    bytes.push(0x00);
+    bytes.push(0x00);
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.push(1u8);
+    bytes.push(u8::try_from(packet.len()).expect("ogg test packet must be single-segment"));
+    bytes.extend_from_slice(&packet);
+    bytes
+}
+
 fn physics_mesh_bytes() -> Vec<u8> {
     b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
 }
@@ -12275,6 +12315,52 @@ fn database_audio_importer_reports_unsupported_audio_compression() {
                 && message.contains("compression=vorbis")
                 && message.contains("unsupported audio import compression `vorbis`; expected `none`")
     ));
+}
+
+#[test]
+fn database_ogg_audio_import_cook_and_runtime_load_preserves_payload() {
+    let config = database_config("builtin_ogg_audio_runtime_load");
+    let path = AssetPath::parse("audio/callout.ogg");
+    let source = ogg_vorbis_audio_bytes(44_100, 2);
+
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        source
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, source);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        source
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 44_100);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 0.0);
+    assert!(loaded.streaming);
+    assert!(matches!(loaded.samples, AudioSamples::Streaming(_)));
 }
 
 #[test]
