@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 engine_asset = { path = "../../Asset/engine_asset" }
-
+engine_physics = { path = "../../Physics/engine_physics", default-features = false }

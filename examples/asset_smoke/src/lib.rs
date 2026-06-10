@@ -5,6 +5,10 @@ use std::{
 };
 
 use engine_asset::prelude::*;
+use engine_physics::prelude::{
+    BodyDesc, ColliderDesc, PhysicsConfig, PhysicsWorld, QueryFilter, Ray, TriMeshDesc,
+    Vec3 as PhysicsVec3,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmokeReport {
@@ -18,12 +22,26 @@ pub struct SmokeReport {
     pub group_total_assets: usize,
     pub group_ready_assets: usize,
     pub material_dependencies: usize,
+    pub physics_world_mesh_ready: bool,
+    pub physics_world_collider_ready: bool,
+    pub physics_world_ray_hit: bool,
+    pub physics_world_triangles: usize,
     pub scene_commands: usize,
     pub prefab_commands: usize,
     pub scene_sink_events: usize,
     pub prefab_sink_events: usize,
+    pub scene_typed_entities: usize,
+    pub prefab_typed_entities: usize,
+    pub scene_typed_components: usize,
+    pub prefab_typed_components: usize,
+    pub scene_typed_asset_handles: usize,
+    pub prefab_typed_asset_handles: usize,
+    pub scene_typed_loaded: bool,
+    pub prefab_typed_loaded: bool,
     pub scene_trace: Vec<String>,
     pub prefab_trace: Vec<String>,
+    pub scene_typed_trace: Vec<String>,
+    pub prefab_typed_trace: Vec<String>,
     pub render_handles: usize,
     pub audio_handles: usize,
     pub physics_handles: usize,
@@ -171,6 +189,28 @@ pub fn run_smoke() -> SmokeReport {
     }
     .instantiate(&assets, &mut prefab_sink));
 
+    let mut scene_typed = scene.clone();
+    let mut prefab_typed = prefab.clone();
+    let mut scene_typed_sink = RecordingTypedHostInstantiationSink::with_first_entity(100);
+    let mut prefab_typed_sink = RecordingTypedHostInstantiationSink::with_first_entity(200);
+    let scene_typed_report = scene_typed
+        .instantiate_typed_host(&mut assets, &mut scene_typed_sink)
+        .unwrap()
+        .unwrap();
+    let prefab_typed_report = prefab_typed
+        .instantiate_typed_host(&mut assets, &mut prefab_typed_sink)
+        .unwrap()
+        .unwrap();
+    assert!(scene_typed
+        .instantiate_typed_host(&mut assets, &mut scene_typed_sink)
+        .unwrap()
+        .is_none());
+    assert!(prefab_typed
+        .instantiate_typed_host(&mut assets, &mut prefab_typed_sink)
+        .unwrap()
+        .is_none());
+
+    let physics_bridge = drive_physics_world_from_asset(&assets, &physics);
     let group_progress = assets.group_progress(&group);
     SmokeReport {
         render_ready: renderer.is_ready(&assets),
@@ -186,12 +226,26 @@ pub fn run_smoke() -> SmokeReport {
             .dependency_graph()
             .direct_dependencies(renderer.material.id())
             .len(),
+        physics_world_mesh_ready: physics_bridge.mesh_ready,
+        physics_world_collider_ready: physics_bridge.collider_ready,
+        physics_world_ray_hit: physics_bridge.ray_hit,
+        physics_world_triangles: physics_bridge.triangles,
         scene_commands,
         prefab_commands,
         scene_sink_events: scene_sink.events.len(),
         prefab_sink_events: prefab_sink.events.len(),
+        scene_typed_entities: scene_typed_report.entities.len(),
+        prefab_typed_entities: prefab_typed_report.entities.len(),
+        scene_typed_components: scene_typed_report.attached_component_count,
+        prefab_typed_components: prefab_typed_report.attached_component_count,
+        scene_typed_asset_handles: scene_typed_sink.asset_handles,
+        prefab_typed_asset_handles: prefab_typed_sink.asset_handles,
+        scene_typed_loaded: scene_typed.loaded,
+        prefab_typed_loaded: prefab_typed.loaded,
         scene_trace: scene_sink.events,
         prefab_trace: prefab_sink.events,
+        scene_typed_trace: scene_typed_sink.events,
+        prefab_typed_trace: prefab_typed_sink.events,
         render_handles: renderer.asset_handles().len(),
         audio_handles: audio.asset_handles().len(),
         physics_handles: physics.asset_handles().len(),
@@ -499,6 +553,62 @@ fn physics_mesh_bytes() -> Vec<u8> {
     b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
 }
 
+struct PhysicsBridgeReport {
+    mesh_ready: bool,
+    collider_ready: bool,
+    ray_hit: bool,
+    triangles: usize,
+}
+
+fn drive_physics_world_from_asset(
+    assets: &AssetServer,
+    collider: &PhysicsColliderComponent,
+) -> PhysicsBridgeReport {
+    let mesh = assets
+        .get(&collider.mesh)
+        .expect("smoke physics mesh should be ready before physics bridge");
+    assert_eq!(mesh.kind, PhysicsMeshKind::TriMesh);
+
+    let mut world = PhysicsWorld::new(PhysicsConfig::default());
+    let physics_mesh = world
+        .create_trimesh(TriMeshDesc {
+            vertices: mesh
+                .vertices
+                .iter()
+                .map(|vertex| PhysicsVec3::new(vertex[0], vertex[1], vertex[2]))
+                .collect(),
+            indices: mesh.indices.clone(),
+        })
+        .expect("asset physics mesh should convert to engine_physics trimesh");
+    let body = world
+        .create_body(BodyDesc::fixed().with_debug_name("Asset Physics Mesh"))
+        .expect("fixed body should be valid");
+    let physics_collider = world
+        .create_collider_with_parent(
+            body,
+            ColliderDesc::trimesh(physics_mesh).with_debug_name("Asset Physics Collider"),
+        )
+        .expect("asset physics mesh collider should be valid");
+    let ray_hit = world
+        .query()
+        .cast_ray(
+            Ray {
+                origin: PhysicsVec3::new(0.25, 0.25, -1.0),
+                direction: PhysicsVec3::Z,
+                max_toi: 2.0,
+            },
+            QueryFilter::default(),
+        )
+        .is_some();
+
+    PhysicsBridgeReport {
+        mesh_ready: world.contains_mesh(physics_mesh),
+        collider_ready: world.contains_collider(physics_collider),
+        ray_hit,
+        triangles: mesh.indices.len(),
+    }
+}
+
 #[derive(Default)]
 struct RecordingInstantiationSink {
     events: Vec<String>,
@@ -515,6 +625,56 @@ impl InstantiationSink for RecordingInstantiationSink {
             "attach:{entity_index}:{type_name}:{}",
             String::from_utf8_lossy(data)
         ));
+    }
+}
+
+struct RecordingTypedHostInstantiationSink {
+    next_entity: u64,
+    events: Vec<String>,
+    asset_handles: usize,
+}
+
+impl RecordingTypedHostInstantiationSink {
+    fn with_first_entity(first_entity: u64) -> Self {
+        Self {
+            next_entity: first_entity,
+            events: Vec::new(),
+            asset_handles: 0,
+        }
+    }
+}
+
+impl TypedHostInstantiationSink for RecordingTypedHostInstantiationSink {
+    type Entity = u64;
+    type Error = String;
+
+    fn spawn_entity(
+        &mut self,
+        entity_index: usize,
+        name: Option<&str>,
+        parent: Option<&Self::Entity>,
+    ) -> Result<Self::Entity, Self::Error> {
+        let entity = self.next_entity;
+        self.next_entity += 1;
+        self.events
+            .push(format!("spawn:{entity_index}:{entity}:{name:?}:{parent:?}"));
+        Ok(entity)
+    }
+
+    fn attach_component(
+        &mut self,
+        entity: &Self::Entity,
+        entity_index: usize,
+        component_index: usize,
+        component: EcsComponentInstance,
+    ) -> Result<(), Self::Error> {
+        let handle_count = component.asset_handles().len();
+        self.asset_handles += handle_count;
+        self.events.push(format!(
+            "attach:{entity}:{entity_index}:{component_index}:{}:{handle_count}",
+            component.type_name()
+        ));
+        Ok(())
     }
 }
 
@@ -550,10 +710,22 @@ mod tests {
         assert_eq!(report.group_total_assets, 4);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
+        assert!(report.physics_world_mesh_ready);
+        assert!(report.physics_world_collider_ready);
+        assert!(report.physics_world_ray_hit);
+        assert_eq!(report.physics_world_triangles, 1);
         assert_eq!(report.scene_commands, 4);
         assert_eq!(report.prefab_commands, 4);
         assert_eq!(report.scene_sink_events, 4);
         assert_eq!(report.prefab_sink_events, 4);
+        assert_eq!(report.scene_typed_entities, 2);
+        assert_eq!(report.prefab_typed_entities, 2);
+        assert_eq!(report.scene_typed_components, 2);
+        assert_eq!(report.prefab_typed_components, 2);
+        assert_eq!(report.scene_typed_asset_handles, 2);
+        assert_eq!(report.prefab_typed_asset_handles, 2);
+        assert!(report.scene_typed_loaded);
+        assert!(report.prefab_typed_loaded);
         assert_eq!(
             report.scene_trace,
             vec![
@@ -572,6 +744,24 @@ mod tests {
                 "spawn:1:Some(\"Weapon\"):Some(0)".to_owned(),
                 "attach:1:MeshRenderer:mesh=meshes/tri.mesh;material=materials/hero.material"
                     .to_owned(),
+            ]
+        );
+        assert_eq!(
+            report.scene_typed_trace,
+            vec![
+                "spawn:0:100:Some(\"Root\"):None".to_owned(),
+                "attach:100:0:0:Transform:0".to_owned(),
+                "spawn:1:101:Some(\"Hero\"):Some(100)".to_owned(),
+                "attach:101:1:0:MeshRenderer:2".to_owned(),
+            ]
+        );
+        assert_eq!(
+            report.prefab_typed_trace,
+            vec![
+                "spawn:0:200:Some(\"Hero\"):None".to_owned(),
+                "attach:200:0:0:Transform:0".to_owned(),
+                "spawn:1:201:Some(\"Weapon\"):Some(200)".to_owned(),
+                "attach:201:1:0:MeshRenderer:2".to_owned(),
             ]
         );
         assert_eq!(report.render_handles, 2);
