@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        70
+        72
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4825,6 +4825,7 @@ fn parse_model_obj_source(
                 parse_obj_on_off_attribute(parts, directive_key.as_str(), line_number)?
             }
             "lod" => parse_obj_lod_attribute(parts, line_number)?,
+            "mg" => parse_obj_merging_group_attribute(parts, line_number)?,
             _ => {
                 return Err(AssetError::Import {
                     message: format!("unknown OBJ directive `{directive}` on line {line_number}"),
@@ -5190,6 +5191,58 @@ fn parse_obj_lod_attribute<'a>(
     if parts.next().is_some() {
         return Err(AssetError::Import {
             message: format!("too many OBJ lod values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_merging_group_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let group = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ merging group value on line {line_number}"),
+    })?;
+    let normalized_group = group.to_ascii_lowercase();
+    if normalized_group == "off" || normalized_group == "0" {
+        if parts.next().is_some() {
+            return Err(AssetError::Import {
+                message: format!("too many OBJ merging group values on line {line_number}"),
+            });
+        }
+        return Ok(());
+    }
+    let group_number = group.parse::<i64>().map_err(|error| AssetError::Import {
+        message: format!(
+            "invalid OBJ merging group number `{group}` on line {line_number}: {error}"
+        ),
+    })?;
+    if group_number <= 0 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ merging group number on line {line_number} must be positive or `off`"
+            ),
+        });
+    }
+    let resolution = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ merging group resolution on line {line_number}"),
+    })?;
+    let resolution = resolution
+        .parse::<f32>()
+        .map_err(|error| AssetError::Import {
+            message: format!("invalid OBJ merging group resolution on line {line_number}: {error}"),
+        })?;
+    if !resolution.is_finite() || resolution < 0.0 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ merging group resolution must be finite and non-negative on line {line_number}"
+            ),
+        });
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ merging group values on line {line_number}"),
         });
     }
     Ok(())
@@ -7102,6 +7155,8 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         "map_pr" | "map_ns" => Some("roughness"),
         "map_ni" => Some("index_of_refraction"),
         "map_pm" => Some("metallic"),
+        "map_rma" => Some("rma"),
+        "map_orm" => Some("orm"),
         "map_ps" | "map_sheen" => Some("sheen"),
         "map_pc" | "map_clearcoat" => Some("clearcoat"),
         "map_pcr" | "map_clearcoat_roughness" => Some("clearcoat_roughness"),
