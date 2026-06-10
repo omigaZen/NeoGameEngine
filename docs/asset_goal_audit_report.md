@@ -473,6 +473,7 @@ Result: 3 smoke integration tests passed, covering non-owning renderer/audio/phy
 
 - Streaming region preload progress and ready state from real asset states.
 - Region priority controlling load scheduler order.
+- Runtime updates to a streaming region's priority, including immediate queued-request reprioritization.
 - Resident regions protecting assets from region unload until residency is cleared.
 - Shared assets staying resident until every resident region releases them.
 - Removing resident regions decrementing shared residency counts.
