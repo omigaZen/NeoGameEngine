@@ -211,6 +211,70 @@ fn shared_streaming_asset_stays_resident_until_all_regions_release_it() {
 }
 
 #[test]
+fn streaming_region_can_add_and_remove_assets() {
+    let mut server = server_with_textures(&[
+        ("textures/base.texture", 10),
+        ("textures/extra.texture", 11),
+    ]);
+    let region_path = AssetPath::parse("textures/base.texture");
+    let extra_path = AssetPath::parse("textures/extra.texture");
+    let region = server
+        .register_streaming_region_paths("dynamic", LoadPriority::Normal, &[region_path.clone()])
+        .unwrap();
+    let base_id = server.id_from_path(&region_path).unwrap();
+    let region_data = server.streaming_region(region).unwrap();
+    assert_eq!(region_data.assets.len(), 1);
+
+    assert!(server
+        .add_asset_to_streaming_region(region, &extra_path)
+        .unwrap());
+    let extra_id = server.id_from_path(&extra_path).unwrap();
+    assert_eq!(server.streaming_region(region).unwrap().assets.len(), 2);
+    assert!(!server
+        .add_asset_to_streaming_region(region, &extra_path)
+        .unwrap());
+
+    server.preload_streaming_region(region).unwrap();
+    server.update_loading();
+    finish_uploads(&mut server);
+    assert_eq!(server.state_by_id(extra_id), AssetLoadState::Ready);
+    assert_eq!(server.state_by_id(base_id), AssetLoadState::Ready);
+
+    server.set_streaming_region_resident(region, true).unwrap();
+    assert!(server.is_asset_resident(base_id));
+    assert!(server.is_asset_resident(extra_id));
+
+    assert!(server.remove_streaming_region_asset(region, extra_id).unwrap());
+    assert_eq!(server.streaming_region(region).unwrap().assets.len(), 1);
+    assert!(!server.is_asset_resident(extra_id));
+
+    server.set_streaming_region_resident(region, false).unwrap();
+    assert_eq!(server.unload_streaming_region(region).unwrap(), 1);
+    assert_eq!(server.state_by_id(base_id), AssetLoadState::Unloaded);
+    assert_eq!(
+        server
+            .remove_streaming_region_asset(region, extra_id)
+            .unwrap(),
+        false
+    );
+}
+
+#[test]
+fn streaming_region_add_asset_rejects_unknown_extension() {
+    let mut server = server_with_textures(&[]);
+    let region = server
+        .register_streaming_region_paths("dynamic", LoadPriority::Normal, &[])
+        .unwrap();
+    let err = server
+        .add_asset_to_streaming_region(region, &AssetPath::parse("audio/unknown.bin"))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        AssetError::LoaderNotFound { extension: ref ext } if ext == "bin"
+    ));
+}
+
+#[test]
 fn removing_resident_streaming_regions_releases_shared_residency_counts() {
     let mut server = server_with_textures(&[("textures/shared.texture", 5)]);
     let path = AssetPath::parse("textures/shared.texture");

@@ -1129,6 +1129,43 @@ impl AssetServer {
         Ok(self.register_streaming_region(name, priority, handles))
     }
 
+    #[cfg(feature = "streaming")]
+    pub fn add_asset_to_streaming_region(
+        &mut self,
+        id: StreamingRegionId,
+        path: &AssetPath,
+    ) -> AssetResult<bool> {
+        let extension = path.extension().unwrap_or("");
+        let asset_type = self
+            .loaders
+            .asset_type_for_extension(extension)
+            .ok_or_else(|| AssetError::LoaderNotFound {
+                extension: extension.to_owned(),
+            })?;
+        let asset_id = self.registry.get_or_create(path.clone(), asset_type);
+        let handle = self.make_untyped_handle(asset_id, asset_type, HandleStrength::Weak);
+
+        let needs_residency = {
+            let region = self
+                .streaming_regions
+                .get_mut(&id)
+                .ok_or_else(|| streaming_region_not_found(id))?;
+            if region
+                .assets
+                .iter()
+                .any(|handle| handle.id() == asset_id)
+            {
+                return Ok(false);
+            }
+            region.assets.push(handle);
+            region.resident
+        };
+        if needs_residency {
+            self.retain_streaming_residency([asset_id]);
+        }
+        Ok(true)
+    }
+
     #[cfg(not(feature = "streaming"))]
     pub fn register_streaming_region_paths(
         &mut self,
@@ -1222,6 +1259,35 @@ impl AssetServer {
             self.release_streaming_residency(region.assets.iter().map(|handle| handle.id()));
         }
         Ok(region)
+    }
+
+    #[cfg(feature = "streaming")]
+    pub fn remove_streaming_region_asset(
+        &mut self,
+        region_id: StreamingRegionId,
+        asset_id: AssetId,
+    ) -> AssetResult<bool> {
+        let mut removed = false;
+        let mut should_release = false;
+        {
+            let region = self
+                .streaming_regions
+                .get_mut(&region_id)
+                .ok_or_else(|| streaming_region_not_found(region_id))?;
+            let position = region
+                .assets
+                .iter()
+                .position(|handle| handle.id() == asset_id);
+            if let Some(position) = position {
+                region.assets.swap_remove(position);
+                removed = true;
+                should_release = region.resident;
+            }
+        }
+        if removed && should_release {
+            self.release_streaming_residency([asset_id]);
+        }
+        Ok(removed)
     }
 
     #[cfg(not(feature = "streaming"))]
