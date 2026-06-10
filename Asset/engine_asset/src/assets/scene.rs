@@ -63,6 +63,22 @@ pub struct SerializedComponent {
     pub data: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SerializedComponentAssetField {
+    pub component_type: &'static str,
+    pub field: &'static str,
+    pub asset_type: AssetTypeId,
+    pub asset_type_name: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SerializedComponentAssetReference {
+    pub component_type: String,
+    pub field: String,
+    pub path: AssetPath,
+    pub asset_type: AssetTypeId,
+}
+
 pub struct SceneLoader;
 
 impl SceneLoader {
@@ -264,13 +280,37 @@ pub(crate) fn serialized_component_asset_dependencies(
     line_number: usize,
     asset_kind: &str,
 ) -> Result<Vec<(AssetPath, AssetTypeId)>, AssetError> {
+    let references =
+        serialized_component_asset_references_with_context(component, line_number, asset_kind)?;
+    let mut dependencies = Vec::new();
+    for reference in references {
+        if !dependencies.iter().any(|(existing_path, existing_type)| {
+            existing_path == &reference.path && *existing_type == reference.asset_type
+        }) {
+            dependencies.push((reference.path, reference.asset_type));
+        }
+    }
+    Ok(dependencies)
+}
+
+pub fn serialized_component_asset_references(
+    component: &SerializedComponent,
+) -> Result<Vec<SerializedComponentAssetReference>, AssetError> {
+    serialized_component_asset_references_with_context(component, 1, "serialized component")
+}
+
+fn serialized_component_asset_references_with_context(
+    component: &SerializedComponent,
+    line_number: usize,
+    asset_kind: &str,
+) -> Result<Vec<SerializedComponentAssetReference>, AssetError> {
     let data = std::str::from_utf8(&component.data).map_err(|error| AssetError::Decode {
         message: format!(
             "{asset_kind} component `{}` data must be UTF-8 on line {line_number}: {error}",
             component.type_name
         ),
     })?;
-    let mut dependencies = Vec::new();
+    let mut references = Vec::new();
     for field in data
         .split(';')
         .map(str::trim)
@@ -318,16 +358,17 @@ pub(crate) fn serialized_component_asset_dependencies(
                 ),
             });
         }
-        if !dependencies.iter().any(|(existing_path, existing_type)| {
-            existing_path == &path && *existing_type == asset_type
-        }) {
-            dependencies.push((path, asset_type));
-        }
+        references.push(SerializedComponentAssetReference {
+            component_type: component.type_name.clone(),
+            field: key.to_owned(),
+            path,
+            asset_type,
+        });
     }
-    Ok(dependencies)
+    Ok(references)
 }
 
-pub(crate) fn serialized_component_type_has_asset_fields(type_name: &str) -> bool {
+pub fn serialized_component_type_has_asset_fields(type_name: &str) -> bool {
     matches!(
         type_name.to_ascii_lowercase().as_str(),
         "meshrenderer"
@@ -339,10 +380,7 @@ pub(crate) fn serialized_component_type_has_asset_fields(type_name: &str) -> boo
     )
 }
 
-pub(crate) fn serialized_component_asset_field_type(
-    type_name: &str,
-    field: &str,
-) -> Option<AssetTypeId> {
+pub fn serialized_component_asset_field_type(type_name: &str, field: &str) -> Option<AssetTypeId> {
     match (
         type_name.to_ascii_lowercase().as_str(),
         field.to_ascii_lowercase().as_str(),
@@ -358,6 +396,39 @@ pub(crate) fn serialized_component_asset_field_type(
         ("prefabinstance", "prefab") => Some(Prefab::TYPE_ID),
         _ => None,
     }
+}
+
+pub fn serialized_component_asset_fields(type_name: &str) -> Vec<SerializedComponentAssetField> {
+    let fields: &[(&str, &str, AssetTypeId)] = match type_name.to_ascii_lowercase().as_str() {
+        "meshrenderer" => &[
+            ("MeshRenderer", "mesh", Mesh::TYPE_ID),
+            ("MeshRenderer", "material", Material::TYPE_ID),
+        ],
+        "skinnedmeshrenderer" => &[
+            ("SkinnedMeshRenderer", "mesh", Mesh::TYPE_ID),
+            ("SkinnedMeshRenderer", "skeleton", Skeleton::TYPE_ID),
+            ("SkinnedMeshRenderer", "material", Material::TYPE_ID),
+        ],
+        "audiosource" => &[("AudioSource", "clip", AudioClip::TYPE_ID)],
+        "physicscollider" => &[
+            ("PhysicsCollider", "mesh", PhysicsMesh::TYPE_ID),
+            ("PhysicsCollider", "physics_mesh", PhysicsMesh::TYPE_ID),
+        ],
+        "sceneinstance" => &[("SceneInstance", "scene", SceneAsset::TYPE_ID)],
+        "prefabinstance" => &[("PrefabInstance", "prefab", Prefab::TYPE_ID)],
+        _ => &[],
+    };
+    fields
+        .iter()
+        .map(
+            |(component_type, field, asset_type)| SerializedComponentAssetField {
+                component_type,
+                field,
+                asset_type: *asset_type,
+                asset_type_name: asset_type_name(*asset_type),
+            },
+        )
+        .collect()
 }
 
 fn add_serialized_dependency(
