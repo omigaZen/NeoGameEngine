@@ -211,6 +211,117 @@ fn scene_instance_component_reports_instantiation_readiness_without_mutating_lif
 }
 
 #[test]
+fn scene_instance_component_can_instantiate_directly_via_sink() {
+    let scene_id = AssetId::new();
+    let scene_handle = Handle::<SceneAsset>::strong(scene_id);
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.register_asset_type::<SceneAsset>();
+    server.storage_mut::<SceneAsset>().unwrap().insert(
+        scene_id,
+        SceneAsset {
+            name: "level".to_owned(),
+            entities: vec![
+                SerializedEntity {
+                    name: Some("Root".to_owned()),
+                    parent: None,
+                    components: vec![SerializedComponent {
+                        type_name: "Transform".to_owned(),
+                        data: b"translation=0,0,0".to_vec(),
+                    }],
+                },
+                SerializedEntity {
+                    name: Some("Hero".to_owned()),
+                    parent: Some(0),
+                    components: vec![SerializedComponent {
+                        type_name: "MeshRenderer".to_owned(),
+                        data: b"mesh=meshes/tri.mesh".to_vec(),
+                    }],
+                },
+            ],
+            dependencies: Vec::new(),
+        },
+    );
+
+    let ready_component = SceneInstanceComponent {
+        scene: scene_handle.clone(),
+        loaded: false,
+    };
+    let mut sink = RecordingInstantiationSink::default();
+    assert!(ready_component.instantiate(&server, &mut sink));
+    assert_eq!(
+        sink.events,
+        vec![
+            "spawn:0:Some(\"Root\"):None".to_owned(),
+            "attach:0:Transform:translation=0,0,0".to_owned(),
+            "spawn:1:Some(\"Hero\"):Some(0)".to_owned(),
+            "attach:1:MeshRenderer:mesh=meshes/tri.mesh".to_owned(),
+        ]
+    );
+
+    let pending_component = SceneInstanceComponent {
+        scene: scene_handle,
+        loaded: true,
+    };
+    let mut second_sink = RecordingInstantiationSink::default();
+    assert!(!pending_component.instantiate(&server, &mut second_sink));
+    assert!(second_sink.events.is_empty());
+}
+
+#[test]
+fn prefab_instance_component_can_instantiate_directly_via_sink() {
+    let prefab_id = AssetId::new();
+    let prefab_handle = Handle::<Prefab>::strong(prefab_id);
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.register_asset_type::<Prefab>();
+    server.storage_mut::<Prefab>().unwrap().insert(
+        prefab_id,
+        Prefab {
+            root: SerializedEntity {
+                name: Some("Hero".to_owned()),
+                parent: None,
+                components: vec![SerializedComponent {
+                    type_name: "Transform".to_owned(),
+                    data: b"translation=0,0,0".to_vec(),
+                }],
+            },
+            children: vec![SerializedEntity {
+                name: Some("Weapon".to_owned()),
+                parent: Some(0),
+                components: vec![SerializedComponent {
+                    type_name: "MeshRenderer".to_owned(),
+                    data: b"mesh=meshes/weapon.mesh".to_vec(),
+                }],
+            }],
+            dependencies: Vec::new(),
+        },
+    );
+
+    let ready_component = PrefabInstanceComponent {
+        prefab: prefab_handle.clone(),
+        loaded: false,
+    };
+    let mut sink = RecordingInstantiationSink::default();
+    assert!(ready_component.instantiate(&server, &mut sink));
+    assert_eq!(
+        sink.events,
+        vec![
+            "spawn:0:Some(\"Hero\"):None".to_owned(),
+            "attach:0:Transform:translation=0,0,0".to_owned(),
+            "spawn:1:Some(\"Weapon\"):Some(0)".to_owned(),
+            "attach:1:MeshRenderer:mesh=meshes/weapon.mesh".to_owned(),
+        ]
+    );
+
+    let pending_component = PrefabInstanceComponent {
+        prefab: prefab_handle,
+        loaded: true,
+    };
+    let mut second_sink = RecordingInstantiationSink::default();
+    assert!(!pending_component.instantiate(&server, &mut second_sink));
+    assert!(second_sink.events.is_empty());
+}
+
+#[test]
 fn prefab_instance_component_exports_stable_spawn_and_attach_commands() {
     let prefab_id = AssetId::new();
     let dependency_id = AssetId::new();

@@ -102,6 +102,18 @@ impl SceneInstanceComponent {
         Some(SceneInstantiationPlan::from_scene(self.scene.id(), scene))
     }
 
+    pub fn instantiate(&self, assets: &AssetServer, sink: &mut impl InstantiationSink) -> bool {
+        if !self.can_instantiate(assets) {
+            return false;
+        }
+        let Some(scene_asset) = assets.get(&self.scene) else {
+            return false;
+        };
+        let plan = SceneInstantiationPlan::from_scene(self.scene.id(), scene_asset);
+        plan.apply(scene_asset, sink);
+        true
+    }
+
     pub fn instantiation_commands(
         &self,
         assets: &AssetServer,
@@ -242,6 +254,18 @@ impl PrefabInstanceComponent {
             self.prefab.id(),
             prefab,
         ))
+    }
+
+    pub fn instantiate(&self, assets: &AssetServer, sink: &mut impl InstantiationSink) -> bool {
+        if !self.can_instantiate(assets) {
+            return false;
+        }
+        let Some(prefab_asset) = assets.get(&self.prefab) else {
+            return false;
+        };
+        let plan = PrefabInstantiationPlan::from_prefab(self.prefab.id(), prefab_asset);
+        plan.apply(prefab_asset, sink);
+        true
     }
 
     pub fn instantiation_commands(

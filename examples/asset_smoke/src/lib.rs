@@ -158,14 +158,18 @@ pub fn run_smoke() -> SmokeReport {
         .instantiation_commands(&assets)
         .map(|commands| commands.len())
         .unwrap_or_default();
-    if let Some(plan) = scene.instantiation_plan(&assets) {
-        let scene_asset = assets.get(&scene.scene).unwrap();
-        plan.apply(scene_asset, &mut scene_sink);
+    assert!(scene.instantiate(&assets, &mut scene_sink));
+    assert!(prefab.instantiate(&assets, &mut prefab_sink));
+    assert!(!SceneInstanceComponent {
+        scene: scene.scene.clone(),
+        loaded: true,
     }
-    if let Some(plan) = prefab.instantiation_plan(&assets) {
-        let prefab_asset = assets.get(&prefab.prefab).unwrap();
-        plan.apply(prefab_asset, &mut prefab_sink);
+    .instantiate(&assets, &mut scene_sink));
+    assert!(!PrefabInstanceComponent {
+        prefab: prefab.prefab.clone(),
+        loaded: true,
     }
+    .instantiate(&assets, &mut prefab_sink));
 
     let group_progress = assets.group_progress(&group);
     SmokeReport {
@@ -298,6 +302,10 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         .instantiation_commands(&assets)
         .map(|commands| commands.len())
         .unwrap_or_default();
+    let mut scene_sink = RecordingInstantiationSink::default();
+    let mut prefab_sink = RecordingInstantiationSink::default();
+    assert!(scene_instance.instantiate(&assets, &mut scene_sink));
+    assert!(prefab_instance.instantiate(&assets, &mut prefab_sink));
 
     let report = EditorSmokeReport {
         scanned_sources,
