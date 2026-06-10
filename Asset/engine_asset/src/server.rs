@@ -1150,11 +1150,7 @@ impl AssetServer {
                 .streaming_regions
                 .get_mut(&id)
                 .ok_or_else(|| streaming_region_not_found(id))?;
-            if region
-                .assets
-                .iter()
-                .any(|handle| handle.id() == asset_id)
-            {
+            if region.assets.iter().any(|handle| handle.id() == asset_id) {
                 return Ok(false);
             }
             region.assets.push(handle);

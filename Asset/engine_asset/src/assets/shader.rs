@@ -751,12 +751,12 @@ fn shader_source_has_entry_definition(source: &str, entry: &str) -> bool {
         .filter(|token| !token.is_empty())
         .peekable();
     while let Some(token) = tokens.next() {
-        if token != "fn" {
+        if !token.eq_ignore_ascii_case("fn") && !token.eq_ignore_ascii_case("void") {
             continue;
         }
         if matches!(
             tokens.peek(),
-            Some(token) if *token == entry
+            Some(token) if token.eq_ignore_ascii_case(entry)
         ) {
             return true;
         }

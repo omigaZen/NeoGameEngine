@@ -1378,7 +1378,8 @@ fn invalid_ogg_audio_payload_fails_with_decode_error() {
 
 #[test]
 fn invalid_ogg_audio_codec_fails_with_decode_error() {
-    let io = MemoryAssetIo::new().with_file("audio/unknown_codec.ogg", ogg_unknown_codec_audio_bytes());
+    let io =
+        MemoryAssetIo::new().with_file("audio/unknown_codec.ogg", ogg_unknown_codec_audio_bytes());
     let mut server = server_with_io(io);
 
     let audio: Handle<AudioClip> = server.load("audio/unknown_codec.ogg");

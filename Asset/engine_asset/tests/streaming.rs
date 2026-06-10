@@ -181,7 +181,9 @@ fn streaming_region_priority_can_be_updated_before_preload() {
         .unwrap();
 
     assert_eq!(
-        server.set_streaming_region_priority(low, LoadPriority::Immediate).unwrap(),
+        server
+            .set_streaming_region_priority(low, LoadPriority::Immediate)
+            .unwrap(),
         LoadPriority::Background
     );
     assert_eq!(
@@ -231,7 +233,9 @@ fn streaming_region_priority_can_be_updated_while_requests_are_queued() {
     server.preload_streaming_region(low).unwrap();
     server.preload_streaming_region(high).unwrap();
     assert_eq!(
-        server.set_streaming_region_priority(low, LoadPriority::Immediate).unwrap(),
+        server
+            .set_streaming_region_priority(low, LoadPriority::Immediate)
+            .unwrap(),
         LoadPriority::Background
     );
     assert_eq!(
@@ -340,7 +344,9 @@ fn streaming_region_can_add_and_remove_assets() {
     assert!(server.is_asset_resident(base_id));
     assert!(server.is_asset_resident(extra_id));
 
-    assert!(server.remove_streaming_region_asset(region, extra_id).unwrap());
+    assert!(server
+        .remove_streaming_region_asset(region, extra_id)
+        .unwrap());
     assert_eq!(server.streaming_region(region).unwrap().assets.len(), 1);
     assert!(!server.is_asset_resident(extra_id));
 
