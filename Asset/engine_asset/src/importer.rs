@@ -2779,7 +2779,7 @@ impl AssetImporter for MaterialImporter {
     }
 
     fn version(&self) -> u32 {
-        4
+        5
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        81
+        82
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -7627,6 +7627,7 @@ fn parse_obj_material_texture_source_channel(
         "r" | "red" => Ok("red".to_owned()),
         "g" | "green" => Ok("green".to_owned()),
         "b" | "blue" => Ok("blue".to_owned()),
+        "a" | "alpha" => Ok("alpha".to_owned()),
         "m" | "matte" => Ok("matte".to_owned()),
         "l" | "luminance" => Ok("luminance".to_owned()),
         "z" | "depth" => Ok("depth".to_owned()),

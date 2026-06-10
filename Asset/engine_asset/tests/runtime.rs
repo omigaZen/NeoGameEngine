@@ -407,8 +407,40 @@ fn invalid_material_texture_transform_property_fails_with_decode_error_and_event
 #[test]
 fn invalid_material_texture_source_channel_fails_with_decode_error_and_event() {
     assert_material_decode_error(
-        "name=broken\ntexture.albedo.source_channel=alpha\n",
-        "invalid material texture source channel `alpha` on line 2",
+        "name=broken\ntexture.albedo.source_channel=cyan\n",
+        "invalid material texture source channel `cyan` on line 2",
+    );
+}
+
+#[test]
+fn material_load_accepts_alpha_texture_source_channel() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 129));
+    io.insert(
+        "materials/alpha_channel.material",
+        b"name=alpha_channel
+texture.albedo.source_channel=alpha
+texture.albedo=textures/albedo.texture
+"
+        .to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let material: Handle<Material> = server.load("materials/alpha_channel.material");
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready(&material) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&material));
+    let loaded = server.get(&material).unwrap();
+    assert_eq!(loaded.textures.len(), 1);
+    assert_eq!(
+        loaded.textures[0].options.source_channel,
+        Some(MaterialTextureChannel::Alpha)
     );
 }
 
