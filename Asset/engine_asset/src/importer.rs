@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        82
+        85
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -7755,19 +7755,28 @@ fn is_obj_material_texture_option_number(value: &str) -> bool {
 #[cfg(feature = "model_importer")]
 fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
     match directive.to_ascii_lowercase().as_str() {
-        "map_kd" => Some("albedo"),
-        "map_ks" => Some("specular"),
+        "map_kd" | "map_diffuse" | "map_albedo" | "map_basecolor" | "map_base_color" => {
+            Some("albedo")
+        }
+        "map_ks" | "map_specular" => Some("specular"),
         "map_ka" | "map_ao" | "map_occlusion" | "map_ambient_occlusion" => Some("occlusion"),
-        "map_ke" => Some("emissive"),
+        "map_ke" | "map_emissive" | "map_emission" => Some("emissive"),
         "map_tf" => Some("transmission_filter"),
-        "map_d" | "map_tr" => Some("alpha"),
-        "map_bump" | "bump" | "norm" | "normal" | "map_kn" | "map_normal" => Some("normal"),
-        "map_pr" | "map_ns" => Some("roughness"),
+        "map_d" | "map_tr" | "map_opacity" | "map_alpha" | "map_transparency" => Some("alpha"),
+        "map_bump" | "bump" | "norm" | "normal" | "map_kn" | "map_normal" | "map_normalgl"
+        | "map_normaldx" => Some("normal"),
+        "map_pr" | "map_ns" | "map_roughness" => Some("roughness"),
         "map_ni" => Some("index_of_refraction"),
-        "map_pm" => Some("metallic"),
+        "map_pm" | "map_metallic" | "map_metalness" => Some("metallic"),
         "map_rma" => Some("rma"),
-        "map_orm" => Some("orm"),
-        "map_mr" | "map_metallicroughness" => Some("metallic_roughness"),
+        "map_orm" | "map_occlusionroughnessmetallic" | "map_occlusion_roughness_metallic" => {
+            Some("orm")
+        }
+        "map_mr"
+        | "map_metallicroughness"
+        | "map_metallic_roughness"
+        | "map_roughnessmetallic"
+        | "map_roughness_metallic" => Some("metallic_roughness"),
         "map_mra" => Some("mra"),
         "map_arm" => Some("arm"),
         "map_ps" | "map_sheen" => Some("sheen"),

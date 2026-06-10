@@ -2138,7 +2138,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2691,7 +2691,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 82);
+    assert_eq!(physics_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2847,7 +2847,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2977,7 +2977,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 82);
+    assert_eq!(physics_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3135,7 +3135,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 82);
+    assert_eq!(material_metadata.importer_version, 85);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3394,7 +3394,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3490,7 +3490,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3608,7 +3608,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3780,7 +3780,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4763,7 +4763,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4771,7 +4771,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 82);
+    assert_eq!(material_metadata.importer_version, 85);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5021,7 +5021,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -6057,6 +6057,123 @@ alpha_mode=blend
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_common_alpha_texture_aliases_to_alpha_mode() {
+    for (directive, stem, texel) in [
+        ("map_opacity", "opacity_alias", 90),
+        ("map_alpha", "alpha_alias", 91),
+        ("map_transparency", "transparency_alias", 92),
+    ] {
+        let config = database_config(&format!("builtin_model_obj_{stem}"));
+        let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
+        let mesh_path = AssetPath::parse(&format!("models/{stem}.Panel.mesh"));
+        let material_path = AssetPath::parse(&format!("models/{stem}.Material_Cutout.material"));
+        let alpha_path = AssetPath::parse(&format!("models/textures/{stem}_alpha.texture"));
+        let material_library = format!("{stem}.mtl");
+        let model_source = format!(
+            "mtllib {material_library}\n\
+o Panel\n\
+v 0 0 0\n\
+v 1 0 0\n\
+v 0 1 0\n\
+usemtl Cutout\n\
+f 1 2 3\n"
+        )
+        .into_bytes();
+        let material_source =
+            format!("newmtl Cutout\n{directive} textures/{stem}_alpha.texture\n").into_bytes();
+        let expected_material = format!(
+            "# mtllib {material_library}\n\
+name=Cutout\n\
+texture.alpha=models/textures/{stem}_alpha.texture\n\
+alpha_mode=blend\n"
+        )
+        .into_bytes();
+        let alpha_source = texture_bytes(1, 1, texel);
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), model_source);
+        io.insert(format!("models/{material_library}"), material_source);
+        io.insert(alpha_path.path(), alpha_source.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let alpha_id = database.import_asset_path(&alpha_path).unwrap();
+        let model_id = database.import_asset_path(&model_path).unwrap();
+        let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        let material_id = material_metadata.id;
+
+        assert_eq!(material_metadata.labels, vec!["Material/Cutout"]);
+        assert_eq!(material_metadata.dependencies, vec![alpha_id]);
+        assert_eq!(
+            fs::read(config.imported_root.join(material_path.path())).unwrap(),
+            expected_material
+        );
+        assert_eq!(
+            database.registry().get(model_id).unwrap().dependencies,
+            vec![alpha_id, mesh_id, material_id]
+        );
+
+        database
+            .cook_asset(alpha_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(mesh_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(material_id, TargetPlatform::Windows)
+            .unwrap();
+        let bundle = database
+            .build_bundle(&AssetDatabaseBundleBuild::new(
+                format!("{stem}_model"),
+                vec![mesh_id, material_id, alpha_id],
+            ))
+            .unwrap();
+        let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+        assert_eq!(
+            reader.manifest().dependencies(mesh_id),
+            Some([material_id].as_slice())
+        );
+        assert_eq!(
+            reader.manifest().dependencies(material_id),
+            Some([alpha_id].as_slice())
+        );
+        assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+        assert_eq!(reader.read_path(&alpha_path).unwrap(), alpha_source);
+
+        let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+        let mut server = AssetServer::new(AssetServerConfig::default());
+        server.set_io(bundle_io);
+        server.register_builtin_loaders();
+        let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+        let group = server.preload_bundle(&mounted);
+        for _ in 0..8 {
+            server.update_loading();
+            finish_uploads(&mut server);
+            if server.group_state(&group) == AssetLoadState::Ready {
+                break;
+            }
+        }
+
+        assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+        assert_eq!(
+            server.dependency_graph().direct_dependencies(material_id),
+            vec![alpha_id]
+        );
+        let material = server.get_by_id::<Material>(material_id).unwrap();
+        assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
+        assert_eq!(material.textures.len(), 1);
+        assert_eq!(material.textures[0].name, "alpha");
+        assert_eq!(material.textures[0].texture.id(), alpha_id);
+    }
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_alpha_source_channel() {
     let config = database_config("builtin_model_obj_alpha_source_channel");
     let model_path = AssetPath::parse("models/alpha_source.obj");
@@ -7048,6 +7165,130 @@ custom.anisotropy_rotation.float=0.1
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_common_pbr_texture_aliases() {
+    for (directive, stem, channel, texel) in [
+        ("map_diffuse", "diffuse_alias", "albedo", 110),
+        ("map_albedo", "albedo_alias", "albedo", 111),
+        ("map_basecolor", "basecolor_alias", "albedo", 112),
+        ("map_base_color", "base_color_alias", "albedo", 113),
+        ("map_specular", "specular_alias", "specular", 114),
+        ("map_emissive", "emissive_alias", "emissive", 115),
+        ("map_emission", "emission_alias", "emissive", 116),
+        ("map_roughness", "roughness_alias", "roughness", 117),
+        ("map_metallic", "metallic_alias", "metallic", 118),
+        ("map_metalness", "metalness_alias", "metallic", 119),
+        ("map_normalgl", "normalgl_alias", "normal", 120),
+        ("map_normaldx", "normaldx_alias", "normal", 121),
+    ] {
+        let config = database_config(&format!("builtin_model_obj_{stem}"));
+        let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
+        let mesh_path = AssetPath::parse(&format!("models/{stem}.Panel.mesh"));
+        let material_path = AssetPath::parse(&format!("models/{stem}.Material_Surface.material"));
+        let texture_path = AssetPath::parse(&format!("models/textures/{stem}.texture"));
+        let material_library = format!("{stem}.mtl");
+        let model_source = format!(
+            "mtllib {material_library}\n\
+o Panel\n\
+v 0 0 0\n\
+v 1 0 0\n\
+v 0 1 0\n\
+usemtl Surface\n\
+f 1 2 3\n"
+        )
+        .into_bytes();
+        let material_source =
+            format!("newmtl Surface\n{directive} textures/{stem}.texture\n").into_bytes();
+        let expected_material = format!(
+            "# mtllib {material_library}\n\
+name=Surface\n\
+texture.{channel}=models/textures/{stem}.texture\n"
+        )
+        .into_bytes();
+        let texture_source = texture_bytes(1, 1, texel);
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), model_source);
+        io.insert(format!("models/{material_library}"), material_source);
+        io.insert(texture_path.path(), texture_source.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let texture_id = database.import_asset_path(&texture_path).unwrap();
+        let model_id = database.import_asset_path(&model_path).unwrap();
+        let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        let material_id = material_metadata.id;
+
+        assert_eq!(material_metadata.labels, vec!["Material/Surface"]);
+        assert_eq!(material_metadata.dependencies, vec![texture_id]);
+        assert_eq!(
+            fs::read(config.imported_root.join(material_path.path())).unwrap(),
+            expected_material
+        );
+        assert_eq!(
+            database.registry().get(model_id).unwrap().dependencies,
+            vec![texture_id, mesh_id, material_id]
+        );
+
+        database
+            .cook_asset(texture_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(mesh_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(material_id, TargetPlatform::Windows)
+            .unwrap();
+        let bundle = database
+            .build_bundle(&AssetDatabaseBundleBuild::new(
+                format!("{stem}_model"),
+                vec![mesh_id, material_id, texture_id],
+            ))
+            .unwrap();
+        let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+        assert_eq!(
+            reader.manifest().dependencies(mesh_id),
+            Some([material_id].as_slice())
+        );
+        assert_eq!(
+            reader.manifest().dependencies(material_id),
+            Some([texture_id].as_slice())
+        );
+        assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+        assert_eq!(reader.read_path(&texture_path).unwrap(), texture_source);
+
+        let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+        let mut server = AssetServer::new(AssetServerConfig::default());
+        server.set_io(bundle_io);
+        server.register_builtin_loaders();
+        let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+        let group = server.preload_bundle(&mounted);
+        for _ in 0..8 {
+            server.update_loading();
+            finish_uploads(&mut server);
+            if server.group_state(&group) == AssetLoadState::Ready {
+                break;
+            }
+        }
+
+        assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+        assert_eq!(
+            server.dependency_graph().direct_dependencies(material_id),
+            vec![texture_id]
+        );
+        let material = server.get_by_id::<Material>(material_id).unwrap();
+        assert_eq!(material.textures.len(), 1);
+        assert_eq!(material.textures[0].name, channel);
+        assert_eq!(material.textures[0].texture.id(), texture_id);
+    }
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_pbr_packed_texture_maps() {
     let config = database_config("builtin_model_obj_pbr_packed_texture_maps");
     let model_path = AssetPath::parse("models/packed_pbr.obj");
@@ -7397,6 +7638,148 @@ texture.arm.source_channel=green
     );
     let long = server.get_by_id::<Material>(material_ids[1]).unwrap();
     assert_eq!(long.textures[1].sampler.address, AddressMode::ClampToEdge);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_packed_pbr_long_name_texture_aliases() {
+    for (directive, stem, channel, texel) in [
+        (
+            "map_occlusionroughnessmetallic",
+            "occlusionroughnessmetallic_alias",
+            "orm",
+            122,
+        ),
+        (
+            "map_occlusion_roughness_metallic",
+            "occlusion_roughness_metallic_alias",
+            "orm",
+            123,
+        ),
+        (
+            "map_metallic_roughness",
+            "metallic_roughness_alias",
+            "metallic_roughness",
+            124,
+        ),
+        (
+            "map_roughnessmetallic",
+            "roughnessmetallic_alias",
+            "metallic_roughness",
+            125,
+        ),
+        (
+            "map_roughness_metallic",
+            "roughness_metallic_alias",
+            "metallic_roughness",
+            126,
+        ),
+    ] {
+        let config = database_config(&format!("builtin_model_obj_{stem}"));
+        let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
+        let mesh_path = AssetPath::parse(&format!("models/{stem}.Panel.mesh"));
+        let material_path = AssetPath::parse(&format!("models/{stem}.Material_Surface.material"));
+        let texture_path = AssetPath::parse(&format!("models/textures/{stem}.texture"));
+        let material_library = format!("{stem}.mtl");
+        let model_source = format!(
+            "mtllib {material_library}\n\
+o Panel\n\
+v 0 0 0\n\
+v 1 0 0\n\
+v 0 1 0\n\
+usemtl Surface\n\
+f 1 2 3\n"
+        )
+        .into_bytes();
+        let material_source =
+            format!("newmtl Surface\n{directive} textures/{stem}.texture\n").into_bytes();
+        let expected_material = format!(
+            "# mtllib {material_library}\n\
+name=Surface\n\
+texture.{channel}=models/textures/{stem}.texture\n"
+        )
+        .into_bytes();
+        let texture_source = texture_bytes(1, 1, texel);
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), model_source);
+        io.insert(format!("models/{material_library}"), material_source);
+        io.insert(texture_path.path(), texture_source.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let texture_id = database.import_asset_path(&texture_path).unwrap();
+        let model_id = database.import_asset_path(&model_path).unwrap();
+        let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        let material_id = material_metadata.id;
+
+        assert_eq!(material_metadata.labels, vec!["Material/Surface"]);
+        assert_eq!(material_metadata.dependencies, vec![texture_id]);
+        assert_eq!(
+            fs::read(config.imported_root.join(material_path.path())).unwrap(),
+            expected_material
+        );
+        assert_eq!(
+            database.registry().get(model_id).unwrap().dependencies,
+            vec![texture_id, mesh_id, material_id]
+        );
+
+        database
+            .cook_asset(texture_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(mesh_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(material_id, TargetPlatform::Windows)
+            .unwrap();
+        let bundle = database
+            .build_bundle(&AssetDatabaseBundleBuild::new(
+                format!("{stem}_model"),
+                vec![mesh_id, material_id, texture_id],
+            ))
+            .unwrap();
+        let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+        assert_eq!(
+            reader.manifest().dependencies(mesh_id),
+            Some([material_id].as_slice())
+        );
+        assert_eq!(
+            reader.manifest().dependencies(material_id),
+            Some([texture_id].as_slice())
+        );
+        assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+        assert_eq!(reader.read_path(&texture_path).unwrap(), texture_source);
+
+        let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+        let mut server = AssetServer::new(AssetServerConfig::default());
+        server.set_io(bundle_io);
+        server.register_builtin_loaders();
+        let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+        let group = server.preload_bundle(&mounted);
+        for _ in 0..8 {
+            server.update_loading();
+            finish_uploads(&mut server);
+            if server.group_state(&group) == AssetLoadState::Ready {
+                break;
+            }
+        }
+
+        assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+        assert_eq!(
+            server.dependency_graph().direct_dependencies(material_id),
+            vec![texture_id]
+        );
+        let material = server.get_by_id::<Material>(material_id).unwrap();
+        assert_eq!(material.textures.len(), 1);
+        assert_eq!(material.textures[0].name, channel);
+        assert_eq!(material.textures[0].texture.id(), texture_id);
+    }
 }
 
 #[test]
@@ -10568,7 +10951,7 @@ i 0 2 3
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Outline"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -10676,8 +11059,8 @@ base_color=0.25,0.5,0.75,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(mesh_metadata.labels, vec!["Continued"]);
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
-    assert_eq!(material_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
+    assert_eq!(material_metadata.importer_version, 85);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert!(material_metadata.dependencies.is_empty());
     assert_eq!(
@@ -10863,7 +11246,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -10957,7 +11340,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Display"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -11060,7 +11443,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["FreeForm"]);
-    assert_eq!(mesh_metadata.importer_version, 82);
+    assert_eq!(mesh_metadata.importer_version, 85);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
