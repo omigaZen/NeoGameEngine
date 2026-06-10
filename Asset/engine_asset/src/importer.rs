@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        85
+        87
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -6544,6 +6544,63 @@ fn obj_relative_source_path(base_path: &AssetPath, normalized: String) -> AssetP
 }
 
 #[cfg(feature = "model_importer")]
+fn obj_material_line_tokens(
+    line: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<Vec<String>, ImportError> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut token_started = false;
+
+    for value in line.chars() {
+        if let Some(quote_value) = quote {
+            if value == quote_value {
+                quote = None;
+            } else {
+                current.push(value);
+            }
+            token_started = true;
+            continue;
+        }
+
+        match value {
+            '"' | '\'' => {
+                quote = Some(value);
+                token_started = true;
+            }
+            value if value.is_whitespace() => {
+                if token_started {
+                    tokens.push(std::mem::take(&mut current));
+                    token_started = false;
+                }
+            }
+            value => {
+                current.push(value);
+                token_started = true;
+            }
+        }
+    }
+
+    if let Some(quote_value) = quote {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` has unterminated {quote_value} quote on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        });
+    }
+
+    if token_started {
+        tokens.push(current);
+    }
+    Ok(tokens)
+}
+
+#[cfg(feature = "model_importer")]
 fn parse_obj_material_library_text(
     source_text: &str,
     library: &ObjMaterialLibraryRef,
@@ -6563,9 +6620,10 @@ fn parse_obj_material_library_text(
         if line.is_empty() {
             continue;
         }
-        let mut parts = line.split_whitespace();
-        let directive = parts.next().unwrap_or("");
+        let tokens = obj_material_line_tokens(line, library, path, line_number)?;
+        let directive = tokens.first().map(String::as_str).unwrap_or("");
         let directive_key = directive.to_ascii_lowercase();
+        let parts = tokens.iter().skip(1).map(String::as_str);
         match directive_key.as_str() {
             "newmtl" => {
                 if let Some((name, line_number)) = current_name.take() {
@@ -6601,7 +6659,7 @@ fn parse_obj_material_library_text(
                 defined_names.push(name.to_owned());
                 current_name = Some((name.to_owned(), line_number));
             }
-            "kd" => {
+            "kd" | "diffuse" | "albedo" | "basecolor" | "base_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let color = parse_obj_material_rgb(parts, directive, library, path, line_number)?;
                 let alpha = current_properties
@@ -6610,7 +6668,7 @@ fn parse_obj_material_library_text(
                     .unwrap_or(1.0);
                 current_properties.base_color = Some([color[0], color[1], color[2], alpha]);
             }
-            "ka" => {
+            "ka" | "ambient" | "ambient_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.ambient_color = Some(parse_obj_material_rgb(
                     parts,
@@ -6620,7 +6678,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "ks" => {
+            "ks" | "specular" | "specular_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.specular_color = Some(parse_obj_material_rgb(
                     parts,
@@ -6630,7 +6688,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "ke" => {
+            "ke" | "emissive" | "emission" | "emissive_color" | "emission_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.emissive = Some(parse_obj_material_rgb(
                     parts,
@@ -6640,14 +6698,14 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "d" => {
+            "d" | "opacity" | "alpha" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let (alpha, halo) =
                     parse_obj_material_dissolve(parts, directive, library, path, line_number)?;
                 set_obj_material_alpha(&mut current_properties, alpha);
                 current_properties.dissolve_halo |= halo;
             }
-            "tr" => {
+            "tr" | "transparency" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let transparency =
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?;
@@ -6667,7 +6725,7 @@ fn parse_obj_material_library_text(
                         .clamp(0.0, 1.0),
                 );
             }
-            "tf" => {
+            "tf" | "transmission_filter" | "transmission_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.transmission_filter = Some(parse_obj_material_rgb(
                     parts,
@@ -6717,7 +6775,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "pm" | "metallic" => {
+            "pm" | "metallic" | "metalness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.metallic = Some(
                     parse_obj_material_scalar(parts, directive, library, path, line_number)?
@@ -6734,7 +6792,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "pc" | "clearcoat" => {
+            "pc" | "clearcoat" | "clear_coat" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.clearcoat = Some(parse_obj_material_scalar(
                     parts,
@@ -6744,7 +6802,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "pcr" | "clearcoat_roughness" => {
+            "pcr" | "clearcoat_roughness" | "clearcoatroughness" | "clear_coat_roughness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.clearcoat_roughness = Some(parse_obj_material_scalar(
                     parts,
@@ -6764,7 +6822,7 @@ fn parse_obj_material_library_text(
                     line_number,
                 )?);
             }
-            "anisor" | "anisotropy_rotation" => {
+            "anisor" | "anisotropy_rotation" | "anisotropyrotation" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.anisotropy_rotation = Some(parse_obj_material_scalar(
                     parts,
