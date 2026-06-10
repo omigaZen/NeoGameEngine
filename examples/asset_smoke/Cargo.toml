@@ -5,4 +5,7 @@ edition = "2021"
 
 [dependencies]
 engine_asset = { path = "../../Asset/engine_asset" }
+engine_graphics = { path = "../../Graphics/engine_graphics" }
 engine_physics = { path = "../../Physics/engine_physics", default-features = false }
+engine_render = { path = "../../Render/engine_render" }
+engine_renderer = { path = "../../Render/engine_renderer" }

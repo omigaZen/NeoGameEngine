@@ -118,7 +118,10 @@ name = "asset_smoke"
 version = "0.1.0"
 dependencies = [
  "engine_asset",
+ "engine_graphics",
  "engine_physics",
+ "engine_render",
+ "engine_renderer",
 ]
 
 [[package]]

@@ -4535,6 +4535,19 @@ mesh 至少一个 triangle，以及索引不能越过顶点数量；无效输入
 mesh 和 `ColliderDesc::trimesh`，并用 ray query 验证物理系统能消费 asset 数据。这个桥接发生在
 示例/宿主层，`engine_asset` 仍只负责稳定 id、handle、加载状态、依赖和资源生命周期。
 
+同一个 smoke 也会把 ready 的 `Handle<Mesh>`、`Handle<Material>` 和 material 依赖的
+`Handle<Texture>` 通过 `AssetServer::get` 读取为 CPU asset 数据，转换成
+`engine_render::Mesh`、`engine_render::Texture` 和 `engine_render::Material`，加入
+`engine_render::RenderScene` 并生成 `RenderQueue`。测试断言 scene mesh/texture/material/instance
+计数、queue item/batch/draw-call 计数，以及转换后的 vertex/index/texture pixel 数量，证明 renderer
+消费层可以从 asset handles 构建渲染队列而不接管 asset 生命周期。
+
+`examples/asset_smoke` 还会把同一组 ready asset 转换为 `engine_renderer` facade 的 headless
+resources：通过 `Renderer::new_headless` 创建 `MeshDesc`、`TextureDesc` 和
+`StandardMaterialDesc`，再验证 renderer `resource_status`、`mesh_info`、`texture_info` 和
+`memory_stats`。这覆盖了 renderer backend-facing resource lifecycle 的 smoke 路径；asset identity、
+handle 强弱引用、reload/GC 仍由 `engine_asset` 负责，renderer 只持有自己的下游资源句柄。
+
 ---
 
 ## 25. ECS 集成

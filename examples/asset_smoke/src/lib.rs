@@ -9,6 +9,22 @@ use engine_physics::prelude::{
     BodyDesc, ColliderDesc, PhysicsConfig, PhysicsWorld, QueryFilter, Ray, TriMeshDesc,
     Vec3 as PhysicsVec3,
 };
+use engine_render::{
+    ColoredVertex as RenderColoredVertex, Material as RenderMaterial, Mesh as RenderMesh,
+    OrthographicCamera, RenderQueue, RenderScene, Texture as RenderTexture, TextureSize,
+    Transform as RenderTransform,
+};
+use engine_renderer::prelude::{
+    AlphaMode as RendererAlphaMode, Bounds3 as RendererBounds3, IndexData as RendererIndexData,
+    MaterialDomain as RendererMaterialDomain, MeshDesc as RendererMeshDesc,
+    MeshFlags as RendererMeshFlags, MeshUsage as RendererMeshUsage, Renderer as HeadlessRenderer,
+    RendererConfig, ResourceStatus as RendererResourceStatus,
+    StandardMaterialDesc as RendererStandardMaterialDesc, TextureDesc as RendererTextureDesc,
+    TextureDimension as RendererTextureDimension, TextureFormat as RendererTextureFormat,
+    TextureInitialData as RendererTextureInitialData, TextureUsage as RendererTextureUsage,
+    Vec3 as RendererVec3, VertexAttribute, VertexData as RendererVertexData, VertexFormat,
+    VertexLayout, VertexSemantic, VertexStepMode, VertexStreamLayout,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmokeReport {
@@ -22,6 +38,25 @@ pub struct SmokeReport {
     pub group_total_assets: usize,
     pub group_ready_assets: usize,
     pub material_dependencies: usize,
+    pub render_scene_meshes: usize,
+    pub render_scene_textures: usize,
+    pub render_scene_materials: usize,
+    pub render_scene_instances: usize,
+    pub render_queue_items: usize,
+    pub render_queue_batches: usize,
+    pub render_queue_draw_calls: usize,
+    pub render_mesh_vertices: usize,
+    pub render_mesh_indices: usize,
+    pub render_texture_pixels: usize,
+    pub render_material_textured: bool,
+    pub renderer_resource_mesh_ready: bool,
+    pub renderer_resource_texture_ready: bool,
+    pub renderer_resource_material_ready: bool,
+    pub renderer_resource_resident_resources: usize,
+    pub renderer_resource_resident_bytes: u64,
+    pub renderer_resource_mesh_vertices: usize,
+    pub renderer_resource_mesh_indices: u32,
+    pub renderer_resource_texture_bytes: u64,
     pub physics_world_mesh_ready: bool,
     pub physics_world_collider_ready: bool,
     pub physics_world_ray_hit: bool,
@@ -211,6 +246,8 @@ pub fn run_smoke() -> SmokeReport {
         .is_none());
 
     let physics_bridge = drive_physics_world_from_asset(&assets, &physics);
+    let render_bridge = drive_render_scene_from_assets(&assets, &renderer);
+    let renderer_resource_bridge = drive_headless_renderer_from_assets(&assets, &renderer);
     let group_progress = assets.group_progress(&group);
     SmokeReport {
         render_ready: renderer.is_ready(&assets),
@@ -226,6 +263,25 @@ pub fn run_smoke() -> SmokeReport {
             .dependency_graph()
             .direct_dependencies(renderer.material.id())
             .len(),
+        render_scene_meshes: render_bridge.scene_meshes,
+        render_scene_textures: render_bridge.scene_textures,
+        render_scene_materials: render_bridge.scene_materials,
+        render_scene_instances: render_bridge.scene_instances,
+        render_queue_items: render_bridge.queue_items,
+        render_queue_batches: render_bridge.queue_batches,
+        render_queue_draw_calls: render_bridge.queue_draw_calls,
+        render_mesh_vertices: render_bridge.mesh_vertices,
+        render_mesh_indices: render_bridge.mesh_indices,
+        render_texture_pixels: render_bridge.texture_pixels,
+        render_material_textured: render_bridge.material_textured,
+        renderer_resource_mesh_ready: renderer_resource_bridge.mesh_ready,
+        renderer_resource_texture_ready: renderer_resource_bridge.texture_ready,
+        renderer_resource_material_ready: renderer_resource_bridge.material_ready,
+        renderer_resource_resident_resources: renderer_resource_bridge.resident_resources,
+        renderer_resource_resident_bytes: renderer_resource_bridge.resident_bytes,
+        renderer_resource_mesh_vertices: renderer_resource_bridge.mesh_vertices,
+        renderer_resource_mesh_indices: renderer_resource_bridge.mesh_indices,
+        renderer_resource_texture_bytes: renderer_resource_bridge.texture_bytes,
         physics_world_mesh_ready: physics_bridge.mesh_ready,
         physics_world_collider_ready: physics_bridge.collider_ready,
         physics_world_ray_hit: physics_bridge.ray_hit,
@@ -553,6 +609,296 @@ fn physics_mesh_bytes() -> Vec<u8> {
     b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
 }
 
+struct RenderBridgeReport {
+    scene_meshes: usize,
+    scene_textures: usize,
+    scene_materials: usize,
+    scene_instances: usize,
+    queue_items: usize,
+    queue_batches: usize,
+    queue_draw_calls: usize,
+    mesh_vertices: usize,
+    mesh_indices: usize,
+    texture_pixels: usize,
+    material_textured: bool,
+}
+
+fn drive_render_scene_from_assets(
+    assets: &AssetServer,
+    renderer: &MeshRendererComponent,
+) -> RenderBridgeReport {
+    let mesh = assets
+        .get(&renderer.mesh)
+        .expect("smoke mesh should be ready before render bridge");
+    let material = assets
+        .get(&renderer.material)
+        .expect("smoke material should be ready before render bridge");
+    let texture_binding = material
+        .textures
+        .iter()
+        .find(|binding| binding.name == "albedo" || binding.name == "base_color")
+        .or_else(|| material.textures.first())
+        .expect("smoke material should expose a texture binding");
+    let texture = assets
+        .get(&texture_binding.texture)
+        .expect("smoke material texture should be ready before render bridge");
+
+    let render_mesh = render_mesh_from_asset(mesh);
+    let mesh_vertices = render_mesh.vertex_count();
+    let mesh_indices = render_mesh.index_count();
+    let render_texture = RenderTexture::rgba8(
+        TextureSize::new(texture.width, texture.height),
+        texture.data.clone(),
+    )
+    .expect("asset texture should convert to engine_render rgba8 texture");
+    let texture_pixels = usize::try_from(texture.width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(texture.height)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .unwrap_or_default();
+
+    let mut scene = RenderScene::new(OrthographicCamera::new_2d(2.0));
+    let mesh_handle = scene.add_mesh(render_mesh);
+    let texture_handle = scene.add_texture(render_texture);
+    let render_material = RenderMaterial::textured(material.properties.base_color, texture_handle);
+    let material_textured = render_material.base_color_texture.is_some();
+    let material_handle = scene.add_material(render_material);
+    scene.add_instance_with_material(mesh_handle, material_handle, RenderTransform::IDENTITY);
+
+    let queue = RenderQueue::from_scene(&scene);
+    let stats = queue.stats();
+    RenderBridgeReport {
+        scene_meshes: scene.mesh_entries().count(),
+        scene_textures: scene.texture_entries().count(),
+        scene_materials: scene.material_entries().count(),
+        scene_instances: scene.instance_count(),
+        queue_items: stats.item_count,
+        queue_batches: stats.batch_count,
+        queue_draw_calls: stats.draw_call_count,
+        mesh_vertices,
+        mesh_indices,
+        texture_pixels,
+        material_textured,
+    }
+}
+
+fn render_mesh_from_asset(mesh: &Mesh) -> RenderMesh {
+    let vertices = mesh
+        .vertices
+        .iter()
+        .enumerate()
+        .map(|(index, position)| {
+            let normal = mesh.normals.get(index).copied().unwrap_or([0.0, 0.0, 1.0]);
+            let uv = mesh.uvs.get(index).copied().unwrap_or([0.0, 0.0]);
+            let uv1 = mesh
+                .uv_sets
+                .first()
+                .and_then(|uvs| uvs.get(index))
+                .copied()
+                .unwrap_or(uv);
+            let tangent = mesh
+                .tangents
+                .get(index)
+                .copied()
+                .unwrap_or([1.0, 0.0, 0.0, 1.0]);
+            RenderColoredVertex::with_normal_uvs_tangent(
+                *position,
+                [1.0, 1.0, 1.0],
+                normal,
+                uv,
+                uv1,
+                tangent,
+            )
+        })
+        .collect::<Vec<_>>();
+    RenderMesh::with_indices(vertices, mesh.indices.clone())
+}
+
+struct HeadlessRendererBridgeReport {
+    mesh_ready: bool,
+    texture_ready: bool,
+    material_ready: bool,
+    resident_resources: usize,
+    resident_bytes: u64,
+    mesh_vertices: usize,
+    mesh_indices: u32,
+    texture_bytes: u64,
+}
+
+fn drive_headless_renderer_from_assets(
+    assets: &AssetServer,
+    renderer: &MeshRendererComponent,
+) -> HeadlessRendererBridgeReport {
+    let mesh = assets
+        .get(&renderer.mesh)
+        .expect("smoke mesh should be ready before renderer resource bridge");
+    let material = assets
+        .get(&renderer.material)
+        .expect("smoke material should be ready before renderer resource bridge");
+    let texture_binding = material
+        .textures
+        .iter()
+        .find(|binding| binding.name == "albedo" || binding.name == "base_color")
+        .or_else(|| material.textures.first())
+        .expect("smoke material should expose a texture binding");
+    let texture = assets
+        .get(&texture_binding.texture)
+        .expect("smoke material texture should be ready before renderer resource bridge");
+
+    let mut renderer = HeadlessRenderer::new_headless(RendererConfig::default());
+    let vertex_bytes = renderer_mesh_vertex_bytes(mesh);
+    let bounds = renderer_mesh_bounds(mesh);
+    let renderer_mesh = renderer
+        .create_mesh(RendererMeshDesc {
+            label: Some("asset_smoke_mesh"),
+            vertex_layout: renderer_mesh_vertex_layout(),
+            vertices: RendererVertexData::Interleaved(&vertex_bytes),
+            indices: Some(RendererIndexData::U32(&mesh.indices)),
+            submeshes: vec![engine_renderer::prelude::SubMeshDesc {
+                index_range: 0..u32::try_from(mesh.indices.len()).unwrap_or_default(),
+                vertex_range: 0..u32::try_from(mesh.vertices.len()).unwrap_or_default(),
+                material_slot: 0,
+                bounds,
+            }],
+            bounds,
+            usage: RendererMeshUsage::STATIC,
+            flags: RendererMeshFlags::default(),
+            skin: None,
+            morph_targets: Vec::new(),
+            meshlets: None,
+        })
+        .expect("asset mesh should create a headless renderer mesh resource");
+    let renderer_texture = renderer
+        .create_texture(RendererTextureDesc {
+            label: Some("asset_smoke_texture"),
+            dimension: RendererTextureDimension::D2,
+            width: texture.width,
+            height: texture.height,
+            depth_or_layers: 1,
+            mip_levels: 1,
+            samples: 1,
+            format: RendererTextureFormat::Rgba8UnormSrgb,
+            usage: RendererTextureUsage::SAMPLED | RendererTextureUsage::COPY_DST,
+            initial_data: Some(RendererTextureInitialData {
+                bytes: &texture.data,
+                bytes_per_row: texture.width.saturating_mul(4),
+                rows_per_image: texture.height,
+            }),
+        })
+        .expect("asset texture should create a headless renderer texture resource");
+    let renderer_material = renderer
+        .create_standard_material(RendererStandardMaterialDesc {
+            label: Some("asset_smoke_material".to_owned()),
+            domain: RendererMaterialDomain::Opaque,
+            base_color: engine_graphics::Color::rgba(
+                f64::from(material.properties.base_color[0]),
+                f64::from(material.properties.base_color[1]),
+                f64::from(material.properties.base_color[2]),
+                f64::from(material.properties.base_color[3]),
+            ),
+            base_color_texture: Some(renderer_texture),
+            normal_texture: None,
+            metallic_roughness_texture: None,
+            occlusion_texture: None,
+            emissive_texture: None,
+            metallic: material.properties.metallic,
+            roughness: material.properties.roughness,
+            emissive: RendererVec3::new(
+                material.properties.emissive[0],
+                material.properties.emissive[1],
+                material.properties.emissive[2],
+            ),
+            alpha_mode: RendererAlphaMode::Opaque,
+            double_sided: material.render_state.double_sided,
+            receive_shadows: true,
+            cast_shadows: true,
+        })
+        .expect("asset material should create a headless renderer material resource");
+
+    let memory = renderer.memory_stats();
+    HeadlessRendererBridgeReport {
+        mesh_ready: renderer.resource_status(renderer_mesh) == Some(RendererResourceStatus::Ready),
+        texture_ready: renderer.resource_status(renderer_texture)
+            == Some(RendererResourceStatus::Ready),
+        material_ready: renderer.resource_status(renderer_material)
+            == Some(RendererResourceStatus::Ready),
+        resident_resources: memory.resident_resources,
+        resident_bytes: memory.resident_bytes,
+        mesh_vertices: mesh.vertices.len(),
+        mesh_indices: renderer
+            .mesh_info(renderer_mesh)
+            .map(|info| info.index_count)
+            .unwrap_or_default(),
+        texture_bytes: renderer
+            .texture_info(renderer_texture)
+            .map(|info| info.subresource_byte_len())
+            .unwrap_or_default(),
+    }
+}
+
+fn renderer_mesh_vertex_layout() -> VertexLayout {
+    VertexLayout {
+        streams: vec![VertexStreamLayout {
+            stride: 32,
+            step: VertexStepMode::Vertex,
+            attributes: vec![
+                VertexAttribute {
+                    semantic: VertexSemantic::Position,
+                    format: VertexFormat::Float32x3,
+                    offset: 0,
+                },
+                VertexAttribute {
+                    semantic: VertexSemantic::Normal,
+                    format: VertexFormat::Float32x3,
+                    offset: 12,
+                },
+                VertexAttribute {
+                    semantic: VertexSemantic::TexCoord(0),
+                    format: VertexFormat::Float32x2,
+                    offset: 24,
+                },
+            ],
+        }],
+    }
+}
+
+fn renderer_mesh_vertex_bytes(mesh: &Mesh) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(mesh.vertices.len() * 32);
+    for (index, position) in mesh.vertices.iter().enumerate() {
+        let normal = mesh.normals.get(index).copied().unwrap_or([0.0, 0.0, 1.0]);
+        let uv = mesh.uvs.get(index).copied().unwrap_or([0.0, 0.0]);
+        for value in *position {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in normal {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in uv {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    bytes
+}
+
+fn renderer_mesh_bounds(mesh: &Mesh) -> RendererBounds3 {
+    let first = mesh.vertices.first().copied().unwrap_or([0.0, 0.0, 0.0]);
+    let mut min = first;
+    let mut max = first;
+    for vertex in mesh.vertices.iter().skip(1) {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(vertex[axis]);
+            max[axis] = max[axis].max(vertex[axis]);
+        }
+    }
+    RendererBounds3::new(
+        RendererVec3::new(min[0], min[1], min[2]),
+        RendererVec3::new(max[0], max[1], max[2]),
+    )
+}
+
 struct PhysicsBridgeReport {
     mesh_ready: bool,
     collider_ready: bool,
@@ -710,6 +1056,25 @@ mod tests {
         assert_eq!(report.group_total_assets, 4);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
+        assert_eq!(report.render_scene_meshes, 1);
+        assert_eq!(report.render_scene_textures, 1);
+        assert_eq!(report.render_scene_materials, 2);
+        assert_eq!(report.render_scene_instances, 1);
+        assert_eq!(report.render_queue_items, 1);
+        assert_eq!(report.render_queue_batches, 1);
+        assert_eq!(report.render_queue_draw_calls, 1);
+        assert_eq!(report.render_mesh_vertices, 3);
+        assert_eq!(report.render_mesh_indices, 3);
+        assert_eq!(report.render_texture_pixels, 4);
+        assert!(report.render_material_textured);
+        assert!(report.renderer_resource_mesh_ready);
+        assert!(report.renderer_resource_texture_ready);
+        assert!(report.renderer_resource_material_ready);
+        assert!(report.renderer_resource_resident_resources >= 3);
+        assert!(report.renderer_resource_resident_bytes >= 60);
+        assert_eq!(report.renderer_resource_mesh_vertices, 3);
+        assert_eq!(report.renderer_resource_mesh_indices, 3);
+        assert_eq!(report.renderer_resource_texture_bytes, 16);
         assert!(report.physics_world_mesh_ready);
         assert!(report.physics_world_collider_ready);
         assert!(report.physics_world_ray_hit);
