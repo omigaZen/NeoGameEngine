@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        66
+        68
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4775,6 +4775,7 @@ fn parse_model_obj_source(
             }
             "v" => vertices.push(parse_obj_vertex(parts, line_number)?),
             "vt" => texture_coords.push(parse_obj_texture_coord(parts, line_number)?),
+            "vp" => parse_obj_parameter_vertex(parts, line_number)?,
             "vn" => normals.push(parse_obj_normal(parts, line_number)?),
             "f" => {
                 let triangles = parse_obj_face(
@@ -5055,6 +5056,39 @@ fn parse_obj_texture_coord<'a>(
         });
     }
     Ok(values)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_parameter_vertex<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut count = 0;
+    for _ in 0..3 {
+        let Some(part) = parts.next() else {
+            break;
+        };
+        let value = part.parse::<f32>().map_err(|error| AssetError::Import {
+            message: format!("invalid OBJ parameter vertex value on line {line_number}: {error}"),
+        })?;
+        if !value.is_finite() {
+            return Err(AssetError::Import {
+                message: format!("OBJ parameter vertex value must be finite on line {line_number}"),
+            });
+        }
+        count += 1;
+    }
+    if count == 0 {
+        return Err(AssetError::Import {
+            message: format!("missing OBJ parameter vertex value on line {line_number}"),
+        });
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ parameter vertex values on line {line_number}"),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(feature = "model_importer")]
@@ -6006,16 +6040,56 @@ fn require_obj_material_current(
 
 #[cfg(feature = "model_importer")]
 fn parse_obj_material_rgb<'a>(
-    mut parts: impl Iterator<Item = &'a str>,
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<[f32; 3], ImportError> {
+    let parts = parts.collect::<Vec<_>>();
+    let Some(first) = parts.first().copied() else {
+        return Err(AssetError::Import {
+            message: format!(
+                "missing OBJ material library `{}` at `{}` {directive} value on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        });
+    };
+    match first.to_ascii_lowercase().as_str() {
+        "xyz" => {
+            let values = parse_obj_material_rgb_components(
+                &parts[1..],
+                directive,
+                library,
+                path,
+                line_number,
+            )?;
+            Ok(obj_material_xyz_to_linear_srgb(values))
+        }
+        "spectral" => Err(AssetError::Import {
+            message: format!(
+                "unsupported OBJ material library `{}` at `{}` {directive} spectral color on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        }),
+        _ => parse_obj_material_rgb_components(&parts, directive, library, path, line_number),
+    }
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_rgb_components(
+    parts: &[&str],
     directive: &str,
     library: &ObjMaterialLibraryRef,
     path: &AssetPath,
     line_number: usize,
 ) -> Result<[f32; 3], ImportError> {
     let mut values = [0.0; 3];
-    for value in &mut values {
+    for (index, value) in values.iter_mut().enumerate() {
         *value = parse_obj_material_f32(
-            parts.next().ok_or_else(|| AssetError::Import {
+            parts.get(index).copied().ok_or_else(|| AssetError::Import {
                 message: format!(
                     "missing OBJ material library `{}` at `{}` {directive} value on line {line_number}",
                     library.name,
@@ -6028,7 +6102,7 @@ fn parse_obj_material_rgb<'a>(
             line_number,
         )?;
     }
-    if parts.next().is_some() {
+    if parts.len() > values.len() {
         return Err(AssetError::Import {
             message: format!(
                 "too many OBJ material library `{}` at `{}` {directive} values on line {line_number}",
@@ -6038,6 +6112,15 @@ fn parse_obj_material_rgb<'a>(
         });
     }
     Ok(values)
+}
+
+#[cfg(feature = "model_importer")]
+fn obj_material_xyz_to_linear_srgb([x, y, z]: [f32; 3]) -> [f32; 3] {
+    [
+        3.2406 * x - 1.5372 * y - 0.4986 * z,
+        -0.9689 * x + 1.8758 * y + 0.0415 * z,
+        0.0557 * x - 0.2040 * y + 1.0570 * z,
+    ]
 }
 
 #[cfg(feature = "model_importer")]
