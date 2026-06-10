@@ -12318,6 +12318,107 @@ fn database_audio_importer_reports_unsupported_audio_compression() {
 }
 
 #[test]
+fn database_audio_importer_allows_ogg_vorbis_compression_for_binary_source() {
+    let config = database_config("audio_importer_ogg_vorbis");
+    let path = AssetPath::parse("audio/callout.ogg");
+    let source = ogg_vorbis_audio_bytes(44_100, 2);
+
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "vorbis");
+
+    let id = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(
+        metadata.importer_settings,
+        vec![("compression".to_owned(), "vorbis".to_owned())]
+    );
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        source
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, source);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn database_audio_importer_allows_ogg_opus_compression_for_binary_source() {
+    let config = database_config("audio_importer_ogg_opus");
+    let path = AssetPath::parse("audio/dialogue.ogg");
+    let source = ogg_opus_audio_bytes(48_000, 1);
+
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "opus");
+
+    let id = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(
+        metadata.importer_settings,
+        vec![("compression".to_owned(), "opus".to_owned())]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        source
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, source);
+}
+
+#[test]
+fn database_audio_importer_rejects_ogg_compression_for_non_ogg_binary_source() {
+    let config = database_config("audio_importer_ogg_binary_source_validation");
+    let path = AssetPath::parse("audio/raw.audio");
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), vec![0x00, 0x01, 0x02]);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+    let mut settings = ImporterSettings::default();
+    settings.set("compression", "vorbis");
+
+    let error = database
+        .import_asset_path_with_settings(&path, &settings)
+        .unwrap_err();
+    if let AssetError::Import { message } = &error {
+        eprintln!("actual error: {message}");
+    }
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `AudioImporter` failed")
+                && message.contains("audio/raw.audio")
+                && message.contains("compression=vorbis")
+    ));
+}
+
+#[test]
 fn database_ogg_audio_import_cook_and_runtime_load_preserves_payload() {
     let config = database_config("builtin_ogg_audio_runtime_load");
     let path = AssetPath::parse("audio/callout.ogg");

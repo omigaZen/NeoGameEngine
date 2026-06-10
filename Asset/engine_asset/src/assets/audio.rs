@@ -264,7 +264,8 @@ fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     let header_size = 27usize;
     if bytes.len() < header_size {
         return Err(AssetError::Decode {
-            message: "OGG source must start with OggS and include a complete page header".to_owned(),
+            message: "OGG source must start with OggS and include a complete page header"
+                .to_owned(),
         });
     }
     if &bytes[0..4] != b"OggS" {
@@ -279,11 +280,12 @@ fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     }
 
     let segment_count = usize::from(bytes[26]);
-    let segment_table_end = header_size
-        .checked_add(segment_count)
-        .ok_or_else(|| AssetError::Decode {
-            message: "OGG page segment table length overflow".to_owned(),
-        })?;
+    let segment_table_end =
+        header_size
+            .checked_add(segment_count)
+            .ok_or_else(|| AssetError::Decode {
+                message: "OGG page segment table length overflow".to_owned(),
+            })?;
     if bytes.len() < segment_table_end {
         return Err(AssetError::Decode {
             message: "OGG page segment table exceeds source size".to_owned(),
@@ -315,11 +317,12 @@ fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
         });
     }
 
-    let packet_end = segment_table_end
-        .checked_add(packet_len)
-        .ok_or_else(|| AssetError::Decode {
-            message: "OGG first packet length overflow".to_owned(),
-        })?;
+    let packet_end =
+        segment_table_end
+            .checked_add(packet_len)
+            .ok_or_else(|| AssetError::Decode {
+                message: "OGG first packet length overflow".to_owned(),
+            })?;
     if bytes.len() < packet_end {
         return Err(AssetError::Decode {
             message: "OGG page data is truncated".to_owned(),
@@ -377,7 +380,8 @@ fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(u16, u32), AssetError> {
     }
 
     Err(AssetError::Decode {
-        message: "audio source is OggS but codec header is unsupported for runtime decode".to_owned(),
+        message: "audio source is OggS but codec header is unsupported for runtime decode"
+            .to_owned(),
     })
 }
 

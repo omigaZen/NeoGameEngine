@@ -1813,13 +1813,28 @@ fn import_audio_bytes(
     source: &SourceAsset,
     settings: &ImporterSettings,
 ) -> Result<Vec<u8>, ImportError> {
+    let options = AudioImporterOptions::from_importer_settings(settings)?;
     if !source.bytes.starts_with(b"NGA_AUDIO_SOURCE_V1") {
+        match options.compression {
+            Some(AudioCompression::None) | None => {}
+            Some(AudioCompression::Vorbis) | Some(AudioCompression::Opus) => {
+                crate::assets::audio::canonical_audio_runtime_bytes(&source.bytes).map_err(
+                    |error| AssetError::Import {
+                        message: format!(
+                            "audio source is not a supported Ogg payload for `compression`={:?}: {error}",
+                            options
+                                .compression
+                                .expect("compression already validated as vorbis/opus"),
+                        ),
+                    },
+                )?;
+            }
+        }
         return Ok(source.bytes.clone());
     }
     let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
         message: format!("audio source must be UTF-8: {error}"),
     })?;
-    let options = AudioImporterOptions::from_importer_settings(settings)?;
     canonical_audio_source(text, options).map(String::into_bytes)
 }
 
