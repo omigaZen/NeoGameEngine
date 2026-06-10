@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        68
+        70
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4777,6 +4777,10 @@ fn parse_model_obj_source(
             "vt" => texture_coords.push(parse_obj_texture_coord(parts, line_number)?),
             "vp" => parse_obj_parameter_vertex(parts, line_number)?,
             "vn" => normals.push(parse_obj_normal(parts, line_number)?),
+            "p" => parse_obj_point_element(parts, vertices.len(), line_number)?,
+            "l" => {
+                parse_obj_line_element(parts, vertices.len(), texture_coords.len(), line_number)?
+            }
             "f" => {
                 let triangles = parse_obj_face(
                     parts,
@@ -4817,6 +4821,10 @@ fn parse_model_obj_source(
             "s" => {
                 current_smoothing_group = parse_obj_smoothing_group(parts, line_number)?;
             }
+            "bevel" | "c_interp" | "d_interp" => {
+                parse_obj_on_off_attribute(parts, directive_key.as_str(), line_number)?
+            }
+            "lod" => parse_obj_lod_attribute(parts, line_number)?,
             _ => {
                 return Err(AssetError::Import {
                     message: format!("unknown OBJ directive `{directive}` on line {line_number}"),
@@ -5142,6 +5150,52 @@ fn parse_obj_smoothing_group<'a>(
 }
 
 #[cfg(feature = "model_importer")]
+fn parse_obj_on_off_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let value = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ {directive} value on line {line_number}"),
+    })?;
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ {directive} values on line {line_number}"),
+        });
+    }
+    match value.to_ascii_lowercase().as_str() {
+        "on" | "off" => Ok(()),
+        _ => Err(AssetError::Import {
+            message: format!("OBJ {directive} value on line {line_number} must be `on` or `off`"),
+        }),
+    }
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_lod_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let value = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ lod value on line {line_number}"),
+    })?;
+    let lod = value.parse::<i64>().map_err(|error| AssetError::Import {
+        message: format!("invalid OBJ lod value on line {line_number}: {error}"),
+    })?;
+    if lod < 0 {
+        return Err(AssetError::Import {
+            message: format!("OBJ lod value on line {line_number} must be non-negative"),
+        });
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ lod values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
 fn parse_obj_material_libraries(
     value: &str,
     line_number: usize,
@@ -5166,6 +5220,79 @@ fn parse_obj_material_libraries(
                 line_number,
             });
         }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_point_element<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    vertex_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut count = 0;
+    for token in parts {
+        parse_obj_index_reference(token, token, "point", "vertex", vertex_count, line_number)?;
+        count += 1;
+    }
+    if count == 0 {
+        return Err(AssetError::Import {
+            message: format!("OBJ point on line {line_number} must contain at least 1 vertex"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_line_element<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    vertex_count: usize,
+    texture_coord_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut count = 0;
+    for token in parts {
+        parse_obj_line_index(token, vertex_count, texture_coord_count, line_number)?;
+        count += 1;
+    }
+    if count < 2 {
+        return Err(AssetError::Import {
+            message: format!("OBJ line on line {line_number} must contain at least 2 vertices"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_line_index(
+    token: &str,
+    vertex_count: usize,
+    texture_coord_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let parts = token.split('/').collect::<Vec<_>>();
+    if parts.len() > 2 {
+        return Err(AssetError::Import {
+            message: format!("invalid OBJ line tuple `{token}` on line {line_number}"),
+        });
+    }
+    parse_obj_index_reference(
+        parts.first().copied().unwrap_or(""),
+        token,
+        "line",
+        "vertex",
+        vertex_count,
+        line_number,
+    )?;
+    if let Some(texture_coord) = parts.get(1).copied().filter(|part| !part.is_empty()) {
+        parse_obj_index_reference(
+            texture_coord,
+            token,
+            "line texture coordinate",
+            "texture coordinate",
+            texture_coord_count,
+            line_number,
+        )?;
     }
     Ok(())
 }

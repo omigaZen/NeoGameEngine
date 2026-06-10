@@ -2134,7 +2134,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2687,7 +2687,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 68);
+    assert_eq!(physics_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2843,7 +2843,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -2973,7 +2973,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 68);
+    assert_eq!(physics_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3131,7 +3131,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 68);
+    assert_eq!(material_metadata.importer_version, 70);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3390,7 +3390,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3486,7 +3486,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3604,7 +3604,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3776,7 +3776,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4759,7 +4759,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4767,7 +4767,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 68);
+    assert_eq!(material_metadata.importer_version, 70);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5017,7 +5017,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 68);
+    assert_eq!(mesh_metadata.importer_version, 70);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -10053,6 +10053,172 @@ i 0 1 2
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_accepts_obj_point_and_line_elements() {
+    let config = database_config("builtin_model_obj_point_and_line_elements");
+    let model_path = AssetPath::parse("models/point_line_elements.obj");
+    let mesh_path = AssetPath::parse("models/point_line_elements.WireHelpers.mesh");
+    let model_source = b"o WireHelpers
+v 0 0 0
+v 1 0 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 0 1
+p 1 -2 3
+l 1/1 2/2 -1/3
+l -3 -2 -1
+f 1 2 3
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
+    assert_eq!(mesh_metadata.importer_version, 70);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "point_line_elements",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_accepts_obj_display_attributes() {
+    let config = database_config("builtin_model_obj_display_attributes");
+    let model_path = AssetPath::parse("models/display_attributes.obj");
+    let mesh_path = AssetPath::parse("models/display_attributes.Display.mesh");
+    let model_source = b"o Display
+bevel ON
+c_interp off
+d_interp On
+lod 2
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["Display"]);
+    assert_eq!(mesh_metadata.importer_version, 70);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "display_attributes",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_homogeneous_vertices() {
     let config = database_config("builtin_model_obj_homogeneous_vertices");
     let model_path = AssetPath::parse("models/homogeneous.obj");
@@ -10148,6 +10314,109 @@ fn database_model_importer_reports_invalid_obj_parameter_vertex() {
             "builtin_model_obj_too_many_parameter_vertex_values",
             "vp 0 0 0 1\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
             "too many OBJ parameter vertex values on line 1",
+        ),
+    ] {
+        let config = database_config(case);
+        let model_path = AssetPath::parse(&format!("models/{case}.obj"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), source.as_bytes().to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&model_path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `ModelImporter` failed")
+                    && message.contains(&model_path.display_string())
+                    && message.contains(expected)
+        ));
+    }
+}
+
+#[test]
+fn database_model_importer_reports_invalid_obj_point_and_line_elements() {
+    for (case, source, expected) in [
+        (
+            "builtin_model_obj_missing_point_vertex",
+            "p\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ point on line 1 must contain at least 1 vertex",
+        ),
+        (
+            "builtin_model_obj_missing_point_vertex_reference",
+            "v 0 0 0\np 2\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ point index 2 on line 2 references missing vertex",
+        ),
+        (
+            "builtin_model_obj_short_line_element",
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nl 1\nf 1 2 3\n",
+            "OBJ line on line 4 must contain at least 2 vertices",
+        ),
+        (
+            "builtin_model_obj_missing_line_texture_coordinate",
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nl 1/1 2/2\nf 1 2 3\n",
+            "OBJ line texture coordinate index 2 on line 5 references missing texture coordinate",
+        ),
+        (
+            "builtin_model_obj_invalid_line_tuple",
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nl 1//1 2//1\nf 1 2 3\n",
+            "invalid OBJ line tuple `1//1` on line 4",
+        ),
+    ] {
+        let config = database_config(case);
+        let model_path = AssetPath::parse(&format!("models/{case}.obj"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), source.as_bytes().to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&model_path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `ModelImporter` failed")
+                    && message.contains(&model_path.display_string())
+                    && message.contains(expected)
+        ));
+    }
+}
+
+#[test]
+fn database_model_importer_reports_invalid_obj_display_attributes() {
+    for (case, source, expected) in [
+        (
+            "builtin_model_obj_invalid_bevel_attribute",
+            "bevel maybe\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ bevel value on line 1 must be `on` or `off`",
+        ),
+        (
+            "builtin_model_obj_missing_c_interp_attribute",
+            "c_interp\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "missing OBJ c_interp value on line 1",
+        ),
+        (
+            "builtin_model_obj_extra_d_interp_attribute",
+            "d_interp off extra\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "too many OBJ d_interp values on line 1",
+        ),
+        (
+            "builtin_model_obj_negative_lod_attribute",
+            "lod -1\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ lod value on line 1 must be non-negative",
+        ),
+        (
+            "builtin_model_obj_invalid_lod_attribute",
+            "lod high\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "invalid OBJ lod value on line 1",
+        ),
+        (
+            "builtin_model_obj_extra_lod_attribute",
+            "lod 1 2\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "too many OBJ lod values on line 1",
         ),
     ] {
         let config = database_config(case);
