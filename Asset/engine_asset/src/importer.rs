@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        74
+        77
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -4826,6 +4826,16 @@ fn parse_model_obj_source(
             }
             "lod" => parse_obj_lod_attribute(parts, line_number)?,
             "mg" => parse_obj_merging_group_attribute(parts, line_number)?,
+            "maplib" => parse_obj_texture_map_libraries(parts, line_number)?,
+            "usemap" => parse_obj_texture_map_binding(parts, line_number)?,
+            "shadow_obj" | "trace_obj" => {
+                parse_obj_render_object_attribute(parts, directive_key.as_str(), line_number)?
+            }
+            "ctech" | "stech" => parse_obj_approximation_technique_attribute(
+                parts,
+                directive_key.as_str(),
+                line_number,
+            )?,
             _ => {
                 return Err(AssetError::Import {
                     message: format!("unknown OBJ directive `{directive}` on line {line_number}"),
@@ -5243,6 +5253,122 @@ fn parse_obj_merging_group_attribute<'a>(
     if parts.next().is_some() {
         return Err(AssetError::Import {
             message: format!("too many OBJ merging group values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_texture_map_libraries<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let mut count = 0;
+    for _ in parts {
+        count += 1;
+    }
+    if count == 0 {
+        return Err(AssetError::Import {
+            message: format!("OBJ maplib is empty on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_texture_map_binding<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ usemap value on line {line_number}"),
+    })?;
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ usemap values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_render_object_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ {directive} value on line {line_number}"),
+    })?;
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ {directive} values on line {line_number}"),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_approximation_technique_attribute<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    let technique = parts.next().ok_or_else(|| AssetError::Import {
+        message: format!("missing OBJ {directive} technique on line {line_number}"),
+    })?;
+    let technique_key = technique.to_ascii_lowercase();
+    match (directive, technique_key.as_str()) {
+        ("ctech", "cparm") | ("ctech", "cspace") | ("stech", "cparmb") | ("stech", "cspace") => {
+            parse_obj_approximation_values(parts, directive, technique_key.as_str(), 1, line_number)
+        }
+        ("ctech", "curv") | ("stech", "cparma") | ("stech", "curv") => {
+            parse_obj_approximation_values(parts, directive, technique_key.as_str(), 2, line_number)
+        }
+        ("stech", "special") => {
+            if parts.next().is_some() {
+                return Err(AssetError::Import {
+                    message: format!("too many OBJ stech special values on line {line_number}"),
+                });
+            }
+            Ok(())
+        }
+        _ => Err(AssetError::Import {
+            message: format!(
+                "unknown OBJ {directive} technique `{technique}` on line {line_number}"
+            ),
+        }),
+    }
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_approximation_values<'a>(
+    mut parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    technique: &str,
+    expected_count: usize,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    for _ in 0..expected_count {
+        let value = parts.next().ok_or_else(|| AssetError::Import {
+            message: format!("missing OBJ {directive} {technique} value on line {line_number}"),
+        })?;
+        let value = value.parse::<f32>().map_err(|error| AssetError::Import {
+            message: format!(
+                "invalid OBJ {directive} {technique} value on line {line_number}: {error}"
+            ),
+        })?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(AssetError::Import {
+                message: format!(
+                    "OBJ {directive} {technique} value must be finite and non-negative on line {line_number}"
+                ),
+            });
+        }
+    }
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("too many OBJ {directive} {technique} values on line {line_number}"),
         });
     }
     Ok(())
