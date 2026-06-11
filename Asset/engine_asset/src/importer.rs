@@ -2985,7 +2985,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        103
+        105
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3588,7 +3588,12 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
     let mut index = 1;
     while index < lines.len() {
         let line_number = index + 1;
-        let line = lines[index].trim();
+        let raw_line = lines[index].trim();
+        let line = if raw_line.contains('|') {
+            raw_line
+        } else {
+            strip_model_source_comment(raw_line).trim()
+        };
         if line.is_empty() || line.starts_with('#') {
             index += 1;
             continue;
@@ -3677,18 +3682,13 @@ fn parse_model_inline_subresource<'a>(
     value: &'a str,
     key: &str,
     line_number: usize,
-) -> Result<(&'a str, &'a str), ImportError> {
+) -> Result<(String, &'a str), ImportError> {
     let Some((label, payload)) = value.split_once('|') else {
         return Err(AssetError::Import {
             message: format!("model {key} on line {line_number} must use label|payload"),
         });
     };
-    let label = label.trim();
-    if label.is_empty() {
-        return Err(AssetError::Import {
-            message: format!("model {key} label is empty on line {line_number}"),
-        });
-    }
+    let label = parse_model_label(label, key, line_number)?;
     if payload.contains('|') {
         return Err(AssetError::Import {
             message: format!(
@@ -3707,7 +3707,28 @@ fn parse_model_label(label: &str, key: &str, line_number: usize) -> Result<Strin
             message: format!("model {key} label is empty on line {line_number}"),
         });
     }
-    Ok(label.to_owned())
+    if !label.starts_with(['"', '\'']) {
+        return Ok(label.to_owned());
+    }
+    let tokens = obj_quoted_line_tokens(label).map_err(|quote_value| AssetError::Import {
+        message: format!(
+            "model {key} label has unterminated {quote_value} quote on line {line_number}"
+        ),
+    })?;
+    if tokens.len() != 1 {
+        return Err(AssetError::Import {
+            message: format!(
+                "model {key} quoted label on line {line_number} must contain exactly one token"
+            ),
+        });
+    }
+    let label = tokens.into_iter().next().unwrap_or_default();
+    if label.is_empty() {
+        return Err(AssetError::Import {
+            message: format!("model {key} label is empty on line {line_number}"),
+        });
+    }
+    Ok(label)
 }
 
 #[cfg(feature = "model_importer")]
@@ -3752,7 +3773,8 @@ fn parse_model_block_payload(
         let current_line_number = index + 1;
         let raw_line = lines[index];
         let line = raw_line.trim();
-        if line == "end" {
+        let control_line = strip_model_source_comment(raw_line).trim();
+        if control_line == "end" {
             let payload = payload_lines.join("\n");
             if payload.trim().is_empty() {
                 return Err(AssetError::Import {
@@ -3778,6 +3800,7 @@ fn parse_model_block_payload(
             ));
         }
         if !in_payload {
+            let line = control_line;
             if line.is_empty() || line.starts_with('#') {
                 index += 1;
                 continue;
@@ -4052,7 +4075,7 @@ fn parse_model_plain_dependency_labels(
     }
 
     let mut labels = Vec::new();
-    for raw_label in value.split(',') {
+    for raw_label in split_model_label_list(value, line_number)? {
         let label = raw_label.trim();
         if label.is_empty() {
             return Err(AssetError::Import {
@@ -4061,7 +4084,7 @@ fn parse_model_plain_dependency_labels(
                 ),
             });
         }
-        labels.push(label.to_owned());
+        labels.push(parse_model_label(label, "dependency", line_number)?);
     }
     Ok(labels)
 }
@@ -4071,37 +4094,75 @@ fn parse_model_dependency_label(
     value: String,
     line_number: usize,
 ) -> Result<ModelDependencyLabel, ImportError> {
-    if let Some((kind, label)) = value.split_once(':') {
-        let kind = kind.trim();
-        let expected_kind = match kind {
-            "mesh" => Some("mesh"),
-            "material" => Some("material"),
-            "skeleton" => Some("skeleton"),
-            "animation" => Some("animation"),
-            "physics_mesh" => Some("physics_mesh"),
-            _ => None,
-        };
-        if let Some(expected_kind) = expected_kind {
-            let label = label.trim();
-            if label.is_empty() {
-                return Err(AssetError::Import {
-                    message: format!(
-                        "model dependency `{kind}:` on line {line_number} must name a generated {expected_kind} label"
-                    ),
-                });
+    let value = value.trim();
+    if !value.starts_with(['"', '\'']) {
+        if let Some((kind, label)) = value.split_once(':') {
+            let kind = kind.trim();
+            let expected_kind = match kind {
+                "mesh" => Some("mesh"),
+                "material" => Some("material"),
+                "skeleton" => Some("skeleton"),
+                "animation" => Some("animation"),
+                "physics_mesh" => Some("physics_mesh"),
+                _ => None,
+            };
+            if let Some(expected_kind) = expected_kind {
+                let label = label.trim();
+                if label.is_empty() {
+                    return Err(AssetError::Import {
+                        message: format!(
+                            "model dependency `{kind}:` on line {line_number} must name a generated {expected_kind} label"
+                        ),
+                    });
+                }
+                return Ok(ModelDependencyLabel::new(
+                    parse_model_label(label, "dependency", line_number)?,
+                    Some(expected_kind),
+                ));
             }
-            return Ok(ModelDependencyLabel::new(
-                label.to_owned(),
-                Some(expected_kind),
-            ));
+            return Err(AssetError::Import {
+                message: format!(
+                    "unknown model generated dependency kind `{kind}` on line {line_number}; expected mesh, material, skeleton, animation, or physics_mesh"
+                ),
+            });
         }
+    }
+    Ok(ModelDependencyLabel::new(
+        parse_model_label(value, "dependency", line_number)?,
+        None,
+    ))
+}
+
+#[cfg(feature = "model_importer")]
+fn split_model_label_list(value: &str, line_number: usize) -> Result<Vec<&str>, ImportError> {
+    let mut labels = Vec::new();
+    let mut quote = None;
+    let mut start = 0usize;
+    for (index, character) in value.char_indices() {
+        if let Some(quote_value) = quote {
+            if character == quote_value {
+                quote = None;
+            }
+            continue;
+        }
+        match character {
+            '"' | '\'' => quote = Some(character),
+            ',' => {
+                labels.push(&value[start..index]);
+                start = index + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if let Some(quote_value) = quote {
         return Err(AssetError::Import {
             message: format!(
-                "unknown model generated dependency kind `{kind}` on line {line_number}; expected mesh, material, skeleton, animation, or physics_mesh"
+                "model dependency list has unterminated {quote_value} quote on line {line_number}"
             ),
         });
     }
-    Ok(ModelDependencyLabel::new(value, None))
+    labels.push(&value[start..]);
+    Ok(labels)
 }
 
 #[cfg(feature = "model_importer")]
