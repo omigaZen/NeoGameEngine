@@ -2138,7 +2138,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2718,7 +2718,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 98);
+    assert_eq!(physics_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2874,7 +2874,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -3004,7 +3004,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 98);
+    assert_eq!(physics_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3162,7 +3162,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 100);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3421,7 +3421,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3517,7 +3517,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3635,7 +3635,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3807,7 +3807,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4790,7 +4790,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4798,7 +4798,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5048,7 +5048,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -5884,7 +5884,7 @@ custom.transmission_filter.vec3=0.1,0.2,0.3
         (material_metadata.importer.as_deref()),
         Some("ModelImporter")
     );
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8455,10 +8455,10 @@ base_color=0.25,0.5,0.75,1
 
     assert_eq!(mesh_metadata.labels, vec!["Display Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(material_metadata.labels, vec!["Material/Brushed Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8563,10 +8563,10 @@ base_color=0.6,0.4,0.2,1
 
     assert_eq!(mesh_metadata.labels, vec!["Panel #A"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(material_metadata.labels, vec!["Material/Hash # Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 100);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11822,7 +11822,7 @@ i 0 2 3
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Outline"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -11930,8 +11930,8 @@ base_color=0.25,0.5,0.75,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(mesh_metadata.labels, vec!["Continued"]);
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
-    assert_eq!(material_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
+    assert_eq!(material_metadata.importer_version, 100);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert!(material_metadata.dependencies.is_empty());
     assert_eq!(
@@ -12117,7 +12117,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12211,7 +12211,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Display"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12314,7 +12314,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["FreeForm"]);
-    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(mesh_metadata.importer_version, 100);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -13098,6 +13098,43 @@ map_Kd -unknown textures/albedo.texture
                     "unknown OBJ material library `bad_texture_option.mtl` at `models/bad_texture_option.mtl` map_Kd option -unknown on line 2"
                 )
     ));
+
+    let texres_config = database_config("builtin_model_obj_invalid_material_texture_resolution");
+    let model_path = AssetPath::parse("models/bad_texture_resolution.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_texture_resolution.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_texture_resolution.mtl",
+        b"newmtl Red
+map_Kd -texres 0 textures/albedo.texture
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(texres_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_texture_resolution.obj")
+                && message.contains(
+                    "OBJ material library `bad_texture_resolution.mtl` at `models/bad_texture_resolution.mtl` map_Kd option -texres value `0` on line 2 must be greater than zero"
+                )
+    ));
 }
 
 #[test]
@@ -13561,6 +13598,42 @@ sharpness nope
             if message.contains("importer `ModelImporter` failed")
                 && message.contains("models/bad_sharpness.obj")
                 && message.contains("invalid OBJ material library `bad_sharpness.mtl` at `models/bad_sharpness.mtl` sharpness value on line 2")
+    ));
+
+    let sharpness_range_config =
+        database_config("builtin_model_obj_out_of_range_sharpness_property");
+    let model_path = AssetPath::parse("models/bad_sharpness_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_sharpness_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_sharpness_range.mtl",
+        b"newmtl Red
+sharpness 1001
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(sharpness_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_sharpness_range.obj")
+                && message.contains("OBJ material library `bad_sharpness_range.mtl` at `models/bad_sharpness_range.mtl` sharpness value `1001` on line 2 must be between 0 and 1000")
     ));
 
     let map_aat_config = database_config("builtin_model_obj_invalid_map_aat_property");

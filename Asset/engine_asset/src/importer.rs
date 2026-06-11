@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        98
+        100
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -6856,7 +6856,7 @@ fn parse_obj_material_library_text(
             }
             "sharpness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.sharpness = Some(parse_obj_material_scalar(
+                current_properties.sharpness = Some(parse_obj_material_sharpness(
                     parts,
                     directive,
                     library,
@@ -7193,6 +7193,28 @@ fn validate_obj_material_unit_scalar(
 
 #[cfg(feature = "model_importer")]
 fn parse_obj_material_shininess<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<f32, ImportError> {
+    let value = parse_obj_material_scalar(parts, directive, library, path, line_number)?;
+    if !(0.0..=1000.0).contains(&value) {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} value `{}` on line {line_number} must be between 0 and 1000",
+                library.name,
+                path.display_string(),
+                canonical_mesh_f32(value)
+            ),
+        });
+    }
+    Ok(value)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_sharpness<'a>(
     parts: impl Iterator<Item = &'a str>,
     directive: &str,
     library: &ObjMaterialLibraryRef,
@@ -7865,7 +7887,7 @@ fn parse_obj_material_texture_resolution(
     if resolution == 0 {
         return Err(AssetError::Import {
             message: format!(
-                "OBJ material library `{}` at `{}` {directive} option {option} value must be greater than zero on line {line_number}",
+                "OBJ material library `{}` at `{}` {directive} option {option} value `{value}` on line {line_number} must be greater than zero",
                 library.name,
                 path.display_string()
             ),
