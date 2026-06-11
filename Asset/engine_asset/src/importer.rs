@@ -2985,7 +2985,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        105
+        109
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3603,13 +3603,12 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
                 message: format!("invalid model manifest line {line_number}"),
             });
         };
-        let key = key.trim();
-        validate_model_subresource_kind(key, line_number)?;
+        let key = parse_model_subresource_kind(key.trim(), line_number)?;
         let value = value.trim();
         if value.contains('|') {
-            let (label, payload) = parse_model_inline_subresource(value, key, line_number)?;
+            let (label, payload) = parse_model_inline_subresource(value, &key, line_number)?;
             subresources.push(ModelSubresource {
-                kind: key.to_owned(),
+                kind: key.clone(),
                 label: label.to_owned(),
                 payload: payload.to_owned(),
                 dependency_labels: Vec::new(),
@@ -3629,7 +3628,7 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
             continue;
         }
 
-        let label = parse_model_label(value, key, line_number)?;
+        let label = parse_model_label(value, &key, line_number)?;
         let (
             payload,
             dependency_labels,
@@ -3644,9 +3643,9 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
             physics_mesh_labels,
             lod_mesh_labels,
             next_index,
-        ) = parse_model_block_payload(&lines, index + 1, key, &label, line_number)?;
+        ) = parse_model_block_payload(&lines, index + 1, &key, &label, line_number)?;
         subresources.push(ModelSubresource {
-            kind: key.to_owned(),
+            kind: key,
             label,
             payload,
             dependency_labels,
@@ -3668,12 +3667,23 @@ fn parse_model_manifest(source_text: &str) -> Result<Vec<ModelSubresource>, Impo
 }
 
 #[cfg(feature = "model_importer")]
-fn validate_model_subresource_kind(kind: &str, line_number: usize) -> Result<(), ImportError> {
-    match kind {
-        "mesh" | "physics_mesh" | "material" | "skeleton" | "animation" => Ok(()),
-        other => Err(AssetError::Import {
-            message: format!("unknown model manifest key `{other}` on line {line_number}"),
-        }),
+fn parse_model_subresource_kind(kind: &str, line_number: usize) -> Result<String, ImportError> {
+    canonical_model_generated_kind(kind)
+        .map(str::to_owned)
+        .ok_or_else(|| AssetError::Import {
+            message: format!("unknown model manifest key `{kind}` on line {line_number}"),
+        })
+}
+
+#[cfg(feature = "model_importer")]
+fn canonical_model_generated_kind(kind: &str) -> Option<&'static str> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "mesh" | "geometry" | "render_mesh" => Some("mesh"),
+        "physics_mesh" | "physics" | "collision" | "collision_mesh" => Some("physics_mesh"),
+        "material" | "mat" => Some("material"),
+        "skeleton" | "skel" | "rig" => Some("skeleton"),
+        "animation" | "anim" | "animation_clip" | "clip" => Some("animation"),
+        _ => None,
     }
 }
 
@@ -3811,7 +3821,8 @@ fn parse_model_block_payload(
                 continue;
             }
             if let Some((metadata_key, metadata_value)) = line.split_once('=') {
-                match metadata_key.trim() {
+                let metadata_key = metadata_key.trim().to_ascii_lowercase();
+                match metadata_key.as_str() {
                     "depends" | "dependency" => {
                         for dependency in parse_model_dependency_labels(
                             metadata_value.trim(),
@@ -3829,7 +3840,9 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "skin" | "skeleton" if key == "mesh" => {
+                    "skin" | "skeleton" | "rig" | "skin_skeleton" | "target_skeleton"
+                        if key == "mesh" =>
+                    {
                         let skeleton_label = parse_model_skin_skeleton_label(
                             metadata_value.trim(),
                             current_line_number,
@@ -3855,7 +3868,9 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "max_skin_joints" | "skin_joint_limit" if key == "mesh" => {
+                    "max_skin_joints" | "skin_joint_limit" | "max_joints" | "joint_limit"
+                        if key == "mesh" =>
+                    {
                         let limit = parse_model_skin_joint_limit(
                             metadata_value.trim(),
                             current_line_number,
@@ -3870,7 +3885,12 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "max_skin_influences" | "skin_influence_limit" if key == "mesh" => {
+                    "max_skin_influences"
+                    | "skin_influence_limit"
+                    | "max_influences"
+                    | "influence_limit"
+                        if key == "mesh" =>
+                    {
                         let limit = parse_model_skin_influence_limit(
                             metadata_value.trim(),
                             current_line_number,
@@ -3885,7 +3905,10 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "skin_root" | "root_bone" | "skin_root_bone" if key == "mesh" => {
+                    "skin_root" | "root_bone" | "skin_root_bone" | "root_joint"
+                    | "skin_root_joint"
+                        if key == "mesh" =>
+                    {
                         let root_bone = parse_model_skin_root_bone_label(
                             metadata_value.trim(),
                             current_line_number,
@@ -3900,7 +3923,9 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "skeleton" | "target_skeleton" if key == "animation" => {
+                    "skeleton" | "target_skeleton" | "rig" | "target_rig" | "skeleton_target"
+                        if key == "animation" =>
+                    {
                         let skeleton_label = parse_model_animation_skeleton_label(
                             metadata_value.trim(),
                             current_line_number,
@@ -3926,7 +3951,10 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "material" | "materials" if key == "mesh" => {
+                    "material" | "materials" | "material_slot" | "material_slots"
+                    | "material_binding" | "material_bindings"
+                        if key == "mesh" =>
+                    {
                         let labels = parse_model_plain_dependency_labels(
                             metadata_value.trim(),
                             current_line_number,
@@ -3945,7 +3973,10 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "physics_mesh" | "physics_meshes" if key == "mesh" => {
+                    "physics_mesh" | "physics_meshes" | "collision" | "collisions"
+                    | "collision_mesh" | "collision_meshes"
+                        if key == "mesh" =>
+                    {
                         let labels = parse_model_plain_dependency_labels(
                             metadata_value.trim(),
                             current_line_number,
@@ -3967,7 +3998,9 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "lod" | "lods" if key == "mesh" => {
+                    "lod" | "lods" | "lod_mesh" | "lod_meshes" | "lod_level" | "lod_levels"
+                        if key == "mesh" =>
+                    {
                         let labels = parse_model_plain_dependency_labels(
                             metadata_value.trim(),
                             current_line_number,
@@ -3986,7 +4019,9 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "mesh" | "target_mesh" if key == "material" => {
+                    "mesh" | "target_mesh" | "render_mesh" | "target_render_mesh"
+                        if key == "material" =>
+                    {
                         let mesh_label = parse_model_target_mesh_label(
                             metadata_value.trim(),
                             current_line_number,
@@ -4010,7 +4045,10 @@ fn parse_model_block_payload(
                         index += 1;
                         continue;
                     }
-                    "mesh" | "target_mesh" if key == "physics_mesh" => {
+                    "mesh" | "target_mesh" | "source_mesh" | "render_mesh"
+                    | "target_render_mesh"
+                        if key == "physics_mesh" =>
+                    {
                         let mesh_label = parse_model_target_mesh_label(
                             metadata_value.trim(),
                             current_line_number,
@@ -4098,14 +4136,7 @@ fn parse_model_dependency_label(
     if !value.starts_with(['"', '\'']) {
         if let Some((kind, label)) = value.split_once(':') {
             let kind = kind.trim();
-            let expected_kind = match kind {
-                "mesh" => Some("mesh"),
-                "material" => Some("material"),
-                "skeleton" => Some("skeleton"),
-                "animation" => Some("animation"),
-                "physics_mesh" => Some("physics_mesh"),
-                _ => None,
-            };
+            let expected_kind = canonical_model_generated_kind(kind);
             if let Some(expected_kind) = expected_kind {
                 let label = label.trim();
                 if label.is_empty() {
