@@ -1031,3 +1031,49 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ MTL single/double quoted texture paths now parse as one texture path token, allowing spaces in registered texture asset paths while preserving map options before and after the path. Unterminated quoted texture paths now surface visible ModelImporter diagnostics with OBJ source path and MTL library/path/line context. The focused success test preserves generated material bytes, registry dependencies, bundle manifest dependencies/readback, runtime preload dependency graphs, and decoded runtime MaterialTextureBinding names/options. `ModelImporter::version()` is now 87. Full database passed 184 tests; full engine_asset default suite passed 370 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_maps_obj_common_pbr_texture_scalar_aliases
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL descriptive texture scalar/color aliases now canonicalize to runtime texture channels through generated material bytes and runtime `MaterialTextureBinding` values: `map_specular_color -> texture.specular`, `map_ambient`/`map_ambient_color -> texture.occlusion`, `map_emissive_color`/`map_emission_color -> texture.emissive`, `map_transmission_filter`/`map_transmission_color -> texture.transmission_filter`, `map_ior -> texture.index_of_refraction`, `map_clear_coat -> texture.clearcoat`, `map_clearcoatroughness`/`map_clear_coat_roughness -> texture.clearcoat_roughness`, and `map_anisotropyrotation -> texture.anisotropy_rotation`. The focused test preserves generated material bytes, sidecar dependency restoration, bundle manifest dependencies/readback, runtime preload dependency graphs, and decoded texture binding names/ids/options. `ModelImporter::version()` is now 88. Full database passed 185 tests; full engine_asset default suite passed 371 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_quoted_material_names_and_libraries
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_unterminated_obj_quote
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ source parsing now supports single/double quoted `mtllib` path tokens and quoted `o`/`g` labels, `usemtl` names, and MTL `newmtl` names while preserving the previous raw remainder behavior for unquoted names. The focused success test imports a quoted material library path containing spaces, matches quoted `usemtl` to quoted `newmtl`, preserves generated mesh/material labels and bytes, cooks and bundles the outputs, and runtime-loads the bundle with the expected mesh-to-material dependency graph and decoded material base color. Unterminated OBJ source quotes now surface a visible `ModelImporter` diagnostic with source path and line context. `ModelImporter::version()` is now 89. Full database passed 187 tests; full engine_asset default suite passed 373 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_hash_inside_quoted_obj_names
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ/MTL inline comment stripping is now quote-aware, so unquoted `#` still starts comments while `#` inside single/double quoted OBJ labels/material names and MTL `newmtl` names is preserved. The focused test preserves quoted `#` in generated mesh/material labels and material bytes, cooks and bundles the outputs, runtime-loads the bundle, preserves the mesh-to-material dependency graph, and decodes the expected material base color. `ModelImporter::version()` is now 90. Full database passed 188 tests; full engine_asset default suite passed 374 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

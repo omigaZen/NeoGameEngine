@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        87
+        90
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3175,7 +3175,21 @@ fn parse_model_source(
 
 #[cfg(feature = "model_importer")]
 fn strip_model_source_comment(line: &str) -> &str {
-    line.split_once('#').map(|(value, _)| value).unwrap_or(line)
+    let mut quote = None;
+    for (index, value) in line.char_indices() {
+        if let Some(quote_value) = quote {
+            if value == quote_value {
+                quote = None;
+            }
+            continue;
+        }
+        match value {
+            '"' | '\'' => quote = Some(value),
+            '#' => return &line[..index],
+            _ => {}
+        }
+    }
+    line
 }
 
 #[cfg(feature = "model_importer")]
@@ -3236,6 +3250,81 @@ fn obj_logical_source_lines(
     }
 
     Ok(lines)
+}
+
+#[cfg(feature = "model_importer")]
+fn obj_quoted_line_tokens(line: &str) -> Result<Vec<String>, char> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut token_started = false;
+
+    for value in line.chars() {
+        if let Some(quote_value) = quote {
+            if value == quote_value {
+                quote = None;
+            } else {
+                current.push(value);
+            }
+            token_started = true;
+            continue;
+        }
+
+        match value {
+            '"' | '\'' => {
+                quote = Some(value);
+                token_started = true;
+            }
+            value if value.is_whitespace() => {
+                if token_started {
+                    tokens.push(std::mem::take(&mut current));
+                    token_started = false;
+                }
+            }
+            value => {
+                current.push(value);
+                token_started = true;
+            }
+        }
+    }
+
+    if let Some(quote_value) = quote {
+        return Err(quote_value);
+    }
+
+    if token_started {
+        tokens.push(current);
+    }
+    Ok(tokens)
+}
+
+#[cfg(feature = "model_importer")]
+fn obj_source_line_tokens(line: &str, line_number: usize) -> Result<Vec<String>, ImportError> {
+    obj_quoted_line_tokens(line).map_err(|quote_value| AssetError::Import {
+        message: format!("OBJ source has unterminated {quote_value} quote on line {line_number}"),
+    })
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_quoted_or_raw_value(
+    value: &str,
+    directive: &str,
+    field: &str,
+    line_number: usize,
+) -> Result<String, ImportError> {
+    let value = value.trim();
+    if !value.starts_with(['"', '\'']) {
+        return Ok(value.to_owned());
+    }
+    let tokens = obj_source_line_tokens(value, line_number)?;
+    if tokens.len() != 1 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ {directive} quoted {field} on line {line_number} must contain exactly one token"
+            ),
+        });
+    }
+    Ok(tokens.into_iter().next().unwrap_or_default())
 }
 
 #[cfg(feature = "model_importer")]
@@ -4814,12 +4903,18 @@ fn parse_model_obj_source(
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let mut parts = line.split_whitespace();
-        let directive = parts.next().unwrap_or("");
+        let tokens = obj_source_line_tokens(line, line_number)?;
+        let directive = tokens.first().map(String::as_str).unwrap_or("");
         let directive_key = directive.to_ascii_lowercase();
+        let parts = tokens.iter().skip(1).map(String::as_str);
         match directive_key.as_str() {
             "o" | "g" => {
-                let label = line[directive.len()..].trim();
+                let label = parse_obj_quoted_or_raw_value(
+                    line[directive.len()..].trim(),
+                    directive,
+                    "label",
+                    line_number,
+                )?;
                 if label.is_empty() {
                     return Err(AssetError::Import {
                         message: format!("OBJ {directive} label is empty on line {line_number}"),
@@ -4829,7 +4924,7 @@ fn parse_model_obj_source(
                     meshes.push(current);
                 }
                 current = ObjMeshSource {
-                    label: label.to_owned(),
+                    label,
                     material_groups: Vec::new(),
                     line_number,
                 };
@@ -4862,7 +4957,12 @@ fn parse_model_obj_source(
                 );
             }
             "usemtl" => {
-                let name = line[directive.len()..].trim();
+                let name = parse_obj_quoted_or_raw_value(
+                    line[directive.len()..].trim(),
+                    directive,
+                    "name",
+                    line_number,
+                )?;
                 if name.is_empty() {
                     return Err(AssetError::Import {
                         message: format!("OBJ usemtl name is empty on line {line_number}"),
@@ -4870,10 +4970,7 @@ fn parse_model_obj_source(
                 }
                 let label = format!("Material/{name}");
                 if !material_uses.iter().any(|existing| existing.name == name) {
-                    material_uses.push(ObjMaterialUse {
-                        name: name.to_owned(),
-                        line_number,
-                    });
+                    material_uses.push(ObjMaterialUse { name, line_number });
                 }
                 current_material_label = Some(label);
             }
@@ -5860,8 +5957,8 @@ fn parse_obj_material_libraries(
     line_number: usize,
     material_libraries: &mut Vec<ObjMaterialLibraryRef>,
 ) -> Result<(), ImportError> {
-    let names = value
-        .split_whitespace()
+    let names = obj_source_line_tokens(value, line_number)?
+        .into_iter()
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>();
     if names.is_empty() {
@@ -5874,10 +5971,7 @@ fn parse_obj_material_libraries(
             .iter()
             .any(|existing| existing.name == name)
         {
-            material_libraries.push(ObjMaterialLibraryRef {
-                name: name.to_owned(),
-                line_number,
-            });
+            material_libraries.push(ObjMaterialLibraryRef { name, line_number });
         }
     }
     Ok(())
@@ -6550,54 +6644,41 @@ fn obj_material_line_tokens(
     path: &AssetPath,
     line_number: usize,
 ) -> Result<Vec<String>, ImportError> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut quote = None;
-    let mut token_started = false;
-
-    for value in line.chars() {
-        if let Some(quote_value) = quote {
-            if value == quote_value {
-                quote = None;
-            } else {
-                current.push(value);
-            }
-            token_started = true;
-            continue;
-        }
-
-        match value {
-            '"' | '\'' => {
-                quote = Some(value);
-                token_started = true;
-            }
-            value if value.is_whitespace() => {
-                if token_started {
-                    tokens.push(std::mem::take(&mut current));
-                    token_started = false;
-                }
-            }
-            value => {
-                current.push(value);
-                token_started = true;
-            }
-        }
-    }
-
-    if let Some(quote_value) = quote {
-        return Err(AssetError::Import {
+    obj_quoted_line_tokens(line).map_err(|quote_value| {
+        AssetError::Import {
             message: format!(
                 "OBJ material library `{}` at `{}` has unterminated {quote_value} quote on line {line_number}",
                 library.name,
                 path.display_string()
             ),
+        }
+    })
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_quoted_or_raw_value(
+    value: &str,
+    directive: &str,
+    field: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<String, ImportError> {
+    let value = value.trim();
+    if !value.starts_with(['"', '\'']) {
+        return Ok(value.to_owned());
+    }
+    let tokens = obj_material_line_tokens(value, library, path, line_number)?;
+    if tokens.len() != 1 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} quoted {field} on line {line_number} must contain exactly one token",
+                library.name,
+                path.display_string()
+            ),
         });
     }
-
-    if token_started {
-        tokens.push(current);
-    }
-    Ok(tokens)
+    Ok(tokens.into_iter().next().unwrap_or_default())
 }
 
 #[cfg(feature = "model_importer")]
@@ -6634,7 +6715,14 @@ fn parse_obj_material_library_text(
                     });
                     current_properties = ObjMaterialProperties::default();
                 }
-                let name = line["newmtl".len()..].trim();
+                let name = parse_obj_material_quoted_or_raw_value(
+                    line[directive.len()..].trim(),
+                    directive,
+                    "name",
+                    library,
+                    path,
+                    line_number,
+                )?;
                 if name.is_empty() {
                     return Err(AssetError::Import {
                         message: format!(
@@ -6656,8 +6744,8 @@ fn parse_obj_material_library_text(
                         ),
                     });
                 }
-                defined_names.push(name.to_owned());
-                current_name = Some((name.to_owned(), line_number));
+                defined_names.push(name.clone());
+                current_name = Some((name, line_number));
             }
             "kd" | "diffuse" | "albedo" | "basecolor" | "base_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
@@ -7816,15 +7904,23 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         "map_kd" | "map_diffuse" | "map_albedo" | "map_basecolor" | "map_base_color" => {
             Some("albedo")
         }
-        "map_ks" | "map_specular" => Some("specular"),
-        "map_ka" | "map_ao" | "map_occlusion" | "map_ambient_occlusion" => Some("occlusion"),
-        "map_ke" | "map_emissive" | "map_emission" => Some("emissive"),
-        "map_tf" => Some("transmission_filter"),
+        "map_ks" | "map_specular" | "map_specular_color" => Some("specular"),
+        "map_ka"
+        | "map_ambient"
+        | "map_ambient_color"
+        | "map_ao"
+        | "map_occlusion"
+        | "map_ambient_occlusion" => Some("occlusion"),
+        "map_ke" | "map_emissive" | "map_emission" | "map_emissive_color"
+        | "map_emission_color" => Some("emissive"),
+        "map_tf" | "map_transmission_filter" | "map_transmission_color" => {
+            Some("transmission_filter")
+        }
         "map_d" | "map_tr" | "map_opacity" | "map_alpha" | "map_transparency" => Some("alpha"),
         "map_bump" | "bump" | "norm" | "normal" | "map_kn" | "map_normal" | "map_normalgl"
         | "map_normaldx" => Some("normal"),
         "map_pr" | "map_ns" | "map_roughness" => Some("roughness"),
-        "map_ni" => Some("index_of_refraction"),
+        "map_ni" | "map_ior" => Some("index_of_refraction"),
         "map_pm" | "map_metallic" | "map_metalness" => Some("metallic"),
         "map_rma" => Some("rma"),
         "map_orm" | "map_occlusionroughnessmetallic" | "map_occlusion_roughness_metallic" => {
@@ -7838,10 +7934,15 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         "map_mra" => Some("mra"),
         "map_arm" => Some("arm"),
         "map_ps" | "map_sheen" => Some("sheen"),
-        "map_pc" | "map_clearcoat" => Some("clearcoat"),
-        "map_pcr" | "map_clearcoat_roughness" => Some("clearcoat_roughness"),
+        "map_pc" | "map_clearcoat" | "map_clear_coat" => Some("clearcoat"),
+        "map_pcr"
+        | "map_clearcoat_roughness"
+        | "map_clearcoatroughness"
+        | "map_clear_coat_roughness" => Some("clearcoat_roughness"),
         "map_aniso" | "map_anisotropy" => Some("anisotropy"),
-        "map_anisor" | "map_anisotropy_rotation" => Some("anisotropy_rotation"),
+        "map_anisor" | "map_anisotropy_rotation" | "map_anisotropyrotation" => {
+            Some("anisotropy_rotation")
+        }
         "disp" | "map_disp" | "map_displacement" => Some("displacement"),
         "decal" | "map_decal" => Some("decal"),
         "refl" | "map_refl" => Some("reflection"),
