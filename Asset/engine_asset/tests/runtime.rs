@@ -64,7 +64,13 @@ fn wav_float32_bytes(sample_rate: u32, channels: u16, samples: &[f32]) -> Vec<u8
     bytes
 }
 
-fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
+fn wav_format_bytes(
+    sample_rate: u32,
+    channels: u16,
+    audio_format: u16,
+    bits_per_sample: u16,
+    data: &[u8],
+) -> Vec<u8> {
     let bytes_per_sample = u32::from(bits_per_sample / 8);
     let data_len = data.len() as u32;
     let mut bytes = Vec::new();
@@ -73,12 +79,84 @@ fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[
     bytes.extend_from_slice(b"WAVE");
     bytes.extend_from_slice(b"fmt ");
     bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&audio_format.to_le_bytes());
     bytes.extend_from_slice(&channels.to_le_bytes());
     bytes.extend_from_slice(&sample_rate.to_le_bytes());
     bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
     bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
     bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
+fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
+    wav_format_bytes(sample_rate, channels, 1, bits_per_sample, data)
+}
+
+fn wav_ima_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 20) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&20u32.to_le_bytes());
+    bytes.extend_from_slice(&17u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(
+        &(sample_rate * u32::from(block_align) / u32::from(samples_per_block)).to_le_bytes(),
+    );
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&samples_per_block.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
+fn wav_ms_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let coefficients = [(256i16, 0i16)];
+    let extension_size = 4 + coefficients.len() as u16 * 4;
+    let fmt_len = 18 + u32::from(extension_size);
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + fmt_len) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&fmt_len.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(
+        &(sample_rate * u32::from(block_align) / u32::from(samples_per_block)).to_le_bytes(),
+    );
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&extension_size.to_le_bytes());
+    bytes.extend_from_slice(&samples_per_block.to_le_bytes());
+    bytes.extend_from_slice(&(coefficients.len() as u16).to_le_bytes());
+    for (coefficient_1, coefficient_2) in coefficients {
+        bytes.extend_from_slice(&coefficient_1.to_le_bytes());
+        bytes.extend_from_slice(&coefficient_2.to_le_bytes());
+    }
     bytes.extend_from_slice(b"data");
     bytes.extend_from_slice(&data_len.to_le_bytes());
     bytes.extend_from_slice(data);
@@ -93,6 +171,45 @@ fn wav_extensible_bytes(
     data: &[u8],
 ) -> Vec<u8> {
     let bytes_per_sample = u32::from(bits_per_sample / 8);
+    let block_align = (u32::from(channels) * bytes_per_sample) as u16;
+    wav_extensible_bytes_with_format_field(
+        sample_rate,
+        channels,
+        block_align,
+        bits_per_sample,
+        bits_per_sample,
+        subformat_tag,
+        data,
+    )
+}
+
+fn wav_extensible_ima_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    wav_extensible_bytes_with_format_field(
+        sample_rate,
+        channels,
+        block_align,
+        4,
+        samples_per_block,
+        17,
+        data,
+    )
+}
+
+fn wav_extensible_bytes_with_format_field(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    bits_per_sample: u16,
+    format_field: u16,
+    subformat_tag: u16,
+    data: &[u8],
+) -> Vec<u8> {
     let data_len = data.len() as u32;
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"RIFF");
@@ -103,11 +220,11 @@ fn wav_extensible_bytes(
     bytes.extend_from_slice(&0xfffeu16.to_le_bytes());
     bytes.extend_from_slice(&channels.to_le_bytes());
     bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
-    bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(block_align)).to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
     bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
     bytes.extend_from_slice(&22u16.to_le_bytes());
-    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(&format_field.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&u32::from(subformat_tag).to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
@@ -1446,6 +1563,142 @@ fn wav_integer_pcm_audio_bit_depths_load_as_i16_samples() {
 }
 
 #[test]
+fn wav_g711_audio_formats_load_as_i16_samples() {
+    let cases = [
+        (
+            "alaw",
+            wav_format_bytes(44_100, 2, 6, 8, &[0xd5, 0x55, 0xaa, 0x2a]),
+            vec![8, -8, 32256, -32256],
+        ),
+        (
+            "mulaw",
+            wav_format_bytes(44_100, 2, 7, 8, &[0xff, 0x7f, 0x80, 0x00]),
+            vec![0, 0, 32124, -32124],
+        ),
+    ];
+
+    for (name, wav, expected_samples) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, 44_100);
+        assert_eq!(loaded.channels, 2);
+        assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
+fn wav_ima_adpcm_audio_loads_as_i16_samples() {
+    let mono_block = [0, 0, 0, 0, 0x11, 0x91, 0, 0];
+    let mut stereo_block = Vec::new();
+    stereo_block.extend_from_slice(&1000i16.to_le_bytes());
+    stereo_block.extend_from_slice(&[0, 0]);
+    stereo_block.extend_from_slice(&(-1000i16).to_le_bytes());
+    stereo_block.extend_from_slice(&[0, 0]);
+    stereo_block.extend_from_slice(&[0; 8]);
+    let stereo_expected = std::iter::repeat([1000, -1000])
+        .take(9)
+        .flatten()
+        .collect::<Vec<_>>();
+    let cases = [
+        (
+            "ima-mono",
+            wav_ima_adpcm_bytes(22_050, 1, 8, 5, &mono_block),
+            1,
+            5.0 / 22_050.0,
+            vec![0, 1, 2, 3, 2],
+        ),
+        (
+            "ima-stereo",
+            wav_ima_adpcm_bytes(22_050, 2, 16, 9, &stereo_block),
+            2,
+            9.0 / 22_050.0,
+            stereo_expected,
+        ),
+    ];
+
+    for (name, wav, channels, duration_seconds, expected_samples) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, 22_050);
+        assert_eq!(loaded.channels, channels);
+        assert_eq!(loaded.duration_seconds, duration_seconds);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
+fn wav_ms_adpcm_audio_loads_as_i16_samples() {
+    let mut mono_block = Vec::new();
+    mono_block.push(0);
+    mono_block.extend_from_slice(&16i16.to_le_bytes());
+    mono_block.extend_from_slice(&1000i16.to_le_bytes());
+    mono_block.extend_from_slice(&990i16.to_le_bytes());
+    mono_block.push(0x11);
+    let mut stereo_block = Vec::new();
+    stereo_block.extend_from_slice(&[0, 0]);
+    stereo_block.extend_from_slice(&16i16.to_le_bytes());
+    stereo_block.extend_from_slice(&16i16.to_le_bytes());
+    stereo_block.extend_from_slice(&1000i16.to_le_bytes());
+    stereo_block.extend_from_slice(&(-1000i16).to_le_bytes());
+    stereo_block.extend_from_slice(&900i16.to_le_bytes());
+    stereo_block.extend_from_slice(&(-900i16).to_le_bytes());
+    stereo_block.extend_from_slice(&[0x00, 0x00]);
+    let cases = [
+        (
+            "ms-adpcm-mono",
+            wav_ms_adpcm_bytes(22_050, 1, 8, 4, &mono_block),
+            1,
+            4.0 / 22_050.0,
+            vec![990, 1000, 1016, 1032],
+        ),
+        (
+            "ms-adpcm-stereo",
+            wav_ms_adpcm_bytes(22_050, 2, 16, 4, &stereo_block),
+            2,
+            4.0 / 22_050.0,
+            vec![900, -900, 1000, -1000, 1000, -1000, 1000, -1000],
+        ),
+    ];
+
+    for (name, wav, channels, duration_seconds, expected_samples) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, 22_050);
+        assert_eq!(loaded.channels, channels);
+        assert_eq!(loaded.duration_seconds, duration_seconds);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
 fn wav_extensible_audio_subformats_load_through_runtime_loader() {
     let pcm24 = wav_extensible_bytes(
         44_100,
@@ -1461,23 +1714,55 @@ fn wav_extensible_audio_subformats_load_through_runtime_loader() {
         float32_samples.extend_from_slice(&sample.to_le_bytes());
     }
     let float32 = wav_extensible_bytes(48_000, 2, 32, 3, &float32_samples);
+    let alaw = wav_extensible_bytes(44_100, 2, 8, 6, &[0xd5, 0x55, 0xaa, 0x2a]);
+    let mulaw = wav_extensible_bytes(44_100, 2, 8, 7, &[0xff, 0x7f, 0x80, 0x00]);
+    let ima_adpcm =
+        wav_extensible_ima_adpcm_bytes(22_050, 1, 8, 5, &[0, 0, 0, 0, 0x11, 0x91, 0, 0]);
 
     let cases = [
         (
             "pcm24-extensible",
             pcm24,
             44_100,
+            2,
+            2.0 / 44_100.0,
             AudioSamples::I16(vec![-32768, 0, 32767, -1]),
         ),
         (
             "float32-extensible",
             float32,
             48_000,
+            2,
+            2.0 / 48_000.0,
             AudioSamples::F32(vec![0.0, 0.5, -0.25, 1.0]),
+        ),
+        (
+            "alaw-extensible",
+            alaw,
+            44_100,
+            2,
+            2.0 / 44_100.0,
+            AudioSamples::I16(vec![8, -8, 32256, -32256]),
+        ),
+        (
+            "mulaw-extensible",
+            mulaw,
+            44_100,
+            2,
+            2.0 / 44_100.0,
+            AudioSamples::I16(vec![0, 0, 32124, -32124]),
+        ),
+        (
+            "ima-extensible",
+            ima_adpcm,
+            22_050,
+            1,
+            5.0 / 22_050.0,
+            AudioSamples::I16(vec![0, 1, 2, 3, 2]),
         ),
     ];
 
-    for (name, wav, sample_rate, expected_samples) in cases {
+    for (name, wav, sample_rate, channels, duration_seconds, expected_samples) in cases {
         let path = format!("audio/{name}.wav");
         let io = MemoryAssetIo::new().with_file(&path, wav);
         let mut server = server_with_io(io);
@@ -1489,8 +1774,8 @@ fn wav_extensible_audio_subformats_load_through_runtime_loader() {
         assert!(server.drain_gpu_uploads().next().is_none());
         let loaded = server.get(&audio).unwrap();
         assert_eq!(loaded.sample_rate, sample_rate);
-        assert_eq!(loaded.channels, 2);
-        assert_eq!(loaded.duration_seconds, 2.0 / sample_rate as f32);
+        assert_eq!(loaded.channels, channels);
+        assert_eq!(loaded.duration_seconds, duration_seconds);
         assert_eq!(loaded.samples, expected_samples);
         assert!(!loaded.streaming);
     }
@@ -1612,7 +1897,7 @@ fn invalid_wav_extensible_audio_subformat_fails_with_decode_error_and_event() {
     for sample in [0i16, 1000, -1000, 0] {
         sample_bytes.extend_from_slice(&sample.to_le_bytes());
     }
-    let wav = wav_extensible_bytes(44_100, 2, 16, 6, &sample_bytes);
+    let wav = wav_extensible_bytes(44_100, 2, 16, 99, &sample_bytes);
     let io = MemoryAssetIo::new().with_file("audio/unsupported_extensible.wav", wav);
     let mut server = server_with_io(io);
 
@@ -1623,7 +1908,7 @@ fn invalid_wav_extensible_audio_subformat_fails_with_decode_error_and_event() {
     assert!(matches!(
         server.error_by_id(audio.id()),
         Some(AssetError::Decode { message })
-            if message.contains("unsupported WAV extensible subformat 6")
+            if message.contains("unsupported WAV extensible subformat 99")
     ));
     assert!(server
         .events()
@@ -1684,6 +1969,54 @@ fn invalid_wav_extensible_audio_metadata_fails_with_decode_error_and_event() {
             .iter()
             .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
     }
+}
+
+#[test]
+fn invalid_wav_ima_adpcm_audio_metadata_fails_with_decode_error_and_event() {
+    let wav = wav_ima_adpcm_bytes(22_050, 1, 8, 5, &[0, 0, 89, 0, 0, 0, 0, 0]);
+    let io = MemoryAssetIo::new().with_file("audio/broken_ima.wav", wav);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/broken_ima.wav");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("WAV IMA ADPCM step index 89")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_wav_ms_adpcm_audio_metadata_fails_with_decode_error_and_event() {
+    let mut block = Vec::new();
+    block.push(1);
+    block.extend_from_slice(&16i16.to_le_bytes());
+    block.extend_from_slice(&1000i16.to_le_bytes());
+    block.extend_from_slice(&990i16.to_le_bytes());
+    block.push(0);
+    let wav = wav_ms_adpcm_bytes(22_050, 1, 8, 4, &block);
+    let io = MemoryAssetIo::new().with_file("audio/broken_ms_adpcm.wav", wav);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/broken_ms_adpcm.wav");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("WAV MS ADPCM predictor 1")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
 }
 
 #[test]

@@ -61,7 +61,13 @@ fn wav_pcm16_bytes(sample_rate: u32, channels: u16, samples: &[i16]) -> Vec<u8> 
     bytes
 }
 
-fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
+fn wav_format_bytes(
+    sample_rate: u32,
+    channels: u16,
+    audio_format: u16,
+    bits_per_sample: u16,
+    data: &[u8],
+) -> Vec<u8> {
     let bytes_per_sample = u32::from(bits_per_sample / 8);
     let data_len = data.len() as u32;
     let mut bytes = Vec::new();
@@ -70,12 +76,84 @@ fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[
     bytes.extend_from_slice(b"WAVE");
     bytes.extend_from_slice(b"fmt ");
     bytes.extend_from_slice(&16u32.to_le_bytes());
-    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&audio_format.to_le_bytes());
     bytes.extend_from_slice(&channels.to_le_bytes());
     bytes.extend_from_slice(&sample_rate.to_le_bytes());
     bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
     bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
     bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
+fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
+    wav_format_bytes(sample_rate, channels, 1, bits_per_sample, data)
+}
+
+fn wav_ima_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 20) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&20u32.to_le_bytes());
+    bytes.extend_from_slice(&17u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(
+        &(sample_rate * u32::from(block_align) / u32::from(samples_per_block)).to_le_bytes(),
+    );
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&samples_per_block.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
+fn wav_ms_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let coefficients = [(256i16, 0i16)];
+    let extension_size = 4 + coefficients.len() as u16 * 4;
+    let fmt_len = 18 + u32::from(extension_size);
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + fmt_len) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&fmt_len.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(
+        &(sample_rate * u32::from(block_align) / u32::from(samples_per_block)).to_le_bytes(),
+    );
+    bytes.extend_from_slice(&block_align.to_le_bytes());
+    bytes.extend_from_slice(&4u16.to_le_bytes());
+    bytes.extend_from_slice(&extension_size.to_le_bytes());
+    bytes.extend_from_slice(&samples_per_block.to_le_bytes());
+    bytes.extend_from_slice(&(coefficients.len() as u16).to_le_bytes());
+    for (coefficient_1, coefficient_2) in coefficients {
+        bytes.extend_from_slice(&coefficient_1.to_le_bytes());
+        bytes.extend_from_slice(&coefficient_2.to_le_bytes());
+    }
     bytes.extend_from_slice(b"data");
     bytes.extend_from_slice(&data_len.to_le_bytes());
     bytes.extend_from_slice(data);
@@ -90,6 +168,45 @@ fn wav_extensible_bytes(
     data: &[u8],
 ) -> Vec<u8> {
     let bytes_per_sample = u32::from(bits_per_sample / 8);
+    let block_align = (u32::from(channels) * bytes_per_sample) as u16;
+    wav_extensible_bytes_with_format_field(
+        sample_rate,
+        channels,
+        block_align,
+        bits_per_sample,
+        bits_per_sample,
+        subformat_tag,
+        data,
+    )
+}
+
+fn wav_extensible_ima_adpcm_bytes(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    samples_per_block: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    wav_extensible_bytes_with_format_field(
+        sample_rate,
+        channels,
+        block_align,
+        4,
+        samples_per_block,
+        17,
+        data,
+    )
+}
+
+fn wav_extensible_bytes_with_format_field(
+    sample_rate: u32,
+    channels: u16,
+    block_align: u16,
+    bits_per_sample: u16,
+    format_field: u16,
+    subformat_tag: u16,
+    data: &[u8],
+) -> Vec<u8> {
     let data_len = data.len() as u32;
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"RIFF");
@@ -100,11 +217,11 @@ fn wav_extensible_bytes(
     bytes.extend_from_slice(&0xfffeu16.to_le_bytes());
     bytes.extend_from_slice(&channels.to_le_bytes());
     bytes.extend_from_slice(&sample_rate.to_le_bytes());
-    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
-    bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(block_align)).to_le_bytes());
+    bytes.extend_from_slice(&block_align.to_le_bytes());
     bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
     bytes.extend_from_slice(&22u16.to_le_bytes());
-    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(&format_field.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&u32::from(subformat_tag).to_le_bytes());
     bytes.extend_from_slice(&0u16.to_le_bytes());
@@ -15919,7 +16036,7 @@ fn database_builtin_wav_pcm24_import_cook_and_runtime_load_canonicalizes_to_i16(
     );
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
-    assert_eq!(output.version_hash, VersionHash(4));
+    assert_eq!(output.version_hash, VersionHash(8));
     assert_eq!(output.bytes, expected);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
@@ -15951,6 +16068,273 @@ fn database_builtin_wav_pcm24_import_cook_and_runtime_load_canonicalizes_to_i16(
 }
 
 #[test]
+fn database_builtin_wav_g711_import_cook_and_runtime_loads() {
+    let cases = [
+        (
+            "alaw",
+            6u16,
+            vec![0xd5, 0x55, 0xaa, 0x2a],
+            vec![8, -8, 32256, -32256],
+            "8,-8,32256,-32256",
+        ),
+        (
+            "mulaw",
+            7u16,
+            vec![0xff, 0x7f, 0x80, 0x00],
+            vec![0, 0, 32124, -32124],
+            "0,0,32124,-32124",
+        ),
+    ];
+
+    for (name, audio_format, encoded_samples, expected_samples, expected_sample_text) in cases {
+        let config = database_config(&format!("builtin_wav_{name}_g711_audio_runtime_load"));
+        let path = AssetPath::parse(&format!("audio/{name}.wav"));
+        let bytes = wav_format_bytes(44_100, 2, audio_format, 8, &encoded_samples);
+        let expected = format!(
+            "NGA_AUDIO_V1\nsample_rate=44100\nchannels=2\nformat=i16\nsamples={expected_sample_text}\nstreaming=false\n"
+        )
+        .into_bytes();
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let id = database.import_asset_path(&path).unwrap();
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+        assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(
+            fs::read(config.imported_root.join(path.path())).unwrap(),
+            bytes
+        );
+        let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+        assert_eq!(output.version_hash, VersionHash(8));
+        assert_eq!(output.bytes, expected);
+        assert_eq!(
+            fs::read(config.cooked_root.join(path.path())).unwrap(),
+            expected
+        );
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        assert!(metadata.cooked_hash.is_some());
+
+        let mut server = AssetServer::new(AssetServerConfig {
+            root: config.cooked_root.clone(),
+            ..AssetServerConfig::default()
+        });
+        server.register_builtin_loaders();
+        let audio: Handle<AudioClip> = server.load(path);
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, 44_100);
+        assert_eq!(loaded.channels, 2);
+        assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
+fn database_builtin_wav_ima_adpcm_import_cook_and_runtime_loads() {
+    let config = database_config("builtin_wav_ima_adpcm_audio_runtime_load");
+    let path = AssetPath::parse("audio/voice.wav");
+    let block = [0, 0, 0, 0, 0x11, 0x91, 0, 0];
+    let bytes = wav_ima_adpcm_bytes(22_050, 1, 8, 5, &block);
+    let expected =
+        b"NGA_AUDIO_V1\nsample_rate=22050\nchannels=1\nformat=i16\nsamples=0,1,2,3,2\nstreaming=false\n"
+            .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), bytes.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        bytes
+    );
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert!(metadata.cooked_hash.is_some());
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 22_050);
+    assert_eq!(loaded.channels, 1);
+    assert_eq!(loaded.duration_seconds, 5.0 / 22_050.0);
+    assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1, 2, 3, 2]));
+    assert!(!loaded.streaming);
+}
+
+#[test]
+fn database_builtin_wav_ms_adpcm_import_cook_and_runtime_loads() {
+    let config = database_config("builtin_wav_ms_adpcm_audio_runtime_load");
+    let path = AssetPath::parse("audio/radio.wav");
+    let mut block = Vec::new();
+    block.push(0);
+    block.extend_from_slice(&16i16.to_le_bytes());
+    block.extend_from_slice(&1000i16.to_le_bytes());
+    block.extend_from_slice(&990i16.to_le_bytes());
+    block.push(0x11);
+    let bytes = wav_ms_adpcm_bytes(22_050, 1, 8, 4, &block);
+    let expected =
+        b"NGA_AUDIO_V1\nsample_rate=22050\nchannels=1\nformat=i16\nsamples=990,1000,1016,1032\nstreaming=false\n"
+            .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), bytes.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        bytes
+    );
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert!(metadata.cooked_hash.is_some());
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 22_050);
+    assert_eq!(loaded.channels, 1);
+    assert_eq!(loaded.duration_seconds, 4.0 / 22_050.0);
+    assert_eq!(
+        loaded.samples,
+        AudioSamples::I16(vec![990, 1000, 1016, 1032])
+    );
+    assert!(!loaded.streaming);
+}
+
+#[test]
+fn database_builtin_wav_extensible_encoded_import_cook_and_runtime_loads() {
+    let cases = [
+        (
+            "alaw",
+            wav_extensible_bytes(44_100, 2, 8, 6, &[0xd5, 0x55, 0xaa, 0x2a]),
+            b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=2\nformat=i16\nsamples=8,-8,32256,-32256\nstreaming=false\n"
+                .to_vec(),
+            44_100,
+            2,
+            2.0 / 44_100.0,
+            vec![8, -8, 32256, -32256],
+        ),
+        (
+            "ima",
+            wav_extensible_ima_adpcm_bytes(22_050, 1, 8, 5, &[0, 0, 0, 0, 0x11, 0x91, 0, 0]),
+            b"NGA_AUDIO_V1\nsample_rate=22050\nchannels=1\nformat=i16\nsamples=0,1,2,3,2\nstreaming=false\n"
+                .to_vec(),
+            22_050,
+            1,
+            5.0 / 22_050.0,
+            vec![0, 1, 2, 3, 2],
+        ),
+    ];
+
+    for (name, bytes, expected, sample_rate, channels, duration_seconds, expected_samples) in cases
+    {
+        let config = database_config(&format!(
+            "builtin_wav_extensible_{name}_encoded_audio_runtime_load"
+        ));
+        let path = AssetPath::parse(&format!("audio/{name}.wav"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let id = database.import_asset_path(&path).unwrap();
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+        assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(
+            fs::read(config.imported_root.join(path.path())).unwrap(),
+            bytes
+        );
+        let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+        assert_eq!(output.version_hash, VersionHash(8));
+        assert_eq!(output.bytes, expected);
+        assert_eq!(
+            fs::read(config.cooked_root.join(path.path())).unwrap(),
+            expected
+        );
+
+        let mut server = AssetServer::new(AssetServerConfig {
+            root: config.cooked_root.clone(),
+            ..AssetServerConfig::default()
+        });
+        server.register_builtin_loaders();
+        let audio: Handle<AudioClip> = server.load(path);
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, sample_rate);
+        assert_eq!(loaded.channels, channels);
+        assert_eq!(loaded.duration_seconds, duration_seconds);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
 fn database_builtin_wav_extensible_float_import_cook_and_runtime_loads() {
     let config = database_config("builtin_wav_extensible_float_audio_runtime_load");
     let path = AssetPath::parse("audio/pad.wav");
@@ -15979,7 +16363,7 @@ fn database_builtin_wav_extensible_float_import_cook_and_runtime_loads() {
     );
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
-    assert_eq!(output.version_hash, VersionHash(4));
+    assert_eq!(output.version_hash, VersionHash(8));
     assert_eq!(output.bytes, expected);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
@@ -16018,7 +16402,7 @@ fn database_builtin_wav_extensible_import_cook_reports_invalid_subformat() {
     for sample in [0i16, 1000, -1000, 0] {
         sample_bytes.extend_from_slice(&sample.to_le_bytes());
     }
-    let bytes = wav_extensible_bytes(44_100, 2, 16, 6, &sample_bytes);
+    let bytes = wav_extensible_bytes(44_100, 2, 16, 99, &sample_bytes);
     let mut io = MemoryAssetIo::new();
     io.insert(path.path(), bytes);
     let mut database = AssetDatabase::new(config);
@@ -16035,7 +16419,7 @@ fn database_builtin_wav_extensible_import_cook_reports_invalid_subformat() {
         error,
         AssetError::Cook { message }
             if message.contains("AudioCooker failed to canonicalize audio source")
-                && message.contains("unsupported WAV extensible subformat 6")
+                && message.contains("unsupported WAV extensible subformat 99")
     ));
 }
 

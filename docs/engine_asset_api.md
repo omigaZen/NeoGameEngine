@@ -4247,12 +4247,17 @@ streaming=false
 
 `AudioLoader` 还会解析基础 RIFF/WAVE payload：当前支持 PCM `format=1`/8-bit unsigned、
 16-bit signed、24-bit signed、32-bit signed little-endian 采样并生成 `AudioSamples::I16`，
-其中 PCM8 以 128 为零点扩展到 i16，PCM24/PCM32 保留高位截断到 i16；也支持 IEEE float
+其中 PCM8 以 128 为零点扩展到 i16，PCM24/PCM32 保留高位截断到 i16；也支持 G.711
+A-law `format=6` 和 mu-law `format=7` 8-bit code 解码为 `AudioSamples::I16`，IMA ADPCM
+`format=17` 4-bit block payload（含 `samples_per_block` fmt extension）与 Microsoft ADPCM
+`format=2` 4-bit block payload（含 `samples_per_block` 和 coefficient table）解码为 `AudioSamples::I16`，以及 IEEE float
 `format=3`/32-bit little-endian 采样并生成 `AudioSamples::F32`。`format=0xfffe`
-WAVE_FORMAT_EXTENSIBLE 会读取 subformat GUID；PCM subformat 走同一 integer PCM 路径，
-IEEE-float subformat 走同一 float32 路径。`fmt ` 和 `data` chunk 必须存在，
+WAVE_FORMAT_EXTENSIBLE 会读取 subformat GUID；PCM、G.711、IMA ADPCM subformat 走同一 i16
+路径，IEEE-float subformat 走同一 float32 路径。`fmt ` 和 `data` chunk 必须存在，
 `channels`/`sample_rate` 必须非零，`block_align` 必须匹配声道数和采样字节数；
-无效 extension size、超出 `bits_per_sample` 的 valid-bits 值、未知 subformat GUID、
+无效 extension size、超出 `bits_per_sample` 的 valid-bits 值、未知 subformat GUID、无效 IMA ADPCM
+`block_align`/`samples_per_block`/step index/reserved byte、无效 Microsoft ADPCM
+`samples_per_block`/coefficient table/predictor/delta/`block_align`、
 或其他不支持的 WAV payload 会返回 `AssetError::Decode`，加载成功同样是 CPU-only
 `Ready`，不会产生 GPU upload command。`encode_audio_clip_runtime_bytes` 会使用同一 finite `f32`
 sample policy，避免把手工构造的 non-finite `AudioClip` 编码成不可加载的 runtime bytes。
@@ -5064,7 +5069,7 @@ impl AudioLoader {
 
 `AudioLoader` 注册 `audio`、`wav`、`ogg` 扩展名，解析文档中的 `NGA_AUDIO_V1`
 文本 payload，也解析基础 RIFF/WAVE PCM8/PCM16/PCM24/PCM32、WAVE_FORMAT_EXTENSIBLE
-PCM/IEEE-float subformat 和 IEEE-float32 payload。对于 Ogg 数据封包，当
+PCM/IEEE-float/G.711/IMA ADPCM subformat、G.711 A-law/mu-law 8-bit code、IMA ADPCM block payload、Microsoft ADPCM block payload 和 IEEE-float32 payload。对于 Ogg 数据封包，当
 `ogg` 页面头可识别为 Opus/Vorbis 标识头时，会返回 `AudioClip` 且 `streaming=true`，并在
 `AudioSamples` 中使用 `Streaming` 占位符。未识别的 Ogg payload 会返回可见 decode error。
 CPU-only `AudioClip` 仍适用于 `NGA_AUDIO_V1` 和 RIFF/WAVE。

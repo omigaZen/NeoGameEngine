@@ -524,7 +524,7 @@ impl AssetCooker for AudioCooker {
     }
 
     fn version(&self) -> u32 {
-        4
+        8
     }
 
     fn asset_type(&self) -> AssetTypeId {

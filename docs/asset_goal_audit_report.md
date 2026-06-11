@@ -1350,3 +1350,69 @@ git diff --check
 ```
 
 Result: formatting passed; WAVE_FORMAT_EXTENSIBLE metadata diagnostics are now covered on the runtime path for extension size, valid-bits, and GUID tail failures. Extensible WAV payloads with `cbSize < 22`, `valid_bits_per_sample > bits_per_sample`, or a non-standard GUID tail now reach visible `Failed` state, preserve the corresponding `AssetError::Decode` message, and emit failed events. The audio runtime filter passed 15 tests; full database passed 196 tests; full engine_asset default suite passed 389 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_g711_audio_formats_load_as_i16_samples
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_g711_import_cook_and_runtime_loads
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `AudioLoader` now decodes RIFF/WAVE G.711 A-law (`format=6`) and mu-law (`format=7`) 8-bit code payloads into `AudioSamples::I16`, with block-align/sample-count validation and CPU-only readiness matching the existing WAV paths. `AudioCooker::version()` is now 5 so G.711 WAV canonicalization is represented in cooked metadata while `MeshCooker` remains at `VersionHash(4)`. The focused runtime test covers A-law and mu-law sample mapping, duration, no GPU upload, and ready state; the database test covers `.wav` import pass-through, canonical cooked `NGA_AUDIO_V1` i16 bytes for both G.711 formats, `VersionHash(5)`, and runtime load from cooked bytes. The audio runtime filter passed 16 tests; full database passed 197 tests; full engine_asset default suite passed 391 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_ima_adpcm_audio_loads_as_i16_samples
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime invalid_wav_ima_adpcm_audio_metadata_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_ima_adpcm_import_cook_and_runtime_loads
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `AudioLoader` now decodes RIFF/WAVE IMA ADPCM (`format=17`) 4-bit block payloads with `samples_per_block` fmt-extension metadata into `AudioSamples::I16`, including mono blocks, stereo channel-chunk interleaving, block-align validation, declared sample truncation, step-index validation, and reserved-byte diagnostics. `AudioCooker::version()` is now 6 so IMA ADPCM WAV canonicalization is represented in cooked metadata while `MeshCooker` remains at `VersionHash(4)`. The focused runtime tests cover mono nibble decoding, stereo predictor/interleaving, duration, no GPU upload, ready state, and invalid step-index failure events; the database test covers `.wav` import pass-through, canonical cooked `NGA_AUDIO_V1` i16 bytes, `VersionHash(6)`, and runtime load from cooked bytes. The audio runtime filter passed 18 tests; full database passed 198 tests; full engine_asset default suite passed 394 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_extensible_audio_subformats_load_through_runtime_loader
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime invalid_wav_extensible_audio_subformat_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_extensible_encoded_import_cook_and_runtime_loads
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; WAVE_FORMAT_EXTENSIBLE subformat handling now maps the already-supported G.711 A-law/mu-law and IMA ADPCM GUID tags into the same decoded `AudioSamples::I16` paths as direct `format=6`/`format=7`/`format=17` WAV payloads. Extensible PCM/IEEE-float still validate the valid-bits field, while extensible IMA ADPCM treats the same union field as `samples_per_block`. `AudioCooker::version()` is now 7 so these newly canonicalized extensible encoded WAV payloads have distinct cooked metadata. The runtime extensible test now covers PCM24, float32, A-law, mu-law, and IMA ADPCM success paths, while the unsupported-subformat test uses tag `99`; the database test covers extensible A-law and IMA ADPCM import pass-through, canonical cooked `NGA_AUDIO_V1` i16 bytes, `VersionHash(7)`, and runtime load from cooked bytes. The audio runtime filter passed 18 tests; full database passed 199 tests; full engine_asset default suite passed 395 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_ms_adpcm
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_ms_adpcm_import_cook_and_runtime_loads
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `AudioLoader` now decodes RIFF/WAVE Microsoft ADPCM (`format=2`) 4-bit block payloads with `samples_per_block` and coefficient-table fmt-extension metadata into `AudioSamples::I16`, including mono and stereo block layout, predictor/coefficient validation, delta validation, block capacity validation, and visible failed-state diagnostics. `AudioCooker::version()` is now 8 so MS ADPCM WAV canonicalization is represented in cooked metadata while existing PCM/G.711/IMA/extensible cooked outputs also use `VersionHash(8)`. The focused runtime filter passed 2 MS ADPCM tests; the full audio runtime filter passed 20 tests; full database passed 200 tests; full engine_asset default suite passed 398 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
