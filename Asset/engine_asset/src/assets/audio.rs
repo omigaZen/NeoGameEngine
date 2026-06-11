@@ -220,11 +220,17 @@ fn parse_i16_samples(value: &str, channels: u16) -> Result<Vec<i16>, AssetError>
 }
 
 fn parse_f32_samples(value: &str, channels: u16) -> Result<Vec<f32>, AssetError> {
-    let samples = parse_sample_list(value, "f32", |sample| {
-        sample.parse::<f32>().map_err(|error| error.to_string())
-    })?;
+    let samples = parse_sample_list(value, "f32", parse_f32_sample)?;
     validate_sample_count(samples.len(), channels)?;
     Ok(samples)
+}
+
+fn parse_f32_sample(sample: &str) -> Result<f32, String> {
+    let value = sample.parse::<f32>().map_err(|error| error.to_string())?;
+    if !value.is_finite() {
+        return Err("value must be finite".to_owned());
+    }
+    Ok(value)
 }
 
 fn parse_sample_list<T>(
@@ -581,7 +587,7 @@ pub fn canonical_audio_runtime_bytes(bytes: &[u8]) -> Result<Vec<u8>, AssetError
 pub fn encode_audio_clip_runtime_bytes(audio: &AudioClip) -> Result<Vec<u8>, AssetError> {
     let (sample_format, samples) = match &audio.samples {
         AudioSamples::I16(samples) => ("i16", canonical_audio_i16_samples(samples)),
-        AudioSamples::F32(samples) => ("f32", canonical_audio_f32_samples(samples)),
+        AudioSamples::F32(samples) => ("f32", canonical_audio_f32_samples(samples)?),
         AudioSamples::Streaming(_) => {
             return Err(AssetError::Decode {
                 message: "audio streaming samples cannot be encoded to runtime bytes".to_owned(),
@@ -605,16 +611,19 @@ fn canonical_audio_i16_samples(samples: &[i16]) -> String {
         .join(",")
 }
 
-fn canonical_audio_f32_samples(samples: &[f32]) -> String {
-    samples
-        .iter()
-        .map(|sample| {
-            if *sample == 0.0 {
-                "0".to_owned()
-            } else {
-                sample.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",")
+fn canonical_audio_f32_samples(samples: &[f32]) -> Result<String, AssetError> {
+    let mut canonical = Vec::with_capacity(samples.len());
+    for (index, sample) in samples.iter().enumerate() {
+        if !sample.is_finite() {
+            return Err(AssetError::Decode {
+                message: format!("invalid f32 audio sample {index}: value must be finite"),
+            });
+        }
+        canonical.push(if *sample == 0.0 {
+            "0".to_owned()
+        } else {
+            sample.to_string()
+        });
+    }
+    Ok(canonical.join(","))
 }

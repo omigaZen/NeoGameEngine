@@ -373,6 +373,17 @@ fn invalid_material_numeric_property_fails_with_decode_error_and_event() {
 }
 
 #[test]
+fn non_finite_material_numeric_property_fails_with_decode_error_and_event() {
+    for source in [
+        "name=broken\nmetallic=NaN\n",
+        "name=broken\nbase_color=1,inf,1,1\n",
+        "name=broken\ncustom.tint.vec3=1,2,-inf\n",
+    ] {
+        assert_material_decode_error(source, "material float on line 2 must be finite");
+    }
+}
+
+#[test]
 fn invalid_material_bool_property_fails_with_decode_error_and_event() {
     assert_material_decode_error(
         "name=broken\ndouble_sided=sometimes\n",
@@ -1365,6 +1376,53 @@ fn invalid_audio_payload_fails_with_decode_error_and_event() {
         .events()
         .iter()
         .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn non_finite_text_audio_f32_sample_fails_with_decode_error_and_event() {
+    let source = b"NGA_AUDIO_V1
+sample_rate=48000
+channels=1
+format=f32
+samples=0,NaN
+streaming=false
+"
+    .to_vec();
+    let io = MemoryAssetIo::new().with_file("audio/non_finite.audio", source);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/non_finite.audio");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("invalid f32 audio sample 1: value must be finite")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn audio_runtime_encoder_rejects_non_finite_f32_samples() {
+    let clip = AudioClip {
+        sample_rate: 48_000,
+        channels: 1,
+        samples: AudioSamples::F32(vec![0.0, f32::INFINITY]),
+        duration_seconds: 2.0 / 48_000.0,
+        streaming: false,
+    };
+
+    let error = encode_audio_clip_runtime_bytes(&clip).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Decode { message }
+            if message.contains("invalid f32 audio sample 1: value must be finite")
+    ));
 }
 
 #[test]

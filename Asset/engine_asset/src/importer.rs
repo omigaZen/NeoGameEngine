@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        101
+        102
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3341,6 +3341,120 @@ fn parse_obj_group_label(
         });
     }
     Ok(tokens.join("."))
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_call_source(
+    ctx: &ImportContext,
+    source_path: &AssetPath,
+    value: &str,
+    line_number: usize,
+    state: &mut ObjParseState,
+    include_stack: &mut Vec<AssetPath>,
+) -> Result<(), ImportError> {
+    let include_name = parse_obj_call_path(value, line_number)?;
+    let include_path = resolve_obj_call_source_path(source_path, &include_name, line_number)?;
+    let include_key = include_path.without_label();
+    if include_stack.iter().any(|path| path == &include_key) {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} would recursively include `{}`",
+                include_path.display_string()
+            ),
+        });
+    }
+    let Some(include_source) = ctx.source_file(&include_path) else {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} could not find source `{}`",
+                include_path.display_string()
+            ),
+        });
+    };
+    let include_text = std::str::from_utf8(&include_source.bytes).map_err(|error| {
+        AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} source `{}` must be UTF-8: {error}",
+                include_path.display_string()
+            ),
+        }
+    })?;
+    let first_line = strip_model_source_comment(include_text.lines().next().unwrap_or("")).trim();
+    if first_line == "NGA_MODEL_V1" {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} source `{}` must be an OBJ source, not an NGA_MODEL_V1 manifest",
+                include_path.display_string()
+            ),
+        });
+    }
+    include_stack.push(include_key);
+    let result = parse_model_obj_source_into(
+        ctx,
+        &include_path,
+        include_text,
+        first_line == "NGA_MODEL_OBJ_V1",
+        state,
+        include_stack,
+    );
+    include_stack.pop();
+    result.map_err(|error| match error {
+        AssetError::Import { message } => AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} failed for `{}`: {message}",
+                include_path.display_string()
+            ),
+        },
+        other => other,
+    })
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_call_path(value: &str, line_number: usize) -> Result<String, ImportError> {
+    let names = obj_source_line_tokens(value.trim(), line_number)?
+        .into_iter()
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    if names.is_empty() {
+        return Err(AssetError::Import {
+            message: format!("OBJ call is empty on line {line_number}"),
+        });
+    }
+    if names.len() > 1 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ call on line {line_number} accepts exactly one relative .obj source path; macro arguments are unsupported"
+            ),
+        });
+    }
+    Ok(names.into_iter().next().unwrap_or_default())
+}
+
+#[cfg(feature = "model_importer")]
+fn resolve_obj_call_source_path(
+    source_path: &AssetPath,
+    include_name: &str,
+    line_number: usize,
+) -> Result<AssetPath, ImportError> {
+    let normalized = normalize_obj_relative_source_path(include_name).map_err(|()| {
+        AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} must be a relative .obj source path without labels or `..` segments"
+            ),
+        }
+    })?;
+    let include_path = obj_relative_source_path(source_path, normalized);
+    if !include_path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("obj"))
+    {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ call `{include_name}` on line {line_number} must reference a .obj source"
+            ),
+        });
+    }
+    Ok(include_path)
 }
 
 #[cfg(feature = "model_importer")]
@@ -4810,6 +4924,7 @@ enum ObjGeneratedNormalKey {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ObjMaterialLibraryRef {
     name: String,
+    source_path: AssetPath,
     line_number: usize,
 }
 
@@ -4817,7 +4932,49 @@ struct ObjMaterialLibraryRef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ObjMaterialUse {
     name: String,
+    source_path: AssetPath,
     line_number: usize,
+}
+
+#[cfg(feature = "model_importer")]
+#[derive(Clone, Debug, PartialEq)]
+struct ObjParseState {
+    vertices: Vec<[f32; 3]>,
+    texture_coords: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    meshes: Vec<ObjMeshSource>,
+    material_uses: Vec<ObjMaterialUse>,
+    material_libraries: Vec<ObjMaterialLibraryRef>,
+    parameter_vertex_count: usize,
+    curve2_count: usize,
+    surface_count: usize,
+    current: ObjMeshSource,
+    current_material_label: Option<String>,
+    current_smoothing_group: ObjSmoothingGroup,
+}
+
+#[cfg(feature = "model_importer")]
+impl ObjParseState {
+    fn new(has_header: bool) -> Self {
+        Self {
+            vertices: Vec::new(),
+            texture_coords: Vec::new(),
+            normals: Vec::new(),
+            meshes: Vec::new(),
+            material_uses: Vec::new(),
+            material_libraries: Vec::new(),
+            parameter_vertex_count: 0,
+            curve2_count: 0,
+            surface_count: 0,
+            current: ObjMeshSource {
+                label: "Mesh0".to_owned(),
+                material_groups: Vec::new(),
+                line_number: if has_header { 2 } else { 1 },
+            },
+            current_material_label: None,
+            current_smoothing_group: ObjSmoothingGroup::Unspecified,
+        }
+    }
 }
 
 #[cfg(feature = "model_importer")]
@@ -4894,23 +5051,131 @@ fn parse_model_obj_source(
     has_header: bool,
     settings: &ModelImportSettings,
 ) -> Result<Vec<ModelSubresource>, ImportError> {
-    let mut vertices = Vec::new();
-    let mut texture_coords = Vec::new();
-    let mut normals = Vec::new();
-    let mut meshes = Vec::new();
-    let mut material_uses = Vec::<ObjMaterialUse>::new();
-    let mut material_libraries = Vec::new();
-    let mut parameter_vertex_count = 0;
-    let mut curve2_count = 0;
-    let mut surface_count = 0;
-    let mut current = ObjMeshSource {
-        label: "Mesh0".to_owned(),
-        material_groups: Vec::new(),
-        line_number: if has_header { 2 } else { 1 },
-    };
-    let mut current_material_label = None;
-    let mut current_smoothing_group = ObjSmoothingGroup::Unspecified;
+    let mut state = ObjParseState::new(has_header);
+    let mut include_stack = vec![source.path.without_label()];
+    parse_model_obj_source_into(
+        ctx,
+        &source.path,
+        source_text,
+        has_header,
+        &mut state,
+        &mut include_stack,
+    )?;
+    if obj_mesh_has_triangles(&state.current) {
+        let final_mesh = std::mem::replace(
+            &mut state.current,
+            ObjMeshSource {
+                label: String::new(),
+                material_groups: Vec::new(),
+                line_number: 0,
+            },
+        );
+        state.meshes.push(final_mesh);
+    }
+    if state.vertices.is_empty() {
+        return Err(AssetError::Import {
+            message: "OBJ model must contain at least one vertex".to_owned(),
+        });
+    }
+    if state.meshes.is_empty() {
+        return Err(AssetError::Import {
+            message: "OBJ model must contain at least one face".to_owned(),
+        });
+    }
 
+    let material_properties =
+        obj_material_properties_from_libraries(ctx, &state.material_libraries)?;
+    validate_obj_material_uses(
+        &source.path,
+        &state.material_uses,
+        &state.material_libraries,
+        &material_properties,
+    )?;
+    let mut subresources = Vec::new();
+    for mesh in state.meshes {
+        let split_material_groups = mesh.material_groups.len() > 1;
+        for (group_index, group) in mesh.material_groups.into_iter().enumerate() {
+            let label = if split_material_groups {
+                obj_material_group_mesh_label(
+                    &mesh.label,
+                    group.material_label.as_deref(),
+                    group_index,
+                )
+            } else {
+                mesh.label.clone()
+            };
+            let line_number = if split_material_groups {
+                group.line_number
+            } else {
+                mesh.line_number
+            };
+            let payload = obj_mesh_payload(
+                &state.vertices,
+                &state.texture_coords,
+                &state.normals,
+                &group.triangles,
+                &label,
+                line_number,
+                settings.generate_tangents,
+            )?;
+            subresources.push(ModelSubresource {
+                kind: "mesh".to_owned(),
+                label,
+                payload,
+                dependency_labels: group
+                    .material_label
+                    .into_iter()
+                    .map(|label| ModelDependencyLabel::new(label, Some("material")))
+                    .collect(),
+                skin_skeleton_label: None,
+                skin_joint_limit: None,
+                skin_influence_limit: None,
+                skin_root_bone: None,
+                animation_skeleton_label: None,
+                material_mesh_label: None,
+                physics_mesh_mesh_label: None,
+                material_labels: Vec::new(),
+                physics_mesh_labels: Vec::new(),
+                lod_mesh_labels: Vec::new(),
+                line_number,
+            });
+        }
+    }
+    for material_use in state.material_uses {
+        subresources.push(ModelSubresource {
+            kind: "material".to_owned(),
+            label: format!("Material/{}", material_use.name),
+            payload: obj_material_payload(
+                &material_use.name,
+                &state.material_libraries,
+                material_properties.materials.get(&material_use.name),
+            ),
+            dependency_labels: Vec::new(),
+            skin_skeleton_label: None,
+            skin_joint_limit: None,
+            skin_influence_limit: None,
+            skin_root_bone: None,
+            animation_skeleton_label: None,
+            material_mesh_label: None,
+            physics_mesh_mesh_label: None,
+            material_labels: Vec::new(),
+            physics_mesh_labels: Vec::new(),
+            lod_mesh_labels: Vec::new(),
+            line_number: material_use.line_number,
+        });
+    }
+    Ok(subresources)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_model_obj_source_into(
+    ctx: &ImportContext,
+    source_path: &AssetPath,
+    source_text: &str,
+    has_header: bool,
+    state: &mut ObjParseState,
+    include_stack: &mut Vec<AssetPath>,
+) -> Result<(), ImportError> {
     for (line_number, line) in obj_logical_source_lines(source_text, "source")? {
         if has_header && line_number == 1 {
             continue;
@@ -4940,39 +5205,45 @@ fn parse_model_obj_source(
                         message: format!("OBJ {directive} label is empty on line {line_number}"),
                     });
                 }
-                if obj_mesh_has_triangles(&current) {
-                    meshes.push(current);
-                }
-                current = ObjMeshSource {
+                let next = ObjMeshSource {
                     label,
                     material_groups: Vec::new(),
                     line_number,
                 };
+                let previous = std::mem::replace(&mut state.current, next);
+                if obj_mesh_has_triangles(&previous) {
+                    state.meshes.push(previous);
+                }
             }
-            "v" => vertices.push(parse_obj_vertex(parts, line_number)?),
-            "vt" => texture_coords.push(parse_obj_texture_coord(parts, line_number)?),
+            "v" => state.vertices.push(parse_obj_vertex(parts, line_number)?),
+            "vt" => state
+                .texture_coords
+                .push(parse_obj_texture_coord(parts, line_number)?),
             "vp" => {
                 parse_obj_parameter_vertex(parts, line_number)?;
-                parameter_vertex_count += 1;
+                state.parameter_vertex_count += 1;
             }
-            "vn" => normals.push(parse_obj_normal(parts, line_number)?),
-            "p" => parse_obj_point_element(parts, vertices.len(), line_number)?,
-            "l" => {
-                parse_obj_line_element(parts, vertices.len(), texture_coords.len(), line_number)?
-            }
+            "vn" => state.normals.push(parse_obj_normal(parts, line_number)?),
+            "p" => parse_obj_point_element(parts, state.vertices.len(), line_number)?,
+            "l" => parse_obj_line_element(
+                parts,
+                state.vertices.len(),
+                state.texture_coords.len(),
+                line_number,
+            )?,
             "f" | "fo" => {
                 let triangles = parse_obj_face(
                     parts,
-                    vertices.len(),
-                    texture_coords.len(),
-                    normals.len(),
+                    state.vertices.len(),
+                    state.texture_coords.len(),
+                    state.normals.len(),
                     line_number,
                 )?;
                 push_obj_mesh_triangles(
-                    &mut current,
-                    current_material_label.as_ref(),
+                    &mut state.current,
+                    state.current_material_label.as_ref(),
                     triangles,
-                    &current_smoothing_group,
+                    &state.current_smoothing_group,
                     line_number,
                 );
             }
@@ -4989,18 +5260,33 @@ fn parse_model_obj_source(
                     });
                 }
                 let label = format!("Material/{name}");
-                if !material_uses.iter().any(|existing| existing.name == name) {
-                    material_uses.push(ObjMaterialUse { name, line_number });
+                if !state.material_uses.iter().any(|existing| {
+                    existing.name == name && existing.source_path == source_path.without_label()
+                }) {
+                    state.material_uses.push(ObjMaterialUse {
+                        name,
+                        source_path: source_path.without_label(),
+                        line_number,
+                    });
                 }
-                current_material_label = Some(label);
+                state.current_material_label = Some(label);
             }
             "mtllib" => parse_obj_material_libraries(
                 line[directive.len()..].trim(),
+                source_path,
                 line_number,
-                &mut material_libraries,
+                &mut state.material_libraries,
+            )?,
+            "call" => parse_obj_call_source(
+                ctx,
+                source_path,
+                line[directive.len()..].trim(),
+                line_number,
+                state,
+                include_stack,
             )?,
             "s" => {
-                current_smoothing_group = parse_obj_smoothing_group(parts, line_number)?;
+                state.current_smoothing_group = parse_obj_smoothing_group(parts, line_number)?;
             }
             "bevel" | "c_interp" | "d_interp" => {
                 parse_obj_on_off_attribute(parts, directive_key.as_str(), line_number)?
@@ -5021,32 +5307,37 @@ fn parse_model_obj_source(
             "deg" => parse_obj_positive_integer_attribute(parts, "deg", line_number)?,
             "bmat" => parse_obj_basis_matrix_attribute(parts, line_number)?,
             "step" => parse_obj_positive_integer_attribute(parts, "step", line_number)?,
-            "curv" => parse_obj_curve_element(parts, vertices.len(), line_number)?,
+            "curv" => parse_obj_curve_element(parts, state.vertices.len(), line_number)?,
             "curv2" => {
-                parse_obj_curve2_element(parts, parameter_vertex_count, line_number)?;
-                curve2_count += 1;
+                parse_obj_curve2_element(parts, state.parameter_vertex_count, line_number)?;
+                state.curve2_count += 1;
             }
             "surf" => {
                 parse_obj_surface_element(
                     parts,
-                    vertices.len(),
-                    texture_coords.len(),
-                    normals.len(),
+                    state.vertices.len(),
+                    state.texture_coords.len(),
+                    state.normals.len(),
                     line_number,
                 )?;
-                surface_count += 1;
+                state.surface_count += 1;
             }
             "parm" => parse_obj_parameter_values(parts, line_number)?,
             "trim" | "hole" | "scrv" => parse_obj_curve_reference_groups(
                 parts,
                 directive_key.as_str(),
-                curve2_count,
+                state.curve2_count,
                 line_number,
             )?,
-            "con" => {
-                parse_obj_connection_statement(parts, surface_count, curve2_count, line_number)?
+            "con" => parse_obj_connection_statement(
+                parts,
+                state.surface_count,
+                state.curve2_count,
+                line_number,
+            )?,
+            "sp" => {
+                parse_obj_special_point_element(parts, state.parameter_vertex_count, line_number)?
             }
-            "sp" => parse_obj_special_point_element(parts, parameter_vertex_count, line_number)?,
             "end" => parse_obj_end_statement(parts, line_number)?,
             _ => {
                 return Err(AssetError::Import {
@@ -5055,97 +5346,7 @@ fn parse_model_obj_source(
             }
         }
     }
-    if obj_mesh_has_triangles(&current) {
-        meshes.push(current);
-    }
-    if vertices.is_empty() {
-        return Err(AssetError::Import {
-            message: "OBJ model must contain at least one vertex".to_owned(),
-        });
-    }
-    if meshes.is_empty() {
-        return Err(AssetError::Import {
-            message: "OBJ model must contain at least one face".to_owned(),
-        });
-    }
-
-    let material_properties =
-        obj_material_properties_from_libraries(ctx, &source.path, &material_libraries)?;
-    validate_obj_material_uses(&material_uses, &material_libraries, &material_properties)?;
-    let mut subresources = Vec::new();
-    for mesh in meshes {
-        let split_material_groups = mesh.material_groups.len() > 1;
-        for (group_index, group) in mesh.material_groups.into_iter().enumerate() {
-            let label = if split_material_groups {
-                obj_material_group_mesh_label(
-                    &mesh.label,
-                    group.material_label.as_deref(),
-                    group_index,
-                )
-            } else {
-                mesh.label.clone()
-            };
-            let line_number = if split_material_groups {
-                group.line_number
-            } else {
-                mesh.line_number
-            };
-            let payload = obj_mesh_payload(
-                &vertices,
-                &texture_coords,
-                &normals,
-                &group.triangles,
-                &label,
-                line_number,
-                settings.generate_tangents,
-            )?;
-            subresources.push(ModelSubresource {
-                kind: "mesh".to_owned(),
-                label,
-                payload,
-                dependency_labels: group
-                    .material_label
-                    .into_iter()
-                    .map(|label| ModelDependencyLabel::new(label, Some("material")))
-                    .collect(),
-                skin_skeleton_label: None,
-                skin_joint_limit: None,
-                skin_influence_limit: None,
-                skin_root_bone: None,
-                animation_skeleton_label: None,
-                material_mesh_label: None,
-                physics_mesh_mesh_label: None,
-                material_labels: Vec::new(),
-                physics_mesh_labels: Vec::new(),
-                lod_mesh_labels: Vec::new(),
-                line_number,
-            });
-        }
-    }
-    for material_use in material_uses {
-        subresources.push(ModelSubresource {
-            kind: "material".to_owned(),
-            label: format!("Material/{}", material_use.name),
-            payload: obj_material_payload(
-                &material_use.name,
-                &material_libraries,
-                material_properties.materials.get(&material_use.name),
-            ),
-            dependency_labels: Vec::new(),
-            skin_skeleton_label: None,
-            skin_joint_limit: None,
-            skin_influence_limit: None,
-            skin_root_bone: None,
-            animation_skeleton_label: None,
-            material_mesh_label: None,
-            physics_mesh_mesh_label: None,
-            material_labels: Vec::new(),
-            physics_mesh_labels: Vec::new(),
-            lod_mesh_labels: Vec::new(),
-            line_number: material_use.line_number,
-        });
-    }
-    Ok(subresources)
+    Ok(())
 }
 
 #[cfg(feature = "model_importer")]
@@ -5974,6 +6175,7 @@ fn parse_obj_free_form_number(
 #[cfg(feature = "model_importer")]
 fn parse_obj_material_libraries(
     value: &str,
+    source_path: &AssetPath,
     line_number: usize,
     material_libraries: &mut Vec<ObjMaterialLibraryRef>,
 ) -> Result<(), ImportError> {
@@ -5987,11 +6189,16 @@ fn parse_obj_material_libraries(
         });
     }
     for name in names {
+        let source_path = source_path.without_label();
         if !material_libraries
             .iter()
-            .any(|existing| existing.name == name)
+            .any(|existing| existing.name == name && existing.source_path == source_path)
         {
-            material_libraries.push(ObjMaterialLibraryRef { name, line_number });
+            material_libraries.push(ObjMaterialLibraryRef {
+                name,
+                source_path,
+                line_number,
+            });
         }
     }
     Ok(())
@@ -6505,14 +6712,13 @@ fn mesh_vec3_normalize_or(value: [f32; 3], fallback: [f32; 3]) -> [f32; 3] {
 #[cfg(feature = "model_importer")]
 fn obj_material_properties_from_libraries(
     ctx: &ImportContext,
-    source_path: &AssetPath,
     material_libraries: &[ObjMaterialLibraryRef],
 ) -> Result<ObjMaterialLibraryProperties, ImportError> {
     let mut materials = HashMap::new();
     let mut material_sources = HashMap::new();
     let mut loaded_library_count = 0;
     for library in material_libraries {
-        let path = resolve_obj_material_library_path(source_path, library)?;
+        let path = resolve_obj_material_library_path(library)?;
         let Some(source) = ctx.source_file(&path) else {
             continue;
         };
@@ -6558,6 +6764,7 @@ fn obj_material_properties_from_libraries(
 
 #[cfg(feature = "model_importer")]
 fn validate_obj_material_uses(
+    root_source_path: &AssetPath,
     material_uses: &[ObjMaterialUse],
     material_libraries: &[ObjMaterialLibraryRef],
     material_properties: &ObjMaterialLibraryProperties,
@@ -6577,10 +6784,19 @@ fn validate_obj_material_uses(
                 .map(|library| library.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
+            let location = if material_use.source_path == root_source_path.without_label() {
+                format!("on line {}", material_use.line_number)
+            } else {
+                format!(
+                    "in `{}` on line {}",
+                    material_use.source_path.display_string(),
+                    material_use.line_number
+                )
+            };
             return Err(AssetError::Import {
                 message: format!(
-                    "OBJ usemtl `{}` on line {} is not defined by loaded mtllib source(s): {libraries}",
-                    material_use.name, material_use.line_number
+                    "OBJ usemtl `{}` {location} is not defined by loaded mtllib source(s): {libraries}",
+                    material_use.name
                 ),
             });
         }
@@ -6590,7 +6806,6 @@ fn validate_obj_material_uses(
 
 #[cfg(feature = "model_importer")]
 fn resolve_obj_material_library_path(
-    source_path: &AssetPath,
     library: &ObjMaterialLibraryRef,
 ) -> Result<AssetPath, ImportError> {
     let normalized = normalize_obj_relative_source_path(&library.name).map_err(|()| {
@@ -6601,7 +6816,7 @@ fn resolve_obj_material_library_path(
             ),
         }
     })?;
-    Ok(obj_relative_source_path(source_path, normalized))
+    Ok(obj_relative_source_path(&library.source_path, normalized))
 }
 
 #[cfg(feature = "model_importer")]

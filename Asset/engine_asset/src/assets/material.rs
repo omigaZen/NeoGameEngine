@@ -633,9 +633,15 @@ struct MaterialTextureMetadata {
 }
 
 fn parse_f32(value: &str, line_index: usize) -> Result<f32, AssetError> {
-    value.parse().map_err(|error| AssetError::Decode {
+    let value = value.parse::<f32>().map_err(|error| AssetError::Decode {
         message: format!("invalid float on line {}: {error}", line_index + 1),
-    })
+    })?;
+    if !value.is_finite() {
+        return Err(AssetError::Decode {
+            message: format!("material float on line {} must be finite", line_index + 1),
+        });
+    }
+    Ok(value)
 }
 
 fn parse_bool(value: &str, line_index: usize) -> Result<bool, AssetError> {

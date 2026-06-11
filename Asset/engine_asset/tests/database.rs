@@ -2138,7 +2138,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2718,7 +2718,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 101);
+    assert_eq!(physics_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2874,7 +2874,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -3004,7 +3004,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 101);
+    assert_eq!(physics_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3162,7 +3162,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(material_metadata.importer_version, 102);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3421,7 +3421,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3517,7 +3517,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3635,7 +3635,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3807,7 +3807,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4790,7 +4790,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4798,7 +4798,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(material_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5048,7 +5048,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -5884,7 +5884,7 @@ custom.transmission_filter.vec3=0.1,0.2,0.3
         (material_metadata.importer.as_deref()),
         Some("ModelImporter")
     );
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(material_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8455,10 +8455,10 @@ base_color=0.25,0.5,0.75,1
 
     assert_eq!(mesh_metadata.labels, vec!["Display Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(material_metadata.labels, vec!["Material/Brushed Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(material_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8563,10 +8563,10 @@ base_color=0.6,0.4,0.2,1
 
     assert_eq!(mesh_metadata.labels, vec!["Panel #A"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(material_metadata.labels, vec!["Material/Hash # Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(material_metadata.importer_version, 102);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11692,7 +11692,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Body.Shell"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(mesh_metadata.dependencies, Vec::<AssetId>::new());
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -11702,6 +11702,203 @@ i 0 1 2
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
     );
+}
+
+#[test]
+fn database_model_importer_includes_obj_call_sources() {
+    let config = database_config("builtin_model_obj_call_sources");
+    let model_path = AssetPath::parse("models/assembled.obj");
+    let include_path = AssetPath::parse("models/parts/panel.obj");
+    let material_library_path = AssetPath::parse("models/parts/panel.mtl");
+    let mesh_path = AssetPath::parse("models/assembled.Panel.mesh");
+    let material_path = AssetPath::parse("models/assembled.Material_Blue.material");
+    let model_source = b"call parts/panel.obj
+"
+    .to_vec();
+    let first_include = b"mtllib panel.mtl
+usemtl Blue
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let second_include = b"mtllib panel.mtl
+usemtl Blue
+o Panel
+v 0 0 0
+v 2 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Blue
+Kd 0 0 1
+"
+    .to_vec();
+    let first_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let second_mesh = b"v 0 0 0
+v 2 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let expected_material = b"# mtllib panel.mtl
+name=Blue
+base_color=0,0,1,1
+"
+    .to_vec();
+    let mut first_io = MemoryAssetIo::new();
+    first_io.insert(model_path.path(), model_source.clone());
+    first_io.insert(include_path.path(), first_include);
+    first_io.insert(material_library_path.path(), material_source.clone());
+    let mut first = AssetDatabase::new(config.clone());
+    first.set_io(first_io);
+    first.register_builtin_importers();
+
+    let model_id = first.import_asset_path(&model_path).unwrap();
+    let first_hash = first.registry().get(model_id).unwrap().source_hash.unwrap();
+    let mesh_metadata = first.registry().metadata_by_path(&mesh_path).unwrap();
+    let material_metadata = first.registry().metadata_by_path(&material_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+    let material_id = material_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["Panel"]);
+    assert_eq!(mesh_metadata.importer_version, 102);
+    assert_eq!(mesh_metadata.dependencies, vec![material_id]);
+    assert_eq!(material_metadata.labels, vec!["Material/Blue"]);
+    assert_eq!(
+        first.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id, material_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        first_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    first.save_all_metadata_sidecars().unwrap();
+
+    let mut second_io = MemoryAssetIo::new();
+    second_io.insert(model_path.path(), model_source);
+    second_io.insert(include_path.path(), second_include);
+    second_io.insert(material_library_path.path(), material_source);
+    let mut second = AssetDatabase::new(config.clone());
+    second.set_io(second_io);
+    second.register_builtin_importers();
+
+    let report = second.scan_with_metadata().unwrap();
+
+    assert_eq!(report.changed, vec![model_path.clone()]);
+    assert!(report.added.contains(&include_path));
+    assert!(report.added.contains(&material_library_path));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic,
+            AssetDatabaseDiagnostic::ChangedSource {
+                id,
+                path,
+                previous_hash,
+                current_hash,
+            } if *id == model_id
+                && *path == model_path
+                && *previous_hash == first_hash
+                && previous_hash != current_hash
+        )
+    }));
+
+    let reimported_id = second.import_asset_path(&model_path).unwrap();
+    assert_eq!(reimported_id, model_id);
+    assert_ne!(
+        second
+            .registry()
+            .get(reimported_id)
+            .unwrap()
+            .source_hash
+            .unwrap(),
+        first_hash
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        second_mesh
+    );
+}
+
+#[test]
+fn database_model_importer_reports_invalid_obj_call_sources() {
+    for (case, source, expected) in [
+        (
+            "builtin_model_obj_empty_call",
+            "call\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call is empty on line 1",
+        ),
+        (
+            "builtin_model_obj_call_with_macro_args",
+            "call part.obj 1\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call on line 1 accepts exactly one relative .obj source path; macro arguments are unsupported",
+        ),
+        (
+            "builtin_model_obj_call_parent_path",
+            "call ../part.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call `../part.obj` on line 1 must be a relative .obj source path without labels or `..` segments",
+        ),
+        (
+            "builtin_model_obj_call_missing_source",
+            "call missing.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call `missing.obj` on line 1 could not find source `models/missing.obj`",
+        ),
+    ] {
+        let config = database_config(case);
+        let model_path = AssetPath::parse(&format!("models/{case}.obj"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), source.as_bytes().to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&model_path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `ModelImporter` failed")
+                    && message.contains(&model_path.display_string())
+                    && message.contains(expected)
+        ));
+    }
+
+    let config = database_config("builtin_model_obj_call_cycle");
+    let model_path = AssetPath::parse("models/recursive.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), b"call part.obj\n".to_vec());
+    io.insert("models/part.obj", b"call loop.obj\n".to_vec());
+    io.insert("models/loop.obj", b"call part.obj\n".to_vec());
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/recursive.obj")
+                && message.contains("OBJ call `part.obj` on line 1 failed for `models/part.obj`")
+                && message.contains("OBJ call `loop.obj` on line 1 failed for `models/loop.obj`")
+                && message.contains(
+                    "OBJ call `part.obj` on line 1 would recursively include `models/part.obj`"
+                )
+    ));
 }
 
 #[test]
@@ -11864,7 +12061,7 @@ i 0 2 3
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Outline"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -11972,8 +12169,8 @@ base_color=0.25,0.5,0.75,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(mesh_metadata.labels, vec!["Continued"]);
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
-    assert_eq!(material_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
+    assert_eq!(material_metadata.importer_version, 102);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert!(material_metadata.dependencies.is_empty());
     assert_eq!(
@@ -12159,7 +12356,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12253,7 +12450,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Display"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12356,7 +12553,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["FreeForm"]);
-    assert_eq!(mesh_metadata.importer_version, 101);
+    assert_eq!(mesh_metadata.importer_version, 102);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]

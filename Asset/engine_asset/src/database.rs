@@ -1187,11 +1187,7 @@ fn populate_import_source_files(
     };
     for entry in entries {
         let path = AssetPath::parse(&entry).without_label();
-        if path == source.path.without_label()
-            || !path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("mtl"))
-        {
+        if path == source.path.without_label() || !is_model_context_source_path(&path) {
             continue;
         }
         let Ok(bytes) = io.read(path.path()) else {
@@ -1230,11 +1226,7 @@ fn model_context_source_hashes(
     let mut hashes = Vec::new();
     for entry in entries {
         let path = AssetPath::parse(&entry).without_label();
-        if path == source_path.without_label()
-            || !path
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("mtl"))
-        {
+        if path == source_path.without_label() || !is_model_context_source_path(&path) {
             continue;
         }
         let Ok(bytes) = io.read(path.path()) else {
@@ -1248,6 +1240,12 @@ fn model_context_source_hashes(
         hashes.push((path, hash));
     }
     hashes
+}
+
+fn is_model_context_source_path(path: &AssetPath) -> bool {
+    path.extension().is_some_and(|extension| {
+        extension.eq_ignore_ascii_case("mtl") || extension.eq_ignore_ascii_case("obj")
+    })
 }
 
 fn source_asset_directory(path: &str) -> &str {

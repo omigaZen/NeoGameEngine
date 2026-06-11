@@ -1242,3 +1242,48 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ `g` statements now accept multiple group names and canonicalize them into a stable generated mesh label by joining names with `.`, so `g Body Shell` imports as label `Body.Shell` and generated path `Body_Shell.mesh` instead of rejecting or preserving an ambiguous raw label. `ModelImporter::version()` is now 101. The focused database test covers generated metadata labels, sanitized generated path lookup, root-to-generated dependency metadata, runtime mesh payload bytes, and the updated importer version; full database passed 191 tests; full engine_asset default suite passed 377 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_includes_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ `call <relative.obj>` now recursively includes readable `.obj` context sources into the same parser state, so included geometry can generate normal model subresources and include-local `mtllib` declarations resolve relative to the included OBJ path. Invalid `call` statements now fail visibly for empty paths, unsupported macro arguments, invalid/parent paths, missing sources, non-OBJ sources, non-UTF-8 sources, recursive include cycles, and nested include parse failures. OBJ context hashing now folds in readable same-directory/subdirectory `.obj` files alongside `.mtl`, so include-source changes are detected by `scan_with_metadata` and stable-id reimport. `ModelImporter::version()` is now 102. The focused database tests cover successful include import, include-relative MTL material payloads, generated mesh-to-material metadata, source-hash invalidation from included OBJ edits, stable-id reimport, and invalid-call diagnostics; full database passed 193 tests; full engine_asset default suite passed 379 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime non_finite_material_numeric_property_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime material
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; runtime `MaterialLoader` now rejects non-finite material floats (`NaN`, `inf`, `-inf`) during decode instead of letting invalid material state reach renderer-facing GPU upload paths. The shared `parse_f32` path covers scalar material fields, vector fields such as `base_color`, texture transform/color-remap metadata, legacy unknown custom floats, and typed custom float/vector properties. The focused runtime test covers scalar, vec4, and typed custom vec3 non-finite inputs, verifies `Failed` state, preserved decode error text, and emitted failed event; material runtime filter passed 16 tests; full engine_asset default suite passed 380 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime non_finite_text_audio_f32_sample_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio_runtime_encoder_rejects_non_finite_f32_samples
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; runtime text `NGA_AUDIO_V1` `format=f32` samples and the public `encode_audio_clip_runtime_bytes` helper now reject non-finite `f32` values (`NaN`, `inf`, `-inf`) with the same visible decode diagnostic instead of creating runtime bytes that cannot satisfy the loader's finite-sample policy. The focused runtime tests cover non-finite text sample decode failure state/events and encoder-side rejection of manually constructed non-finite `AudioClip` samples; audio runtime filter passed 11 tests; full engine_asset default suite passed 382 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
