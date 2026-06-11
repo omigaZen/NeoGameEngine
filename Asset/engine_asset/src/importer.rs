@@ -2985,7 +2985,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        109
+        111
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3677,7 +3677,8 @@ fn parse_model_subresource_kind(kind: &str, line_number: usize) -> Result<String
 
 #[cfg(feature = "model_importer")]
 fn canonical_model_generated_kind(kind: &str) -> Option<&'static str> {
-    match kind.trim().to_ascii_lowercase().as_str() {
+    let kind = canonical_model_structural_key(kind);
+    match kind.as_str() {
         "mesh" | "geometry" | "render_mesh" => Some("mesh"),
         "physics_mesh" | "physics" | "collision" | "collision_mesh" => Some("physics_mesh"),
         "material" | "mat" => Some("material"),
@@ -3685,6 +3686,27 @@ fn canonical_model_generated_kind(kind: &str) -> Option<&'static str> {
         "animation" | "anim" | "animation_clip" | "clip" => Some("animation"),
         _ => None,
     }
+}
+
+#[cfg(feature = "model_importer")]
+fn canonical_model_structural_key(key: &str) -> String {
+    let mut normalized = String::new();
+    let mut previous_was_separator = false;
+    for character in key.trim().chars() {
+        if character == '-' || character.is_ascii_whitespace() {
+            if !normalized.is_empty() && !previous_was_separator {
+                normalized.push('_');
+                previous_was_separator = true;
+            }
+            continue;
+        }
+        normalized.push(character.to_ascii_lowercase());
+        previous_was_separator = false;
+    }
+    if normalized.ends_with('_') {
+        normalized.pop();
+    }
+    normalized
 }
 
 #[cfg(feature = "model_importer")]
@@ -3821,9 +3843,10 @@ fn parse_model_block_payload(
                 continue;
             }
             if let Some((metadata_key, metadata_value)) = line.split_once('=') {
-                let metadata_key = metadata_key.trim().to_ascii_lowercase();
+                let metadata_key = canonical_model_structural_key(metadata_key);
                 match metadata_key.as_str() {
-                    "depends" | "dependency" => {
+                    "depends" | "dependency" | "dependencies" | "requires" | "require" | "refs"
+                    | "references" => {
                         for dependency in parse_model_dependency_labels(
                             metadata_value.trim(),
                             current_line_number,

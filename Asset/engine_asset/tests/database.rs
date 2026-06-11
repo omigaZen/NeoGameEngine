@@ -2093,8 +2093,8 @@ end # material block end
         .metadata_by_path(&material_path)
         .unwrap();
 
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         mesh_bytes()
@@ -2172,11 +2172,11 @@ end
         .metadata_by_path(&animation_path)
         .unwrap();
 
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(hero_metadata.importer_version, 109);
-    assert_eq!(detail_metadata.importer_version, 109);
-    assert_eq!(skeleton_metadata.importer_version, 109);
-    assert_eq!(animation_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(hero_metadata.importer_version, 111);
+    assert_eq!(detail_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.labels, vec!["Body #Main"]);
     assert_eq!(hero_metadata.labels, vec!["Hero #Material"]);
     assert_eq!(detail_metadata.labels, vec!["Detail,Material"]);
@@ -2346,9 +2346,9 @@ end
         .unwrap();
     let proxy_metadata = database.registry().metadata_by_path(&proxy_path).unwrap();
 
-    assert_eq!(body_metadata.importer_version, 109);
-    assert_eq!(hero_metadata.importer_version, 109);
-    assert_eq!(collision_metadata.importer_version, 109);
+    assert_eq!(body_metadata.importer_version, 111);
+    assert_eq!(hero_metadata.importer_version, 111);
+    assert_eq!(collision_metadata.importer_version, 111);
     assert_eq!(
         body_metadata.dependencies,
         vec![hero_metadata.id, collision_metadata.id, lod_metadata.id]
@@ -2491,13 +2491,13 @@ end
         .metadata_by_path(&proxy_physics_path)
         .unwrap();
 
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(material_metadata.importer_version, 109);
-    assert_eq!(overlay_metadata.importer_version, 109);
-    assert_eq!(skeleton_metadata.importer_version, 109);
-    assert_eq!(animation_metadata.importer_version, 109);
-    assert_eq!(physics_metadata.importer_version, 109);
-    assert_eq!(proxy_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(material_metadata.importer_version, 111);
+    assert_eq!(overlay_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
+    assert_eq!(physics_metadata.importer_version, 111);
+    assert_eq!(proxy_metadata.importer_version, 111);
     assert_eq!(
         mesh_metadata.dependencies,
         vec![
@@ -2619,11 +2619,11 @@ end
     assert_eq!(skeleton_metadata.asset_type, Skeleton::TYPE_ID);
     assert_eq!(animation_metadata.asset_type, AnimationClip::TYPE_ID);
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(material_metadata.importer_version, 109);
-    assert_eq!(skeleton_metadata.importer_version, 109);
-    assert_eq!(animation_metadata.importer_version, 109);
-    assert_eq!(physics_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(material_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
+    assert_eq!(physics_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, vec![material_metadata.id]);
     assert!(material_metadata.dependencies.is_empty());
     assert!(skeleton_metadata.dependencies.is_empty());
@@ -2718,9 +2718,9 @@ end
         .metadata_by_path(&animation_path)
         .unwrap();
 
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(skeleton_metadata.importer_version, 109);
-    assert_eq!(animation_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_metadata.id]);
     assert_eq!(animation_metadata.dependencies, vec![skeleton_metadata.id]);
     assert_eq!(
@@ -2744,6 +2744,327 @@ end
         fs::read(config.imported_root.join(animation_path.path())).unwrap(),
         b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=24\ntrack=bone:Root\ntranslation=0:0,0,0\n"
             .to_vec()
+    );
+}
+
+#[test]
+fn database_model_importer_accepts_manifest_dependency_metadata_aliases() {
+    let config = database_config("builtin_model_manifest_dependency_metadata_aliases");
+    let model_path = AssetPath::parse("models/dependency_aliases.model");
+    let body_path = AssetPath::parse("models/dependency_aliases.Body.mesh");
+    let debug_path = AssetPath::parse("models/dependency_aliases.Debug.mesh");
+    let hero_material_path = AssetPath::parse("models/dependency_aliases.Hero.material");
+    let overlay_material_path = AssetPath::parse("models/dependency_aliases.Overlay.material");
+    let skeleton_path = AssetPath::parse("models/dependency_aliases.Rig.skeleton");
+    let animation_path = AssetPath::parse("models/dependency_aliases.Walk.animation");
+    let physics_path = AssetPath::parse("models/dependency_aliases.Collision.physics");
+    let model_source = b"NGA_MODEL_V1
+mesh=Body
+dependencies=mat:Hero
+---
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+material=Hero
+name=hero
+base_color=1,1,1,1
+end
+skeleton=Rig
+NGA_SKELETON_V1
+bone=Root
+end
+animation=Walk
+requires=rig:Rig
+NGA_ANIMATION_V1
+duration=1
+ticks_per_second=24
+track=bone:Root
+translation=0:0,0,0
+end
+physics_mesh=Collision
+refs=geometry:Body
+NGA_PHYSICS_MESH_V1
+kind=trimesh
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+material=Overlay
+references=physics:Collision
+name=overlay
+base_color=0.25,0.5,0.75,1
+end
+mesh=Debug
+require=render_mesh:Body
+v 0 0 0
+v 0 1 0
+v 1 0 0
+i 0 1 2
+end
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let body_metadata = database.registry().metadata_by_path(&body_path).unwrap();
+    let debug_metadata = database.registry().metadata_by_path(&debug_path).unwrap();
+    let hero_metadata = database
+        .registry()
+        .metadata_by_path(&hero_material_path)
+        .unwrap();
+    let overlay_metadata = database
+        .registry()
+        .metadata_by_path(&overlay_material_path)
+        .unwrap();
+    let skeleton_metadata = database
+        .registry()
+        .metadata_by_path(&skeleton_path)
+        .unwrap();
+    let animation_metadata = database
+        .registry()
+        .metadata_by_path(&animation_path)
+        .unwrap();
+    let physics_metadata = database.registry().metadata_by_path(&physics_path).unwrap();
+
+    assert_eq!(body_metadata.importer_version, 111);
+    assert_eq!(debug_metadata.importer_version, 111);
+    assert_eq!(hero_metadata.importer_version, 111);
+    assert_eq!(overlay_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
+    assert_eq!(physics_metadata.importer_version, 111);
+    assert_eq!(body_metadata.dependencies, vec![hero_metadata.id]);
+    assert!(hero_metadata.dependencies.is_empty());
+    assert!(skeleton_metadata.dependencies.is_empty());
+    assert_eq!(animation_metadata.dependencies, vec![skeleton_metadata.id]);
+    assert_eq!(physics_metadata.dependencies, vec![body_metadata.id]);
+    assert_eq!(overlay_metadata.dependencies, vec![physics_metadata.id]);
+    assert_eq!(debug_metadata.dependencies, vec![body_metadata.id]);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![
+            body_metadata.id,
+            hero_metadata.id,
+            skeleton_metadata.id,
+            animation_metadata.id,
+            physics_metadata.id,
+            overlay_metadata.id,
+            debug_metadata.id
+        ]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(body_path.path())).unwrap(),
+        mesh_bytes()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(debug_path.path())).unwrap(),
+        b"v 0 0 0\nv 0 1 0\nv 1 0 0\ni 0 1 2\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(hero_material_path.path())).unwrap(),
+        b"name=hero\nbase_color=1,1,1,1\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(overlay_material_path.path())).unwrap(),
+        b"name=overlay\nbase_color=0.25,0.5,0.75,1\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(skeleton_path.path())).unwrap(),
+        b"NGA_SKELETON_V1\nbone=Root\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(animation_path.path())).unwrap(),
+        b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=24\ntrack=bone:Root\ntranslation=0:0,0,0\n"
+            .to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(physics_path.path())).unwrap(),
+        physics_mesh_bytes()
+    );
+}
+
+#[test]
+fn database_model_importer_accepts_separator_insensitive_manifest_structure_keys() {
+    let config = database_config("builtin_model_manifest_separator_insensitive_keys");
+    let model_path = AssetPath::parse("models/separator_manifest.model");
+    let body_path = AssetPath::parse("models/separator_manifest.Body.mesh");
+    let lod_path = AssetPath::parse("models/separator_manifest.BodyLOD.mesh");
+    let hero_material_path = AssetPath::parse("models/separator_manifest.Hero.material");
+    let overlay_material_path = AssetPath::parse("models/separator_manifest.Overlay.material");
+    let skeleton_path = AssetPath::parse("models/separator_manifest.Rig.skeleton");
+    let animation_path = AssetPath::parse("models/separator_manifest.Walk.animation");
+    let collision_path = AssetPath::parse("models/separator_manifest.Collision.physics");
+    let proxy_path = AssetPath::parse("models/separator_manifest.Proxy.physics");
+    let model_source = b"NGA_MODEL_V1
+Render-Mesh=Body
+material slot=Hero
+lod-level=BodyLOD
+---
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+mesh=BodyLOD
+v 0 0 0
+v 0.5 0 0
+v 0 0.5 0
+i 0 1 2
+end
+Mat=Hero
+name=hero
+base_color=1,1,1,1
+end
+Skeleton=Rig
+NGA_SKELETON_V1
+bone=Root
+end
+Animation Clip=Walk
+target rig=Rig
+NGA_ANIMATION_V1
+duration=1
+ticks_per_second=24
+track=bone:Root
+translation=0:0,0,0
+end
+Physics-Mesh=Collision
+NGA_PHYSICS_MESH_V1
+kind=trimesh
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+Physics Mesh=Proxy
+source mesh=BodyLOD
+NGA_PHYSICS_MESH_V1
+kind=trimesh
+v 0 0 0
+v 0.5 0 0
+v 0 0.5 0
+i 0 1 2
+end
+Material=Overlay
+depends=physics-mesh:Collision
+target render mesh=Body
+name=overlay
+base_color=0.25,0.5,0.75,1
+end
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let body_metadata = database.registry().metadata_by_path(&body_path).unwrap();
+    let lod_metadata = database.registry().metadata_by_path(&lod_path).unwrap();
+    let hero_metadata = database
+        .registry()
+        .metadata_by_path(&hero_material_path)
+        .unwrap();
+    let overlay_metadata = database
+        .registry()
+        .metadata_by_path(&overlay_material_path)
+        .unwrap();
+    let skeleton_metadata = database
+        .registry()
+        .metadata_by_path(&skeleton_path)
+        .unwrap();
+    let animation_metadata = database
+        .registry()
+        .metadata_by_path(&animation_path)
+        .unwrap();
+    let collision_metadata = database
+        .registry()
+        .metadata_by_path(&collision_path)
+        .unwrap();
+    let proxy_metadata = database.registry().metadata_by_path(&proxy_path).unwrap();
+
+    assert_eq!(body_metadata.asset_type, Mesh::TYPE_ID);
+    assert_eq!(lod_metadata.asset_type, Mesh::TYPE_ID);
+    assert_eq!(hero_metadata.asset_type, Material::TYPE_ID);
+    assert_eq!(overlay_metadata.asset_type, Material::TYPE_ID);
+    assert_eq!(skeleton_metadata.asset_type, Skeleton::TYPE_ID);
+    assert_eq!(animation_metadata.asset_type, AnimationClip::TYPE_ID);
+    assert_eq!(collision_metadata.asset_type, PhysicsMesh::TYPE_ID);
+    assert_eq!(proxy_metadata.asset_type, PhysicsMesh::TYPE_ID);
+    assert_eq!(body_metadata.importer_version, 111);
+    assert_eq!(lod_metadata.importer_version, 111);
+    assert_eq!(hero_metadata.importer_version, 111);
+    assert_eq!(overlay_metadata.importer_version, 111);
+    assert_eq!(skeleton_metadata.importer_version, 111);
+    assert_eq!(animation_metadata.importer_version, 111);
+    assert_eq!(collision_metadata.importer_version, 111);
+    assert_eq!(proxy_metadata.importer_version, 111);
+    assert_eq!(
+        body_metadata.dependencies,
+        vec![hero_metadata.id, lod_metadata.id]
+    );
+    assert!(lod_metadata.dependencies.is_empty());
+    assert!(hero_metadata.dependencies.is_empty());
+    assert!(skeleton_metadata.dependencies.is_empty());
+    assert_eq!(animation_metadata.dependencies, vec![skeleton_metadata.id]);
+    assert!(collision_metadata.dependencies.is_empty());
+    assert_eq!(proxy_metadata.dependencies, vec![lod_metadata.id]);
+    assert_eq!(
+        overlay_metadata.dependencies,
+        vec![collision_metadata.id, body_metadata.id]
+    );
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![
+            body_metadata.id,
+            lod_metadata.id,
+            hero_metadata.id,
+            skeleton_metadata.id,
+            animation_metadata.id,
+            collision_metadata.id,
+            proxy_metadata.id,
+            overlay_metadata.id
+        ]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(body_path.path())).unwrap(),
+        mesh_bytes()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(lod_path.path())).unwrap(),
+        b"v 0 0 0\nv 0.5 0 0\nv 0 0.5 0\ni 0 1 2\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(hero_material_path.path())).unwrap(),
+        b"name=hero\nbase_color=1,1,1,1\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(overlay_material_path.path())).unwrap(),
+        b"name=overlay\nbase_color=0.25,0.5,0.75,1\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(skeleton_path.path())).unwrap(),
+        b"NGA_SKELETON_V1\nbone=Root\n".to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(animation_path.path())).unwrap(),
+        b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=24\ntrack=bone:Root\ntranslation=0:0,0,0\n"
+            .to_vec()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(collision_path.path())).unwrap(),
+        physics_mesh_bytes()
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(proxy_path.path())).unwrap(),
+        b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 0.5 0 0\nv 0 0.5 0\ni 0 1 2\n".to_vec()
     );
 }
 
@@ -3020,7 +3341,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -3600,7 +3921,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 109);
+    assert_eq!(physics_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3756,7 +4077,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -3886,7 +4207,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 109);
+    assert_eq!(physics_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -4044,7 +4365,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(material_metadata.importer_version, 111);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -4303,7 +4624,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -4399,7 +4720,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4517,7 +4838,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4689,7 +5010,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -5672,7 +5993,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -5680,7 +6001,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5930,7 +6251,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -6766,7 +7087,7 @@ custom.transmission_filter.vec3=0.1,0.2,0.3
         (material_metadata.importer.as_deref()),
         Some("ModelImporter")
     );
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -9337,10 +9658,10 @@ base_color=0.25,0.5,0.75,1
 
     assert_eq!(mesh_metadata.labels, vec!["Display Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(material_metadata.labels, vec!["Material/Brushed Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -9445,10 +9766,10 @@ base_color=0.6,0.4,0.2,1
 
     assert_eq!(mesh_metadata.labels, vec!["Panel #A"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(material_metadata.labels, vec!["Material/Hash # Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -12574,7 +12895,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Body.Shell"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, Vec::<AssetId>::new());
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -12653,7 +12974,7 @@ base_color=0,0,1,1
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert_eq!(material_metadata.labels, vec!["Material/Blue"]);
     assert_eq!(
@@ -12943,7 +13264,7 @@ i 0 2 3
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Outline"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -13051,8 +13372,8 @@ base_color=0.25,0.5,0.75,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(mesh_metadata.labels, vec!["Continued"]);
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
-    assert_eq!(material_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(material_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert!(material_metadata.dependencies.is_empty());
     assert_eq!(
@@ -13238,7 +13559,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -13332,7 +13653,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Display"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -13435,7 +13756,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["FreeForm"]);
-    assert_eq!(mesh_metadata.importer_version, 109);
+    assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
