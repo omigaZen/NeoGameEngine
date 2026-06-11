@@ -1416,3 +1416,18 @@ git diff --check
 ```
 
 Result: formatting passed; `AudioLoader` now decodes RIFF/WAVE Microsoft ADPCM (`format=2`) 4-bit block payloads with `samples_per_block` and coefficient-table fmt-extension metadata into `AudioSamples::I16`, including mono and stereo block layout, predictor/coefficient validation, delta validation, block capacity validation, and visible failed-state diagnostics. `AudioCooker::version()` is now 8 so MS ADPCM WAV canonicalization is represented in cooked metadata while existing PCM/G.711/IMA/extensible cooked outputs also use `VersionHash(8)`. The focused runtime filter passed 2 MS ADPCM tests; the full audio runtime filter passed 20 tests; full database passed 200 tests; full engine_asset default suite passed 398 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime font
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database font
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `FontLoader` now registers `font`, `ttf`, and `otf`, keeps bitmap `NGA_FONT_V1` loading, validates TrueType/OpenType sfnt signatures for binary `.ttf`/`.otf` payloads, derives binary font family names from asset path stems, preserves binary bytes, and reports visible decode diagnostics for invalid signatures or truncated headers. `FontImporter::version()` is now 3 and validates runtime/pass-through bitmap and binary font bytes before import output. `FontCooker::version()` is now 2 and validates bitmap/runtime plus TrueType/OpenType source bytes before writing cooked pass-through output. The focused runtime font filter passed 4 tests; the focused database font filter passed 5 tests; full database passed 202 tests; full engine_asset default suite passed 402 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

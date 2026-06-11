@@ -1110,11 +1110,11 @@ impl AssetImporter for FontImporter {
     }
 
     fn version(&self) -> u32 {
-        2
+        3
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["font"]
+        &["font", "ttf", "otf"]
     }
 
     fn import(
@@ -1155,6 +1155,11 @@ impl AssetImporter for FontImporter {
 #[cfg(feature = "importers")]
 fn import_font_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
     if !source.bytes.starts_with(b"NGA_FONT_SOURCE_V1") {
+        crate::assets::font::parse_font_from_path(&source.path, &source.bytes).map_err(
+            |error| AssetError::Import {
+                message: format!("font source is invalid: {error}"),
+            },
+        )?;
         return Ok(source.bytes.clone());
     }
     let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {

@@ -237,6 +237,26 @@ fn font_bytes() -> Vec<u8> {
     b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\n".to_vec()
 }
 
+fn ttf_font_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes
+}
+
+fn otf_font_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"OTTO");
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes
+}
+
 fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
     let mut packet = Vec::new();
     packet.push(0x01);
@@ -16898,9 +16918,10 @@ fn database_builtin_font_import_cook_and_runtime_load_preserves_payload() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
     assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
+    assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.bytes, bytes);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
@@ -16923,6 +16944,70 @@ fn database_builtin_font_import_cook_and_runtime_load_preserves_payload() {
 }
 
 #[test]
+fn database_builtin_binary_font_import_cook_and_runtime_loads() {
+    let cases = [
+        (
+            "truetype",
+            AssetPath::parse("fonts/interface.ttf"),
+            ttf_font_bytes(),
+            "interface",
+        ),
+        (
+            "opentype",
+            AssetPath::parse("fonts/display.otf"),
+            otf_font_bytes(),
+            "display",
+        ),
+    ];
+
+    for (name, path, bytes, family_name) in cases {
+        let config = database_config(&format!("builtin_{name}_font_runtime_load"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let id = database.import_asset_path(&path).unwrap();
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
+        assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(
+            fs::read(config.imported_root.join(path.path())).unwrap(),
+            bytes
+        );
+        let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+
+        assert_eq!(output.version_hash, VersionHash(2));
+        assert_eq!(output.bytes, bytes);
+        assert_eq!(
+            fs::read(config.cooked_root.join(path.path())).unwrap(),
+            bytes
+        );
+
+        let mut server = AssetServer::new(AssetServerConfig {
+            root: config.cooked_root.clone(),
+            ..AssetServerConfig::default()
+        });
+        server.register_builtin_loaders();
+        let font: Handle<Font> = server.load(path);
+        server.update_loading();
+
+        assert!(server.is_ready(&font), "{name} font should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&font).unwrap();
+        assert_eq!(loaded.family_name, family_name);
+        match (&loaded.data, name) {
+            (FontData::TrueType(loaded_bytes), "truetype") => assert_eq!(loaded_bytes, &bytes),
+            (FontData::OpenType(loaded_bytes), "opentype") => assert_eq!(loaded_bytes, &bytes),
+            _ => panic!("{name} font loaded wrong data variant"),
+        }
+    }
+}
+
+#[test]
 fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let config = database_config("font_importer_source_conversion");
     let path = AssetPath::parse("fonts/generated.font");
@@ -16939,7 +17024,7 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
     assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -16947,6 +17032,7 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     );
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.bytes, expected);
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
@@ -17008,6 +17094,27 @@ fn database_font_importer_reports_invalid_source_bitmap() {
             if message.contains("importer `FontImporter` failed")
                 && message.contains("font source glyph bitmap on line 3 has 1 bytes, expected 2")
                 && message.contains("fonts/invalid.font")
+    ));
+}
+
+#[test]
+fn database_font_importer_reports_invalid_binary_font() {
+    let config = database_config("font_importer_invalid_binary_font");
+    let path = AssetPath::parse("fonts/broken.otf");
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), b"not a real font".to_vec());
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `FontImporter` failed")
+                && message.contains("OpenType font source has unsupported signature")
+                && message.contains("fonts/broken.otf")
     ));
 }
 

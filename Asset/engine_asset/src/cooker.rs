@@ -699,6 +699,64 @@ define_passthrough_cooker!(SceneCooker, SceneAsset, 1);
 #[cfg(feature = "cookers")]
 define_passthrough_cooker!(PrefabCooker, Prefab, 1);
 #[cfg(feature = "cookers")]
-define_passthrough_cooker!(FontCooker, Font, 1);
+pub struct FontCooker;
+
+#[cfg(feature = "cookers")]
+impl FontCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl Default for FontCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl AssetCooker for FontCooker {
+    fn name(&self) -> &'static str {
+        "FontCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Font::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "FontCooker requires source bytes".to_owned(),
+            });
+        }
+        let source_path = ctx
+            .source_path
+            .as_ref()
+            .or(metadata.source_path.as_ref())
+            .or(metadata.path.as_ref())
+            .ok_or_else(|| CookError::Cook {
+                message: "FontCooker requires source path metadata".to_owned(),
+            })?;
+        crate::assets::font::parse_font_from_path(source_path, &ctx.source_bytes).map_err(
+            |error| CookError::Cook {
+                message: format!("FontCooker failed to validate font source: {error}"),
+            },
+        )?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: ctx.source_bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&ctx.source_bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
+
 #[cfg(feature = "cookers")]
 define_passthrough_cooker!(PhysicsMeshCooker, PhysicsMesh, 1);

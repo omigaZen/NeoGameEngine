@@ -4492,7 +4492,7 @@ pub enum FontData {
 }
 ```
 
-`FontLoader` 当前支持一个最小 bitmap 文本 payload：
+`FontLoader` 支持一个最小 bitmap 文本 payload：
 
 ```text
 NGA_FONT_V1
@@ -4503,8 +4503,12 @@ glyph=char=A;size=2x1;bitmap=0,255
 第一行必须是 `NGA_FONT_V1`。`family` 必填，至少需要一个 `glyph`。`glyph` 字段使用
 `char=<单字符>;size=<width>x<height>;bitmap=<u8,u8,...>`，bitmap 字节数必须等于
 `width * height`。无效 header、缺失 family、缺失 glyph、非法 size、非法 bitmap 值、
-bitmap 长度不匹配或未知字段都会返回 `AssetError::Decode`。当前生成 `FontData::Bitmap`，
-不会产生 GPU upload command。
+bitmap 长度不匹配或未知字段都会返回 `AssetError::Decode`。`.font` 文本生成
+`FontData::Bitmap`，不会产生 GPU upload command。`FontLoader` 也支持 `.ttf` 和 `.otf`
+二进制字体：`.ttf` 会校验 TrueType sfnt signature（`0x00010000`/`true`/`typ1`），`.otf`
+会校验 OpenType CFF signature（`OTTO`），至少需要 12 字节 sfnt header；加载后分别生成
+`FontData::TrueType` 或 `FontData::OpenType`，二进制 bytes 原样保留，`family_name` 当前使用
+asset path 的文件名 stem。
 
 ---
 
@@ -5156,8 +5160,8 @@ impl FontLoader {
 }
 ```
 
-`FontLoader` 注册 `font` 扩展名，解析文档中的 `NGA_FONT_V1` bitmap 文本 payload，
-并直接生成 CPU-only `Font`。
+`FontLoader` 注册 `font`、`ttf`、`otf` 扩展名，解析文档中的 `NGA_FONT_V1` bitmap 文本
+payload，也校验 TrueType/OpenType sfnt header 并直接生成 CPU-only `Font`。
 
 ---
 
@@ -5603,7 +5607,8 @@ impl FontImporter {
 }
 ```
 
-`FontImporter` 保持 runtime `NGA_FONT_V1` bitmap font payload 的 pass-through 兼容性；如果
+`FontImporter` 保持 runtime `NGA_FONT_V1` bitmap font payload 以及 `.ttf`/`.otf` 二进制
+font payload 的 pass-through 兼容性，并用 `FontLoader` 同一规则校验 pass-through bytes；如果
 source 以 `NGA_FONT_SOURCE_V1` 开头，则会验证并规范化为 `FontLoader` 使用的 runtime 文本：
 
 ```text
@@ -5623,7 +5628,8 @@ glyph=char=B;size=1x1;bitmap=128
 ```
 
 Importer 会验证 `family`、至少一个 glyph、单字符 `char`、非零 `size`、bitmap 字节值和
-`width * height` 字节数，并拒绝重复 family 或重复 glyph。导入错误会包含
+`width * height` 字节数，并拒绝重复 family 或重复 glyph；二进制字体会校验 `.ttf`/`.otf`
+sfnt signature 和最小 header 长度。导入错误会包含
 `FontImporter`、source path 和 settings 上下文。转换后的 bytes 会写入 imported root，
 后续 `cook_asset`、bundle 和 runtime load 都使用该规范化 payload。
 

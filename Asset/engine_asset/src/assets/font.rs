@@ -69,7 +69,7 @@ impl AssetLoader for FontLoader {
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["font"]
+        &["font", "ttf", "otf"]
     }
 
     fn asset_type(&self) -> AssetTypeId {
@@ -78,15 +78,26 @@ impl AssetLoader for FontLoader {
 
     fn load(
         &self,
-        _ctx: &mut LoadContext<'_>,
+        ctx: &mut LoadContext<'_>,
         bytes: &[u8],
         _settings: &LoaderSettings,
     ) -> Result<LoadedAsset, AssetLoadError> {
-        parse_font(bytes).map(LoadedAsset::new)
+        parse_font_from_path(ctx.path(), bytes).map(LoadedAsset::new)
     }
 }
 
-fn parse_font(bytes: &[u8]) -> Result<Font, AssetError> {
+pub(crate) fn parse_font_from_path(
+    path: &crate::path::AssetPath,
+    bytes: &[u8],
+) -> Result<Font, AssetError> {
+    match path.extension().map(str::to_ascii_lowercase).as_deref() {
+        Some("ttf") => parse_binary_font(path, bytes, BinaryFontKind::TrueType),
+        Some("otf") => parse_binary_font(path, bytes, BinaryFontKind::OpenType),
+        _ => parse_bitmap_font(bytes),
+    }
+}
+
+fn parse_bitmap_font(bytes: &[u8]) -> Result<Font, AssetError> {
     let source = std::str::from_utf8(bytes).map_err(|error| AssetError::Decode {
         message: format!("font source must be UTF-8: {error}"),
     })?;
@@ -141,6 +152,75 @@ fn parse_font(bytes: &[u8]) -> Result<Font, AssetError> {
         family_name,
         data: FontData::Bitmap(BitmapFont { glyphs }),
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BinaryFontKind {
+    TrueType,
+    OpenType,
+}
+
+fn parse_binary_font(
+    path: &crate::path::AssetPath,
+    bytes: &[u8],
+    kind: BinaryFontKind,
+) -> Result<Font, AssetError> {
+    if bytes.len() < 12 {
+        return Err(AssetError::Decode {
+            message: format!(
+                "{} font source is truncated; expected at least 12 bytes",
+                binary_font_kind_name(kind)
+            ),
+        });
+    }
+    let signature = bytes.get(0..4).unwrap_or_default();
+    let valid = match kind {
+        BinaryFontKind::TrueType => {
+            matches!(signature, b"\x00\x01\x00\x00" | b"true" | b"typ1")
+        }
+        BinaryFontKind::OpenType => signature == b"OTTO",
+    };
+    if !valid {
+        return Err(AssetError::Decode {
+            message: format!(
+                "{} font source has unsupported signature {}",
+                binary_font_kind_name(kind),
+                format_font_signature(signature)
+            ),
+        });
+    }
+    let family_name = font_family_from_path(path, kind);
+    let data = match kind {
+        BinaryFontKind::TrueType => FontData::TrueType(bytes.to_vec()),
+        BinaryFontKind::OpenType => FontData::OpenType(bytes.to_vec()),
+    };
+    Ok(Font { family_name, data })
+}
+
+fn binary_font_kind_name(kind: BinaryFontKind) -> &'static str {
+    match kind {
+        BinaryFontKind::TrueType => "TrueType",
+        BinaryFontKind::OpenType => "OpenType",
+    }
+}
+
+fn font_family_from_path(path: &crate::path::AssetPath, kind: BinaryFontKind) -> String {
+    path.path()
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.').map(|(stem, _)| stem).or(Some(name)))
+        .filter(|stem| !stem.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("{} Font", binary_font_kind_name(kind)))
+}
+
+fn format_font_signature(signature: &[u8]) -> String {
+    let bytes = signature
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("[{bytes}]")
 }
 
 fn parse_bitmap_glyph(value: &str, line_number: usize) -> Result<BitmapGlyph, AssetError> {

@@ -294,6 +294,26 @@ fn font_bytes() -> Vec<u8> {
     b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\n".to_vec()
 }
 
+fn ttf_font_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&[0x00, 0x01, 0x00, 0x00]);
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes
+}
+
+fn otf_font_bytes() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"OTTO");
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes.extend_from_slice(&0u16.to_be_bytes());
+    bytes
+}
+
 fn physics_mesh_bytes() -> Vec<u8> {
     b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
 }
@@ -2216,11 +2236,66 @@ fn font_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn binary_font_formats_load_reaches_ready_without_renderer_upload() {
+    let cases = [
+        (
+            "fonts/interface.ttf",
+            ttf_font_bytes(),
+            "interface",
+            "truetype",
+        ),
+        ("fonts/display.otf", otf_font_bytes(), "display", "opentype"),
+    ];
+
+    for (path, bytes, family_name, kind) in cases {
+        let io = MemoryAssetIo::new().with_file(path, bytes.clone());
+        let mut server = server_with_io(io);
+
+        let font: Handle<Font> = server.load(path);
+        server.update_loading();
+
+        assert!(server.is_ready(&font), "{path} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&font).unwrap();
+        assert_eq!(loaded.family_name, family_name);
+        match (&loaded.data, kind) {
+            (FontData::TrueType(loaded_bytes), "truetype") => assert_eq!(loaded_bytes, &bytes),
+            (FontData::OpenType(loaded_bytes), "opentype") => assert_eq!(loaded_bytes, &bytes),
+            _ => panic!("{path} loaded wrong font data variant"),
+        }
+        assert!(server
+            .events()
+            .iter()
+            .any(|event| matches!(event, AssetEvent::Ready { id } if *id == font.id())));
+    }
+}
+
+#[test]
 fn invalid_font_payload_fails_with_decode_error_and_event() {
     assert_font_decode_error(
         "NGA_FONT_V1\nfamily=Debug\nglyph=char=A;size=2x2;bitmap=0,255\n",
         "expected 4",
     );
+}
+
+#[test]
+fn invalid_binary_font_payload_fails_with_decode_error_and_event() {
+    let io = MemoryAssetIo::new().with_file("fonts/broken.ttf", b"not a real font".to_vec());
+    let mut server = server_with_io(io);
+
+    let font: Handle<Font> = server.load("fonts/broken.ttf");
+    server.update_loading();
+
+    assert_eq!(server.state(&font), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(font.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("TrueType font source has unsupported signature")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == font.id())));
 }
 
 #[test]
