@@ -349,7 +349,7 @@ Result: 3 smoke integration tests passed, covering non-owning renderer/audio/phy
 
 `Asset/engine_asset/tests/runtime.rs` covers:
 
-- Audio load success paths through minimal `NGA_AUDIO_V1` payload parsing plus RIFF/WAVE PCM16 and float32 payload parsing, CPU-only `Ready`, sample/duration fields, no GPU upload, and ready event observation.
+- Audio load success paths through minimal `NGA_AUDIO_V1` payload parsing plus RIFF/WAVE PCM8/PCM16/PCM24/PCM32, WAVE_FORMAT_EXTENSIBLE PCM/IEEE-float subformats, and IEEE-float32 payload parsing, CPU-only `Ready`, sample/duration fields, no GPU upload, and ready event observation.
 - Invalid text audio and invalid WAV payload failures with visible `AssetError::Decode` and failed events.
 - Skeleton load success path through minimal `NGA_SKELETON_V1` payload parsing, CPU-only `Ready`, bone hierarchy fields, no GPU upload, and ready event observation.
 - Skeleton payload success with explicit bind/inverse-bind matrices, explicit inverse-bind validation against accumulated parent bind poses, plus invalid skeleton payload failure with visible `AssetError::Decode` and failed event.
@@ -1287,3 +1287,66 @@ git diff --check
 ```
 
 Result: formatting passed; runtime text `NGA_AUDIO_V1` `format=f32` samples and the public `encode_audio_clip_runtime_bytes` helper now reject non-finite `f32` values (`NaN`, `inf`, `-inf`) with the same visible decode diagnostic instead of creating runtime bytes that cannot satisfy the loader's finite-sample policy. The focused runtime tests cover non-finite text sample decode failure state/events and encoder-side rejection of manually constructed non-finite `AudioClip` samples; audio runtime filter passed 11 tests; full engine_asset default suite passed 382 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_integer_pcm_audio_bit_depths_load_as_i16_samples
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_pcm24_import_cook_and_runtime_load_canonicalizes_to_i16
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `AudioLoader` now accepts RIFF/WAVE PCM `format=1` 8-bit unsigned, 16-bit signed, 24-bit signed, and 32-bit signed integer payloads, canonicalizing all integer PCM paths into `AudioSamples::I16` while retaining IEEE-float32 WAV as `AudioSamples::F32`. PCM8 uses 128 as the zero point, and PCM24/PCM32 preserve the high bits when reducing to i16. `AudioCooker::version()` is now 3 so newly supported WAV integer bit depths produce distinct cooked metadata. The focused runtime test covers PCM8/PCM24/PCM32 sample mapping, CPU-only readiness, duration, and no GPU upload; the database test covers PCM24 `.wav` import pass-through, cook output as canonical `NGA_AUDIO_V1` i16 bytes, `VersionHash(3)`, and runtime load from cooked bytes. The audio runtime filter passed 12 tests; full database passed 194 tests; full engine_asset default suite passed 384 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime wav_extensible_audio_subformats_load_through_runtime_loader
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_extensible_float_import_cook_and_runtime_loads
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `AudioLoader` now recognizes WAVE_FORMAT_EXTENSIBLE (`format=0xfffe`) `fmt ` chunks, validates the extension size, valid-bits field, and subformat GUID, and maps PCM subformats into the existing PCM8/16/24/32 integer paths and IEEE-float subformats into the existing finite float32 path. Unsupported or malformed extensible GUID data now returns visible `AssetError::Decode` instead of falling through as a generic unsupported WAV format. `AudioCooker::version()` is now 4 so extensible WAV canonicalization is represented in cooked metadata. The focused runtime test covers extensible PCM24 and extensible float32 runtime loading, CPU-only readiness, duration, and no GPU upload; the database test covers extensible float32 `.wav` import pass-through, canonical cooked `NGA_AUDIO_V1` f32 bytes, `VersionHash(4)`, and runtime load from cooked bytes. The audio runtime filter passed 13 tests; full database passed 195 tests; full engine_asset default suite passed 386 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime invalid_wav_extensible_audio_subformat_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_builtin_wav_extensible_import_cook_reports_invalid_subformat
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; WAVE_FORMAT_EXTENSIBLE error behavior is now covered in both runtime and editor/cook paths. Runtime loading of an extensible WAV with unsupported subformat tag `6` now reaches visible `Failed` state, preserves the `unsupported WAV extensible subformat 6` decode message, and emits a failed event. Database import still preserves the source `.wav` payload, while `AudioCooker` canonicalization fails visibly with `AudioCooker failed to canonicalize audio source` plus the same unsupported-subformat diagnostic. The audio runtime filter passed 14 tests; full database passed 196 tests; full engine_asset default suite passed 388 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime invalid_wav_extensible_audio_metadata_fails_with_decode_error_and_event
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; WAVE_FORMAT_EXTENSIBLE metadata diagnostics are now covered on the runtime path for extension size, valid-bits, and GUID tail failures. Extensible WAV payloads with `cbSize < 22`, `valid_bits_per_sample > bits_per_sample`, or a non-standard GUID tail now reach visible `Failed` state, preserve the corresponding `AssetError::Decode` message, and emit failed events. The audio runtime filter passed 15 tests; full database passed 196 tests; full engine_asset default suite passed 389 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

@@ -64,6 +64,61 @@ fn wav_float32_bytes(sample_rate: u32, channels: u16, samples: &[f32]) -> Vec<u8
     bytes
 }
 
+fn wav_pcm_bytes(sample_rate: u32, channels: u16, bits_per_sample: u16, data: &[u8]) -> Vec<u8> {
+    let bytes_per_sample = u32::from(bits_per_sample / 8);
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 16) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
+    bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
+    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
+fn wav_extensible_bytes(
+    sample_rate: u32,
+    channels: u16,
+    bits_per_sample: u16,
+    subformat_tag: u16,
+    data: &[u8],
+) -> Vec<u8> {
+    let bytes_per_sample = u32::from(bits_per_sample / 8);
+    let data_len = data.len() as u32;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(4 + (8 + 40) + (8 + data_len)).to_le_bytes());
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&40u32.to_le_bytes());
+    bytes.extend_from_slice(&0xfffeu16.to_le_bytes());
+    bytes.extend_from_slice(&channels.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * u32::from(channels) * bytes_per_sample).to_le_bytes());
+    bytes.extend_from_slice(&((u32::from(channels) * bytes_per_sample) as u16).to_le_bytes());
+    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(&22u16.to_le_bytes());
+    bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&u32::from(subformat_tag).to_le_bytes());
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes.extend_from_slice(&0x0010u16.to_le_bytes());
+    bytes.extend_from_slice(&[0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71]);
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    bytes.extend_from_slice(data);
+    bytes
+}
+
 fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
     let mut packet = Vec::new();
     packet.push(0x01);
@@ -1337,6 +1392,111 @@ fn wav_audio_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn wav_integer_pcm_audio_bit_depths_load_as_i16_samples() {
+    let cases = [
+        (
+            "pcm8",
+            wav_pcm_bytes(44_100, 2, 8, &[0, 128, 255, 64]),
+            vec![-32768, 0, 32512, -16384],
+        ),
+        (
+            "pcm24",
+            wav_pcm_bytes(
+                44_100,
+                2,
+                24,
+                &[
+                    0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0xff, 0xff, 0x7f, 0x00, 0xff, 0xff,
+                ],
+            ),
+            vec![-32768, 0, 32767, -1],
+        ),
+        (
+            "pcm32",
+            wav_pcm_bytes(
+                44_100,
+                2,
+                32,
+                &[
+                    0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0x7f, 0x00,
+                    0x00, 0x01, 0x00,
+                ],
+            ),
+            vec![-32768, 0, 32767, 1],
+        ),
+    ];
+
+    for (name, wav, expected_samples) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, 44_100);
+        assert_eq!(loaded.channels, 2);
+        assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
+        assert_eq!(loaded.samples, AudioSamples::I16(expected_samples));
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
+fn wav_extensible_audio_subformats_load_through_runtime_loader() {
+    let pcm24 = wav_extensible_bytes(
+        44_100,
+        2,
+        24,
+        1,
+        &[
+            0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0xff, 0xff, 0x7f, 0x00, 0xff, 0xff,
+        ],
+    );
+    let mut float32_samples = Vec::new();
+    for sample in [0.0f32, 0.5, -0.25, 1.0] {
+        float32_samples.extend_from_slice(&sample.to_le_bytes());
+    }
+    let float32 = wav_extensible_bytes(48_000, 2, 32, 3, &float32_samples);
+
+    let cases = [
+        (
+            "pcm24-extensible",
+            pcm24,
+            44_100,
+            AudioSamples::I16(vec![-32768, 0, 32767, -1]),
+        ),
+        (
+            "float32-extensible",
+            float32,
+            48_000,
+            AudioSamples::F32(vec![0.0, 0.5, -0.25, 1.0]),
+        ),
+    ];
+
+    for (name, wav, sample_rate, expected_samples) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert!(server.is_ready(&audio), "{name} should load");
+        assert!(server.drain_gpu_uploads().next().is_none());
+        let loaded = server.get(&audio).unwrap();
+        assert_eq!(loaded.sample_rate, sample_rate);
+        assert_eq!(loaded.channels, 2);
+        assert_eq!(loaded.duration_seconds, 2.0 / sample_rate as f32);
+        assert_eq!(loaded.samples, expected_samples);
+        assert!(!loaded.streaming);
+    }
+}
+
+#[test]
 fn wav_float32_audio_load_reaches_ready_without_renderer_upload() {
     let wav = wav_float32_bytes(48_000, 2, &[0.0, 0.5, -0.25, 1.0]);
     let io = MemoryAssetIo::new().with_file("audio/tone.wav", wav);
@@ -1444,6 +1604,86 @@ fn invalid_wav_audio_payload_fails_with_decode_error_and_event() {
         .events()
         .iter()
         .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_wav_extensible_audio_subformat_fails_with_decode_error_and_event() {
+    let mut sample_bytes = Vec::new();
+    for sample in [0i16, 1000, -1000, 0] {
+        sample_bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    let wav = wav_extensible_bytes(44_100, 2, 16, 6, &sample_bytes);
+    let io = MemoryAssetIo::new().with_file("audio/unsupported_extensible.wav", wav);
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/unsupported_extensible.wav");
+    server.update_loading();
+
+    assert_eq!(server.state(&audio), AssetLoadState::Failed);
+    assert!(matches!(
+        server.error_by_id(audio.id()),
+        Some(AssetError::Decode { message })
+            if message.contains("unsupported WAV extensible subformat 6")
+    ));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+}
+
+#[test]
+fn invalid_wav_extensible_audio_metadata_fails_with_decode_error_and_event() {
+    let mut sample_bytes = Vec::new();
+    for sample in [0i16, 1000, -1000, 0] {
+        sample_bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+
+    let mut short_extension = wav_extensible_bytes(44_100, 2, 16, 1, &sample_bytes);
+    short_extension[36..38].copy_from_slice(&21u16.to_le_bytes());
+    let mut invalid_valid_bits = wav_extensible_bytes(44_100, 2, 16, 1, &sample_bytes);
+    invalid_valid_bits[38..40].copy_from_slice(&17u16.to_le_bytes());
+    let mut invalid_guid_tail = wav_extensible_bytes(44_100, 2, 16, 1, &sample_bytes);
+    invalid_guid_tail[52] ^= 0x01;
+
+    let cases = [
+        (
+            "short-extension",
+            short_extension,
+            "WAV extensible fmt chunk extension size 21 must be at least 22",
+        ),
+        (
+            "invalid-valid-bits",
+            invalid_valid_bits,
+            "WAV valid bits per sample 17 exceeds bits per sample 16",
+        ),
+        (
+            "invalid-guid-tail",
+            invalid_guid_tail,
+            "unsupported WAV extensible subformat GUID",
+        ),
+    ];
+
+    for (name, wav, expected_message) in cases {
+        let path = format!("audio/{name}.wav");
+        let io = MemoryAssetIo::new().with_file(&path, wav);
+        let mut server = server_with_io(io);
+
+        let audio: Handle<AudioClip> = server.load(path.as_str());
+        server.update_loading();
+
+        assert_eq!(server.state(&audio), AssetLoadState::Failed, "{name}");
+        assert!(
+            matches!(
+                server.error_by_id(audio.id()),
+                Some(AssetError::Decode { message }) if message.contains(expected_message)
+            ),
+            "{name} should include `{expected_message}`"
+        );
+        assert!(server
+            .events()
+            .iter()
+            .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == audio.id())));
+    }
 }
 
 #[test]

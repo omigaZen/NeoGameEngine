@@ -400,6 +400,13 @@ struct WavFormat {
     bits_per_sample: u16,
 }
 
+const WAV_FORMAT_PCM: u16 = 1;
+const WAV_FORMAT_IEEE_FLOAT: u16 = 3;
+const WAV_FORMAT_EXTENSIBLE: u16 = 0xfffe;
+const WAV_EXTENSIBLE_SUBFORMAT_TAIL: [u8; 12] = [
+    0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71,
+];
+
 fn parse_wav_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err(AssetError::Decode {
@@ -455,11 +462,23 @@ fn parse_wav_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     })?;
 
     let samples = match (format.audio_format, format.bits_per_sample) {
-        (1, 16) => {
-            validate_wav_block_align(format, 2)?;
-            AudioSamples::I16(parse_wav_i16_samples(data, format.channels)?)
+        (WAV_FORMAT_PCM, 8) => {
+            validate_wav_block_align(format, 1)?;
+            AudioSamples::I16(parse_wav_pcm8_samples(data, format.channels)?)
         }
-        (3, 32) => {
+        (WAV_FORMAT_PCM, 16) => {
+            validate_wav_block_align(format, 2)?;
+            AudioSamples::I16(parse_wav_pcm16_samples(data, format.channels)?)
+        }
+        (WAV_FORMAT_PCM, 24) => {
+            validate_wav_block_align(format, 3)?;
+            AudioSamples::I16(parse_wav_pcm24_samples(data, format.channels)?)
+        }
+        (WAV_FORMAT_PCM, 32) => {
+            validate_wav_block_align(format, 4)?;
+            AudioSamples::I16(parse_wav_pcm32_samples(data, format.channels)?)
+        }
+        (WAV_FORMAT_IEEE_FLOAT, 32) => {
             validate_wav_block_align(format, 4)?;
             AudioSamples::F32(parse_wav_f32_samples(data, format.channels)?)
         }
@@ -494,13 +513,67 @@ fn parse_wav_format(bytes: &[u8]) -> Result<WavFormat, AssetError> {
         });
     }
 
+    let audio_format = read_wav_u16(bytes, 0, "audio format")?;
+    let bits_per_sample = read_wav_u16(bytes, 14, "bits per sample")?;
+    let audio_format = if audio_format == WAV_FORMAT_EXTENSIBLE {
+        parse_wav_extensible_audio_format(bytes, bits_per_sample)?
+    } else {
+        audio_format
+    };
+
     Ok(WavFormat {
-        audio_format: read_wav_u16(bytes, 0, "audio format")?,
+        audio_format,
         channels: read_wav_u16(bytes, 2, "channels")?,
         sample_rate: read_wav_u32(bytes, 4, "sample rate")?,
         block_align: read_wav_u16(bytes, 12, "block align")?,
-        bits_per_sample: read_wav_u16(bytes, 14, "bits per sample")?,
+        bits_per_sample,
     })
+}
+
+fn parse_wav_extensible_audio_format(
+    bytes: &[u8],
+    bits_per_sample: u16,
+) -> Result<u16, AssetError> {
+    if bytes.len() < 40 {
+        return Err(AssetError::Decode {
+            message: "WAV extensible fmt chunk must be at least 40 bytes".to_owned(),
+        });
+    }
+
+    let extension_size = read_wav_u16(bytes, 16, "extensible extension size")?;
+    if extension_size < 22 {
+        return Err(AssetError::Decode {
+            message: format!(
+                "WAV extensible fmt chunk extension size {extension_size} must be at least 22"
+            ),
+        });
+    }
+
+    let valid_bits_per_sample = read_wav_u16(bytes, 18, "valid bits per sample")?;
+    if valid_bits_per_sample != 0 && valid_bits_per_sample > bits_per_sample {
+        return Err(AssetError::Decode {
+            message: format!(
+                "WAV valid bits per sample {valid_bits_per_sample} exceeds bits per sample {bits_per_sample}"
+            ),
+        });
+    }
+
+    let subformat = bytes.get(24..40).ok_or_else(|| AssetError::Decode {
+        message: "WAV extensible subformat GUID is truncated".to_owned(),
+    })?;
+    if subformat[2] != 0 || subformat[3] != 0 || subformat[4..] != WAV_EXTENSIBLE_SUBFORMAT_TAIL {
+        return Err(AssetError::Decode {
+            message: "unsupported WAV extensible subformat GUID".to_owned(),
+        });
+    }
+
+    let subformat_tag = u16::from_le_bytes([subformat[0], subformat[1]]);
+    match subformat_tag {
+        WAV_FORMAT_PCM | WAV_FORMAT_IEEE_FLOAT => Ok(subformat_tag),
+        other => Err(AssetError::Decode {
+            message: format!("unsupported WAV extensible subformat {other}"),
+        }),
+    }
 }
 
 fn validate_wav_block_align(format: WavFormat, bytes_per_sample: u16) -> Result<(), AssetError> {
@@ -521,16 +594,66 @@ fn validate_wav_block_align(format: WavFormat, bytes_per_sample: u16) -> Result<
     Ok(())
 }
 
-fn parse_wav_i16_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
+fn parse_wav_pcm8_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
+    let samples = bytes
+        .iter()
+        .map(|sample| (i16::from(*sample) - 128) << 8)
+        .collect::<Vec<_>>();
+    validate_sample_count(samples.len(), channels)?;
+    Ok(samples)
+}
+
+fn parse_wav_pcm16_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
     if bytes.len() % 2 != 0 {
         return Err(AssetError::Decode {
-            message: "WAV i16 data byte length must be divisible by 2".to_owned(),
+            message: "WAV PCM16 data byte length must be divisible by 2".to_owned(),
         });
     }
 
     let samples = bytes
         .chunks_exact(2)
         .map(|sample| i16::from_le_bytes([sample[0], sample[1]]))
+        .collect::<Vec<_>>();
+    validate_sample_count(samples.len(), channels)?;
+    Ok(samples)
+}
+
+fn parse_wav_pcm24_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
+    if bytes.len() % 3 != 0 {
+        return Err(AssetError::Decode {
+            message: "WAV PCM24 data byte length must be divisible by 3".to_owned(),
+        });
+    }
+
+    let samples = bytes
+        .chunks_exact(3)
+        .map(|sample| {
+            let signed = i32::from_le_bytes([
+                sample[0],
+                sample[1],
+                sample[2],
+                if sample[2] & 0x80 == 0 { 0x00 } else { 0xff },
+            ]);
+            (signed >> 8) as i16
+        })
+        .collect::<Vec<_>>();
+    validate_sample_count(samples.len(), channels)?;
+    Ok(samples)
+}
+
+fn parse_wav_pcm32_samples(bytes: &[u8], channels: u16) -> Result<Vec<i16>, AssetError> {
+    if bytes.len() % 4 != 0 {
+        return Err(AssetError::Decode {
+            message: "WAV PCM32 data byte length must be divisible by 4".to_owned(),
+        });
+    }
+
+    let samples = bytes
+        .chunks_exact(4)
+        .map(|sample| {
+            let signed = i32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]);
+            (signed >> 16) as i16
+        })
         .collect::<Vec<_>>();
     validate_sample_count(samples.len(), channels)?;
     Ok(samples)
