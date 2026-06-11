@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        100
+        101
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3326,6 +3326,21 @@ fn parse_obj_quoted_or_raw_value(
         });
     }
     Ok(tokens.into_iter().next().unwrap_or_default())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_group_label(
+    value: &str,
+    directive: &str,
+    line_number: usize,
+) -> Result<String, ImportError> {
+    let tokens = obj_source_line_tokens(value.trim(), line_number)?;
+    if tokens.iter().any(|token| token.is_empty()) {
+        return Err(AssetError::Import {
+            message: format!("OBJ {directive} label is empty on line {line_number}"),
+        });
+    }
+    Ok(tokens.join("."))
 }
 
 #[cfg(feature = "model_importer")]
@@ -4910,12 +4925,16 @@ fn parse_model_obj_source(
         let parts = tokens.iter().skip(1).map(String::as_str);
         match directive_key.as_str() {
             "o" | "g" => {
-                let label = parse_obj_quoted_or_raw_value(
-                    line[directive.len()..].trim(),
-                    directive,
-                    "label",
-                    line_number,
-                )?;
+                let label = if directive_key == "g" {
+                    parse_obj_group_label(line[directive.len()..].trim(), directive, line_number)?
+                } else {
+                    parse_obj_quoted_or_raw_value(
+                        line[directive.len()..].trim(),
+                        directive,
+                        "label",
+                        line_number,
+                    )?
+                };
                 if label.is_empty() {
                     return Err(AssetError::Import {
                         message: format!("OBJ {directive} label is empty on line {line_number}"),

@@ -1227,3 +1227,18 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ MTL texture-map `-texres` non-zero diagnostics are now covered and documented on the `ModelImporter` path. `-texres 0` returns a visible `ModelImporter` import error with OBJ source path, MTL library/path, directive, option name, rejected value, line number, and the greater-than-zero requirement, matching the runtime material loader's non-zero texture-resolution contract instead of surfacing a later material decode failure. `ModelImporter::version()` is now 100. The focused invalid texture-option database test covers the diagnostic while preserving the existing unknown-option diagnostic; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_combines_obj_multi_group_labels
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ `g` statements now accept multiple group names and canonicalize them into a stable generated mesh label by joining names with `.`, so `g Body Shell` imports as label `Body.Shell` and generated path `Body_Shell.mesh` instead of rejecting or preserving an ambiguous raw label. `ModelImporter::version()` is now 101. The focused database test covers generated metadata labels, sanitized generated path lookup, root-to-generated dependency metadata, runtime mesh payload bytes, and the updated importer version; full database passed 191 tests; full engine_asset default suite passed 377 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
