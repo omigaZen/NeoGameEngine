@@ -1077,3 +1077,33 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ/MTL inline comment stripping is now quote-aware, so unquoted `#` still starts comments while `#` inside single/double quoted OBJ labels/material names and MTL `newmtl` names is preserved. The focused test preserves quoted `#` in generated mesh/material labels and material bytes, cooks and bundles the outputs, runtime-loads the bundle, preserves the mesh-to-material dependency graph, and decodes the expected material base color. `ModelImporter::version()` is now 90. Full database passed 188 tests; full engine_asset default suite passed 374 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_rejects_generated_dependency_cycles
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; `ModelImporter` now rejects generated subresource dependency cycles before emitting generated assets, while preserving the existing more specific diagnostics for self-dependencies, unknown generated labels, and typed dependency kind mismatches. The focused test covers a manifest mesh-to-material plus material-target-mesh cycle and verifies a visible source-context `ModelImporter` error. `ModelImporter::version()` is now 91. Full database passed 189 tests; full engine_asset default suite passed 375 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_transmittance_aliases
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `Kt`/`transmittance`/`transmittance_color` now canonicalize to the existing `custom.transmission_filter.vec3` material field, and `map_Kt`/`map_transmittance`/`map_transmittance_color` now canonicalize to `texture.transmission_filter`. The focused test preserves generated material bytes, registry dependencies, bundle manifest dependencies/readback, runtime preload dependency graphs, decoded `MaterialTextureBinding` source-channel metadata, and decoded runtime custom transmission-filter values. `ModelImporter::version()` is now 92. Full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

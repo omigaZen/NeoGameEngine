@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        90
+        92
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -3033,6 +3033,7 @@ impl AssetImporter for ModelImporter {
         validate_model_animation_skeleton_targets(&subresources)?;
         validate_model_skeleton_payloads(&subresources)?;
         validate_model_animation_payloads(&subresources)?;
+        validate_model_generated_dependency_cycles(&subresources)?;
 
         for subresource in &subresources {
             let local_dependencies =
@@ -6813,7 +6814,12 @@ fn parse_obj_material_library_text(
                         .clamp(0.0, 1.0),
                 );
             }
-            "tf" | "transmission_filter" | "transmission_color" => {
+            "tf"
+            | "kt"
+            | "transmission_filter"
+            | "transmission_color"
+            | "transmittance"
+            | "transmittance_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 current_properties.transmission_filter = Some(parse_obj_material_rgb(
                     parts,
@@ -7913,9 +7919,12 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
         | "map_ambient_occlusion" => Some("occlusion"),
         "map_ke" | "map_emissive" | "map_emission" | "map_emissive_color"
         | "map_emission_color" => Some("emissive"),
-        "map_tf" | "map_transmission_filter" | "map_transmission_color" => {
-            Some("transmission_filter")
-        }
+        "map_tf"
+        | "map_kt"
+        | "map_transmission_filter"
+        | "map_transmission_color"
+        | "map_transmittance"
+        | "map_transmittance_color" => Some("transmission_filter"),
         "map_d" | "map_tr" | "map_opacity" | "map_alpha" | "map_transparency" => Some("alpha"),
         "map_bump" | "bump" | "norm" | "normal" | "map_kn" | "map_normal" | "map_normalgl"
         | "map_normaldx" => Some("normal"),
@@ -8293,6 +8302,117 @@ fn model_local_dependencies(
         }
     }
     Ok(dependencies)
+}
+
+#[cfg(feature = "model_importer")]
+fn validate_model_generated_dependency_cycles(
+    subresources: &[ModelSubresource],
+) -> Result<(), ImportError> {
+    let label_indices = subresources
+        .iter()
+        .enumerate()
+        .map(|(index, subresource)| (subresource.label.as_str(), index))
+        .collect::<HashMap<_, _>>();
+    let mut edges = vec![Vec::<usize>::new(); subresources.len()];
+    for (index, subresource) in subresources.iter().enumerate() {
+        for dependency in &subresource.dependency_labels {
+            let Some(&target_index) = label_indices.get(dependency.label.as_str()) else {
+                continue;
+            };
+            if target_index == index {
+                continue;
+            }
+            if dependency
+                .expected_kind
+                .is_some_and(|expected_kind| subresources[target_index].kind != expected_kind)
+            {
+                continue;
+            }
+            if !edges[index].contains(&target_index) {
+                edges[index].push(target_index);
+            }
+        }
+    }
+
+    let mut states = vec![ModelDependencyVisitState::Unvisited; subresources.len()];
+    let mut stack = Vec::new();
+    for index in 0..subresources.len() {
+        if states[index] == ModelDependencyVisitState::Unvisited {
+            if let Some(cycle) =
+                model_generated_dependency_cycle_from(index, &edges, &mut states, &mut stack)
+            {
+                return Err(AssetError::Import {
+                    message: format!(
+                        "model generated dependency cycle detected: {}",
+                        format_model_generated_dependency_cycle(&cycle, subresources)
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModelDependencyVisitState {
+    Unvisited,
+    Visiting,
+    Visited,
+}
+
+#[cfg(feature = "model_importer")]
+fn model_generated_dependency_cycle_from(
+    index: usize,
+    edges: &[Vec<usize>],
+    states: &mut [ModelDependencyVisitState],
+    stack: &mut Vec<usize>,
+) -> Option<Vec<usize>> {
+    states[index] = ModelDependencyVisitState::Visiting;
+    stack.push(index);
+    for &target_index in &edges[index] {
+        match states[target_index] {
+            ModelDependencyVisitState::Unvisited => {
+                if let Some(cycle) =
+                    model_generated_dependency_cycle_from(target_index, edges, states, stack)
+                {
+                    return Some(cycle);
+                }
+            }
+            ModelDependencyVisitState::Visiting => {
+                let cycle_start = stack
+                    .iter()
+                    .position(|candidate| *candidate == target_index)
+                    .unwrap_or(0);
+                let mut cycle = stack[cycle_start..].to_vec();
+                cycle.push(target_index);
+                return Some(cycle);
+            }
+            ModelDependencyVisitState::Visited => {}
+        }
+    }
+    stack.pop();
+    states[index] = ModelDependencyVisitState::Visited;
+    None
+}
+
+#[cfg(feature = "model_importer")]
+fn format_model_generated_dependency_cycle(
+    cycle: &[usize],
+    subresources: &[ModelSubresource],
+) -> String {
+    let mut output = String::new();
+    for (position, &index) in cycle.iter().enumerate() {
+        let subresource = &subresources[index];
+        if position > 0 {
+            output.push_str(" -> ");
+        }
+        output.push_str(&format!(
+            "{} `{}` on line {}",
+            subresource.kind, subresource.label, subresource.line_number
+        ));
+    }
+    output
 }
 
 #[cfg(feature = "model_importer")]
