@@ -1107,3 +1107,93 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ MTL `Kt`/`transmittance`/`transmittance_color` now canonicalize to the existing `custom.transmission_filter.vec3` material field, and `map_Kt`/`map_transmittance`/`map_transmittance_color` now canonicalize to `texture.transmission_filter`. The focused test preserves generated material bytes, registry dependencies, bundle manifest dependencies/readback, runtime preload dependency graphs, decoded `MaterialTextureBinding` source-channel metadata, and decoded runtime custom transmission-filter values. `ModelImporter::version()` is now 92. Full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `illum` now remains a case-insensitive typed custom material property only when it is a standard illumination model value in the `0..=10` range. Out-of-range values such as `illum 11` now return a visible `ModelImporter` import error with OBJ source path, MTL library/path, line number, and accepted range while preserving the existing invalid-integer diagnostic. `ModelImporter::version()` is now 93. The focused invalid-property database test covers the new range diagnostic; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `Ni` and `ior` now keep valid positive finite index-of-refraction values as `custom.index_of_refraction.float` while rejecting non-positive values such as `Ni 0` with a visible `ModelImporter` import error containing OBJ source path, MTL library/path, line number, and the positive-value requirement. `ModelImporter::version()` is now 94. The focused invalid-property database test covers the new range diagnostic while preserving the existing invalid-integer and `illum` range diagnostics; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `d`/`opacity`/`alpha` and `Tr`/`transparency` now reject non-finite or out-of-range alpha/transparency values outside `0..=1` instead of silently clamping them into a material state. The focused invalid-property database test covers both `d -halo 1.25` and `Tr -0.1` visible `ModelImporter` diagnostics with OBJ source path, MTL library/path, line number, and accepted range while preserving the existing valid alpha-to-`alpha_mode=blend` behavior. `ModelImporter::version()` is now 95. Full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `Ns` shininess now accepts only finite values in the documented `0..=1000` range and maps valid values to roughness with `1 - sqrt(Ns / 1000)`. Out-of-range values such as `Ns 1001` now return a visible `ModelImporter` import error with OBJ source path, MTL library/path, line number, and accepted range instead of being silently clamped. `ModelImporter::version()` is now 96. The focused invalid-property database test covers the new `Ns` range diagnostic; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `Pr`/`roughness` and `Pm`/`metallic`/`metalness` now accept only finite values in the `0..=1` unit range and preserve valid values as roughness/metallic material fields. Out-of-range values such as `Pr 1.2` and `Pm -0.1` now return visible `ModelImporter` import errors with OBJ source path, MTL library/path, line number, and accepted range instead of being silently clamped. `ModelImporter::version()` is now 97. The focused invalid-property database test covers both new unit-range diagnostics; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --no-default-features --features model_importer --test feature_flags
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+git diff --check
+```
+
+Result: formatting passed; OBJ MTL `Ps`/`sheen`, `Pc`/`clearcoat`/`clear_coat`, `Pcr`/`clearcoat_roughness`/`clearcoatroughness`/`clear_coat_roughness`, and `aniso`/`anisotropy` now accept only finite values in the `0..=1` unit range while preserving valid values as typed custom material fields. Out-of-range values such as `Ps 1.1`, `Pc -0.1`, `Pcr 1.1`, and `aniso -0.1` now return visible `ModelImporter` import errors with OBJ source path, MTL library/path, line number, and accepted range. `ModelImporter::version()` is now 98. The focused invalid-property database test covers the new unit-range diagnostics; full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

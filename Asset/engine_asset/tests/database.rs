@@ -2138,7 +2138,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![lod0_id, lod1_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, lod0_id, lod1_id]
@@ -2718,7 +2718,7 @@ fn database_model_importer_generates_physics_mesh_subresources() {
     assert_eq!(physics_metadata.asset_type, PhysicsMesh::TYPE_ID);
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 92);
+    assert_eq!(physics_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -2874,7 +2874,7 @@ fn database_model_importer_records_mesh_physics_mesh_binding_metadata() {
 
     assert_eq!(mesh_metadata.dependencies, vec![collision_id, proxy_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, collision_id, proxy_id]
@@ -3004,7 +3004,7 @@ end
 
     assert_eq!(physics_metadata.dependencies, vec![mesh_id]);
     assert_eq!(physics_metadata.labels, vec!["Collision"]);
-    assert_eq!(physics_metadata.importer_version, 92);
+    assert_eq!(physics_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id, physics_id]
@@ -3162,7 +3162,7 @@ fn database_model_importer_records_material_mesh_target_metadata() {
 
     assert_eq!(material_metadata.dependencies, vec![mesh_id]);
     assert_eq!(material_metadata.labels, vec!["HeroMaterial"]);
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(material_metadata.importer_version, 98);
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -3421,7 +3421,7 @@ fn database_model_importer_records_skinned_mesh_skeleton_dependency() {
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
     assert_eq!(mesh_metadata.labels, vec!["Body"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(skeleton_metadata.labels, vec!["Rig"]);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -3517,7 +3517,7 @@ fn database_model_importer_validates_skin_root_bone_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3635,7 +3635,7 @@ fn database_model_importer_requires_skin_root_for_multi_root_skeletons() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -3807,7 +3807,7 @@ fn database_model_importer_validates_skin_influence_limit_metadata() {
         .id;
 
     assert_eq!(mesh_metadata.dependencies, vec![skeleton_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_metadata.id, skeleton_id]
@@ -4790,7 +4790,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -4798,7 +4798,7 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
     assert_eq!(material_metadata.dependencies, vec![albedo_id]);
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(material_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -5048,7 +5048,7 @@ i 3 4 5
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Fold"]);
     assert!(mesh_metadata.dependencies.is_empty());
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -5884,7 +5884,7 @@ custom.transmission_filter.vec3=0.1,0.2,0.3
         (material_metadata.importer.as_deref()),
         Some("ModelImporter")
     );
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(material_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8455,10 +8455,10 @@ base_color=0.25,0.5,0.75,1
 
     assert_eq!(mesh_metadata.labels, vec!["Display Panel"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(material_metadata.labels, vec!["Material/Brushed Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(material_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8563,10 +8563,10 @@ base_color=0.6,0.4,0.2,1
 
     assert_eq!(mesh_metadata.labels, vec!["Panel #A"]);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(material_metadata.labels, vec!["Material/Hash # Metal"]);
     assert!(material_metadata.dependencies.is_empty());
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(material_metadata.importer_version, 98);
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11822,7 +11822,7 @@ i 0 2 3
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Outline"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -11930,8 +11930,8 @@ base_color=0.25,0.5,0.75,1
     assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
     assert_eq!(mesh_metadata.labels, vec!["Continued"]);
     assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
-    assert_eq!(material_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
+    assert_eq!(material_metadata.importer_version, 98);
     assert_eq!(mesh_metadata.dependencies, vec![material_id]);
     assert!(material_metadata.dependencies.is_empty());
     assert_eq!(
@@ -12117,7 +12117,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["WireHelpers"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12211,7 +12211,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Display"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -12314,7 +12314,7 @@ i 0 1 2
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["FreeForm"]);
-    assert_eq!(mesh_metadata.importer_version, 92);
+    assert_eq!(mesh_metadata.importer_version, 98);
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
         vec![mesh_id]
@@ -13212,6 +13212,76 @@ Pr nope
                 && message.contains("invalid OBJ material library `bad_roughness.mtl` at `models/bad_roughness.mtl` Pr value on line 2")
     ));
 
+    let roughness_range_config = database_config("builtin_model_obj_out_of_range_roughness");
+    let model_path = AssetPath::parse("models/bad_roughness_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_roughness_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_roughness_range.mtl",
+        b"newmtl Red
+Pr 1.2
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(roughness_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_roughness_range.obj")
+                && message.contains("OBJ material library `bad_roughness_range.mtl` at `models/bad_roughness_range.mtl` Pr value `1.2` on line 2 must be between 0 and 1")
+    ));
+
+    let shininess_range_config = database_config("builtin_model_obj_out_of_range_shininess");
+    let model_path = AssetPath::parse("models/bad_shininess_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_shininess_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_shininess_range.mtl",
+        b"newmtl Red
+Ns 1001
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(shininess_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_shininess_range.obj")
+                && message.contains("OBJ material library `bad_shininess_range.mtl` at `models/bad_shininess_range.mtl` Ns value `1001` on line 2 must be between 0 and 1000")
+    ));
+
     let dissolve_option_config = database_config("builtin_model_obj_invalid_dissolve_option");
     let model_path = AssetPath::parse("models/bad_dissolve.obj");
     let mut io = MemoryAssetIo::new();
@@ -13280,6 +13350,182 @@ Pcr nope
             if message.contains("importer `ModelImporter` failed")
                 && message.contains("models/bad_pbr.obj")
                 && message.contains("invalid OBJ material library `bad_pbr.mtl` at `models/bad_pbr.mtl` Pcr value on line 2")
+    ));
+
+    let sheen_range_config = database_config("builtin_model_obj_out_of_range_sheen");
+    let model_path = AssetPath::parse("models/bad_sheen_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_sheen_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_sheen_range.mtl",
+        b"newmtl Red
+Ps 1.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(sheen_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_sheen_range.obj")
+                && message.contains("OBJ material library `bad_sheen_range.mtl` at `models/bad_sheen_range.mtl` Ps value `1.1` on line 2 must be between 0 and 1")
+    ));
+
+    let clearcoat_range_config = database_config("builtin_model_obj_out_of_range_clearcoat");
+    let model_path = AssetPath::parse("models/bad_clearcoat_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_clearcoat_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_clearcoat_range.mtl",
+        b"newmtl Red
+Pc -0.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(clearcoat_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_clearcoat_range.obj")
+                && message.contains("OBJ material library `bad_clearcoat_range.mtl` at `models/bad_clearcoat_range.mtl` Pc value `-0.1` on line 2 must be between 0 and 1")
+    ));
+
+    let clearcoat_roughness_range_config =
+        database_config("builtin_model_obj_out_of_range_clearcoat_roughness");
+    let model_path = AssetPath::parse("models/bad_clearcoat_roughness_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_clearcoat_roughness_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_clearcoat_roughness_range.mtl",
+        b"newmtl Red
+Pcr 1.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(clearcoat_roughness_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_clearcoat_roughness_range.obj")
+                && message.contains("OBJ material library `bad_clearcoat_roughness_range.mtl` at `models/bad_clearcoat_roughness_range.mtl` Pcr value `1.1` on line 2 must be between 0 and 1")
+    ));
+
+    let anisotropy_range_config = database_config("builtin_model_obj_out_of_range_anisotropy");
+    let model_path = AssetPath::parse("models/bad_anisotropy_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_anisotropy_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_anisotropy_range.mtl",
+        b"newmtl Red
+aniso -0.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(anisotropy_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_anisotropy_range.obj")
+                && message.contains("OBJ material library `bad_anisotropy_range.mtl` at `models/bad_anisotropy_range.mtl` aniso value `-0.1` on line 2 must be between 0 and 1")
+    ));
+
+    let metallic_range_config = database_config("builtin_model_obj_out_of_range_metallic");
+    let model_path = AssetPath::parse("models/bad_metallic_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_metallic_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_metallic_range.mtl",
+        b"newmtl Red
+Pm -0.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(metallic_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_metallic_range.obj")
+                && message.contains("OBJ material library `bad_metallic_range.mtl` at `models/bad_metallic_range.mtl` Pm value `-0.1` on line 2 must be between 0 and 1")
     ));
 
     let sharpness_config = database_config("builtin_model_obj_invalid_sharpness_property");
@@ -13385,6 +13631,147 @@ illum nope
             if message.contains("importer `ModelImporter` failed")
                 && message.contains("models/bad_illum.obj")
                 && message.contains("invalid OBJ material library `bad_illum.mtl` at `models/bad_illum.mtl` illum value on line 2")
+    ));
+
+    let illum_range_config = database_config("builtin_model_obj_out_of_range_illum_property");
+    let model_path = AssetPath::parse("models/bad_illum_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_illum_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_illum_range.mtl",
+        b"newmtl Red
+illum 11
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(illum_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_illum_range.obj")
+                && message.contains("OBJ material library `bad_illum_range.mtl` at `models/bad_illum_range.mtl` illum value `11` on line 2 must be between 0 and 10")
+    ));
+
+    let ni_range_config = database_config("builtin_model_obj_out_of_range_ni_property");
+    let model_path = AssetPath::parse("models/bad_ni_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_ni_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_ni_range.mtl",
+        b"newmtl Red
+Ni 0
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(ni_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_ni_range.obj")
+                && message.contains("OBJ material library `bad_ni_range.mtl` at `models/bad_ni_range.mtl` Ni value `0` on line 2 must be greater than 0")
+    ));
+
+    let dissolve_range_config = database_config("builtin_model_obj_out_of_range_dissolve_property");
+    let model_path = AssetPath::parse("models/bad_dissolve_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_dissolve_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_dissolve_range.mtl",
+        b"newmtl Red
+d -halo 1.25
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(dissolve_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_dissolve_range.obj")
+                && message.contains("OBJ material library `bad_dissolve_range.mtl` at `models/bad_dissolve_range.mtl` d value `1.25` on line 2 must be between 0 and 1")
+    ));
+
+    let transparency_range_config =
+        database_config("builtin_model_obj_out_of_range_transparency_property");
+    let model_path = AssetPath::parse("models/bad_transparency_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_transparency_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_transparency_range.mtl",
+        b"newmtl Red
+Tr -0.1
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(transparency_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_transparency_range.obj")
+                && message.contains("OBJ material library `bad_transparency_range.mtl` at `models/bad_transparency_range.mtl` Tr value `-0.1` on line 2 must be between 0 and 1")
     ));
 
     let spectral_config = database_config("builtin_model_obj_unsupported_spectral_color");

@@ -2980,7 +2980,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        92
+        98
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -6797,22 +6797,25 @@ fn parse_obj_material_library_text(
             "tr" | "transparency" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let transparency =
-                    parse_obj_material_scalar(parts, directive, library, path, line_number)?;
+                    parse_obj_material_unit_scalar(parts, directive, library, path, line_number)?;
                 set_obj_material_alpha(&mut current_properties, 1.0 - transparency);
             }
             "ns" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
                 let shininess =
-                    parse_obj_material_scalar(parts, directive, library, path, line_number)?;
-                let gloss = (shininess / 1000.0).clamp(0.0, 1.0).sqrt();
+                    parse_obj_material_shininess(parts, directive, library, path, line_number)?;
+                let gloss = (shininess / 1000.0).sqrt();
                 current_properties.roughness = Some((1.0 - gloss).clamp(0.0, 1.0));
             }
             "pr" | "roughness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.roughness = Some(
-                    parse_obj_material_scalar(parts, directive, library, path, line_number)?
-                        .clamp(0.0, 1.0),
-                );
+                current_properties.roughness = Some(parse_obj_material_unit_scalar(
+                    parts,
+                    directive,
+                    library,
+                    path,
+                    line_number,
+                )?);
             }
             "tf"
             | "kt"
@@ -6831,23 +6834,25 @@ fn parse_obj_material_library_text(
             }
             "ni" | "ior" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.index_of_refraction = Some(parse_obj_material_scalar(
-                    parts,
-                    directive,
-                    library,
-                    path,
-                    line_number,
-                )?);
+                current_properties.index_of_refraction =
+                    Some(parse_obj_material_index_of_refraction(
+                        parts,
+                        directive,
+                        library,
+                        path,
+                        line_number,
+                    )?);
             }
             "illum" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.illumination_model = Some(parse_obj_material_integer(
-                    parts,
-                    directive,
-                    library,
-                    path,
-                    line_number,
-                )?);
+                current_properties.illumination_model =
+                    Some(parse_obj_material_illumination_model(
+                        parts,
+                        directive,
+                        library,
+                        path,
+                        line_number,
+                    )?);
             }
             "sharpness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
@@ -6871,14 +6876,17 @@ fn parse_obj_material_library_text(
             }
             "pm" | "metallic" | "metalness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.metallic = Some(
-                    parse_obj_material_scalar(parts, directive, library, path, line_number)?
-                        .clamp(0.0, 1.0),
-                );
+                current_properties.metallic = Some(parse_obj_material_unit_scalar(
+                    parts,
+                    directive,
+                    library,
+                    path,
+                    line_number,
+                )?);
             }
             "ps" | "sheen" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.sheen = Some(parse_obj_material_scalar(
+                current_properties.sheen = Some(parse_obj_material_unit_scalar(
                     parts,
                     directive,
                     library,
@@ -6888,7 +6896,7 @@ fn parse_obj_material_library_text(
             }
             "pc" | "clearcoat" | "clear_coat" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.clearcoat = Some(parse_obj_material_scalar(
+                current_properties.clearcoat = Some(parse_obj_material_unit_scalar(
                     parts,
                     directive,
                     library,
@@ -6898,7 +6906,7 @@ fn parse_obj_material_library_text(
             }
             "pcr" | "clearcoat_roughness" | "clearcoatroughness" | "clear_coat_roughness" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.clearcoat_roughness = Some(parse_obj_material_scalar(
+                current_properties.clearcoat_roughness = Some(parse_obj_material_unit_scalar(
                     parts,
                     directive,
                     library,
@@ -6908,7 +6916,7 @@ fn parse_obj_material_library_text(
             }
             "aniso" | "anisotropy" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                current_properties.anisotropy = Some(parse_obj_material_scalar(
+                current_properties.anisotropy = Some(parse_obj_material_unit_scalar(
                     parts,
                     directive,
                     library,
@@ -7136,6 +7144,7 @@ fn parse_obj_material_dissolve<'a>(
         (first, false)
     };
     let value = parse_obj_material_f32(value, directive, library, path, line_number)?;
+    validate_obj_material_unit_scalar(value, directive, library, path, line_number)?;
     if parts.next().is_some() {
         return Err(AssetError::Import {
             message: format!(
@@ -7146,6 +7155,62 @@ fn parse_obj_material_dissolve<'a>(
         });
     }
     Ok((value, halo))
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_unit_scalar<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<f32, ImportError> {
+    let value = parse_obj_material_scalar(parts, directive, library, path, line_number)?;
+    validate_obj_material_unit_scalar(value, directive, library, path, line_number)?;
+    Ok(value)
+}
+
+#[cfg(feature = "model_importer")]
+fn validate_obj_material_unit_scalar(
+    value: f32,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    if !(0.0..=1.0).contains(&value) {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} value `{}` on line {line_number} must be between 0 and 1",
+                library.name,
+                path.display_string(),
+                canonical_mesh_f32(value)
+            ),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_shininess<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<f32, ImportError> {
+    let value = parse_obj_material_scalar(parts, directive, library, path, line_number)?;
+    if !(0.0..=1000.0).contains(&value) {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} value `{}` on line {line_number} must be between 0 and 1000",
+                library.name,
+                path.display_string(),
+                canonical_mesh_f32(value)
+            ),
+        });
+    }
+    Ok(value)
 }
 
 #[cfg(feature = "model_importer")]
@@ -7175,6 +7240,49 @@ fn parse_obj_material_integer<'a>(
                 "too many OBJ material library `{}` at `{}` {directive} values on line {line_number}",
                 library.name,
                 path.display_string()
+            ),
+        });
+    }
+    Ok(value)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_illumination_model<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<i32, ImportError> {
+    let value = parse_obj_material_integer(parts, directive, library, path, line_number)?;
+    if !(0..=10).contains(&value) {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} value `{value}` on line {line_number} must be between 0 and 10",
+                library.name,
+                path.display_string()
+            ),
+        });
+    }
+    Ok(value)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_index_of_refraction<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<f32, ImportError> {
+    let value = parse_obj_material_scalar(parts, directive, library, path, line_number)?;
+    if value <= 0.0 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ material library `{}` at `{}` {directive} value `{}` on line {line_number} must be greater than 0",
+                library.name,
+                path.display_string(),
+                canonical_mesh_f32(value)
             ),
         });
     }
