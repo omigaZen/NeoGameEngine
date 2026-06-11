@@ -1431,3 +1431,19 @@ git diff --check
 ```
 
 Result: formatting passed; `FontLoader` now registers `font`, `ttf`, and `otf`, keeps bitmap `NGA_FONT_V1` loading, validates TrueType/OpenType sfnt signatures for binary `.ttf`/`.otf` payloads, derives binary font family names from asset path stems, preserves binary bytes, and reports visible decode diagnostics for invalid signatures or truncated headers. `FontImporter::version()` is now 3 and validates runtime/pass-through bitmap and binary font bytes before import output. `FontCooker::version()` is now 2 and validates bitmap/runtime plus TrueType/OpenType source bytes before writing cooked pass-through output. The focused runtime font filter passed 4 tests; the focused database font filter passed 5 tests; full database passed 202 tests; full engine_asset default suite passed 402 tests across emitted test binaries; no-default check passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_display_attributes
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_display_attributes
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset -- --check
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --features model_importer
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: formatting passed; OBJ `maplib` texture-map library markers now validate every library token as a relative source path without labels or `..` segments, and `shadow_obj` / `trace_obj` now accept only `off` or the same relative source-path form instead of silently accepting invalid external references. `ModelImporter::version()` is now 103. The focused display-attribute success path still imports, cooks, bundles, preloads, and runtime-loads the generated mesh; the focused invalid display-attribute test now covers parent-path, quoted label-path, and absolute-path diagnostics. Full database passed 202 tests; full engine_asset default suite passed 402 tests across emitted test binaries; model_importer-only and bare no-default checks passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.

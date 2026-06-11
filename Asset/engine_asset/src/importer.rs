@@ -2985,7 +2985,7 @@ impl AssetImporter for ModelImporter {
     }
 
     fn version(&self) -> u32 {
-        102
+        103
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -5682,7 +5682,8 @@ fn parse_obj_texture_map_libraries<'a>(
     line_number: usize,
 ) -> Result<(), ImportError> {
     let mut count = 0;
-    for _ in parts {
+    for library in parts {
+        validate_obj_marker_source_path(library, "maplib", line_number)?;
         count += 1;
     }
     if count == 0 {
@@ -5715,7 +5716,7 @@ fn parse_obj_render_object_attribute<'a>(
     directive: &str,
     line_number: usize,
 ) -> Result<(), ImportError> {
-    parts.next().ok_or_else(|| AssetError::Import {
+    let value = parts.next().ok_or_else(|| AssetError::Import {
         message: format!("missing OBJ {directive} value on line {line_number}"),
     })?;
     if parts.next().is_some() {
@@ -5723,6 +5724,23 @@ fn parse_obj_render_object_attribute<'a>(
             message: format!("too many OBJ {directive} values on line {line_number}"),
         });
     }
+    if !value.eq_ignore_ascii_case("off") {
+        validate_obj_marker_source_path(value, directive, line_number)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "model_importer")]
+fn validate_obj_marker_source_path(
+    value: &str,
+    directive: &str,
+    line_number: usize,
+) -> Result<(), ImportError> {
+    normalize_obj_relative_source_path(value).map_err(|()| AssetError::Import {
+        message: format!(
+            "OBJ {directive} `{value}` on line {line_number} must be a relative source path without labels or `..` segments"
+        ),
+    })?;
     Ok(())
 }
 
