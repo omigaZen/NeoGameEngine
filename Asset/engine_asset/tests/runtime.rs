@@ -2343,6 +2343,7 @@ fn texture_load_reaches_ready_after_renderer_upload_handoff() {
     assert_eq!(uploads.len(), 1);
     assert_eq!(uploads[0].id, texture.id());
     assert_eq!(uploads[0].kind, GpuUploadKind::Texture);
+    assert_eq!(uploads[0].metadata, GpuUploadMetadata::None);
 
     server.finish_gpu_uploads(vec![GpuUploadResult::ok(
         texture.id(),
