@@ -2396,6 +2396,14 @@ Result: the file-backed Zstd regression now also verifies read and range diagnos
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
+```
+
+Result: `AssetServer::activate_asset_package_registry_from_artifacts()` now has an explicit Zstd artifact-registry regression. A Zstd-compressed package artifact is installed, exposed through composite IO, activated from artifacts, and loaded into a ready `Texture` without disturbing the pre-existing ready asset state.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
 ```
 

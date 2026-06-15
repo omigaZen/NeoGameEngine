@@ -3150,6 +3150,136 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
 }
 
 #[test]
+#[cfg(feature = "zstd")]
+fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets() {
+    let root = temp_dir("package_artifact_reactivate_zstd");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+    let (base_record_seed, base_bundle, base_ids) = texture_package(
+        "artifact_zstd_base",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(82),
+        "unused/zstd_base.bundle",
+        vec![("textures/zstd_react.texture", texture_bytes(1, 1, 35))],
+    );
+    let zstd_bundle = BundleWriter::build_bytes_with_options(
+        "artifact_zstd_patch",
+        BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
+            BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
+        ),
+        vec![
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/zstd_extra_a.texture"),
+                bytes: texture_bytes(1, 1, 36),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/zstd_extra_b.texture"),
+                bytes: texture_bytes(1, 1, 37),
+                dependencies: Vec::new(),
+            },
+        ],
+    )
+    .unwrap();
+
+    let _base_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                base_record_seed.bundle_id,
+                "artifact_zstd_base",
+                AssetIoLayerKind::BaseBundle,
+                10,
+                "base/zstd_base.bundle",
+            )
+            .with_package_version(2),
+            &base_bundle,
+        )
+        .unwrap();
+    let zstd_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(83),
+                "artifact_zstd_patch",
+                AssetIoLayerKind::Patch,
+                1,
+                "patches/zstd_patch.bundle",
+            ),
+            &zstd_bundle,
+        )
+        .unwrap();
+    assert!(zstd_install.artifact_path.exists());
+    assert_eq!(zstd_install.payload_size, zstd_bundle.len() as u64);
+    assert_eq!(zstd_install.payload_hash, content_hash(&zstd_bundle));
+    let composite = store.build_composite_io(&registry).unwrap();
+    assert_eq!(
+        composite
+            .read("textures/zstd_extra_a.texture")
+            .unwrap(),
+        texture_bytes(1, 1, 36)
+    );
+    assert_eq!(
+        composite
+            .metadata("textures/zstd_extra_b.texture")
+            .unwrap()
+            .hash,
+        Some(content_hash(&texture_bytes(1, 1, 37)))
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(composite);
+    server.register_builtin_loaders();
+    let activation = server
+        .activate_asset_package_registry_from_artifacts(
+            registry.clone(),
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        )
+        .unwrap();
+    assert_eq!(activation.mounted_bundles.len(), 2);
+    let groups = activation
+        .mounted_bundles
+        .iter()
+        .map(|mounted| server.preload_bundle(mounted))
+        .collect::<Vec<_>>();
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(72))),
+    );
+    assert!(groups
+        .iter()
+        .all(|group| server.group_state(group) == AssetLoadState::Ready));
+    let base_handle = Handle::<Texture>::strong(base_ids[0]);
+    assert!(server.is_ready(&base_handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().path,
+        Some(AssetPath::parse("textures/zstd_react.texture"))
+    );
+    let zstd_handle = server
+        .asset_package_registry()
+        .packages()
+        .iter()
+        .find(|package| package.name == "artifact_zstd_patch")
+        .and_then(|package| package.manifest.entries.first())
+        .map(|entry| Handle::<Texture>::strong(entry.id))
+        .unwrap();
+    assert!(server.is_ready(&zstd_handle));
+    assert_eq!(server.state_by_id(zstd_handle.id()), AssetLoadState::Ready);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn asset_server_loads_texture_from_bundle_io() {
     let (id, bundle) = texture_bundle("textures/albedo.texture", texture_bytes(2, 1, 5));
     let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
