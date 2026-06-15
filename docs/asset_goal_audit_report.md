@@ -1908,3 +1908,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: registry text parsing now also rejects malformed dependency fields explicitly. Corrupting the serialized dependency field so it no longer contains the expected `package:min:max` shape returns the expected `invalid asset package dependency field` bundle diagnostic before registry construction.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: registry text parsing now also rejects malformed package counts explicitly. A registry header with `packages=abc` returns the expected `invalid asset package count` bundle diagnostic before any package lines are read.

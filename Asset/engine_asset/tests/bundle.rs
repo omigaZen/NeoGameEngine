@@ -1044,6 +1044,10 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package registry header")
     ));
     assert!(matches!(
+        AssetPackageRegistry::from_text("NGA_ASSET_PACKAGE_REGISTRY_V1\npackages=abc"),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package count")
+    ));
+    assert!(matches!(
         AssetPackageRegistry::from_text(
             "NGA_ASSET_PACKAGE_REGISTRY_V1\npackages=1\npackage|1|0|true|patch|patch|packages/patch.nga_bundle|2\nNGA_BUNDLE_V2"
         ),
