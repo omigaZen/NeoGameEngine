@@ -1053,6 +1053,13 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         ),
         Err(AssetError::Bundle { message }) if message.contains("manifest is truncated")
     ));
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&format!(
+            "NGA_ASSET_PACKAGE_REGISTRY_V3\npackages=1\npackage|1|0|true|patch|patch|packages/patch.nga_bundle|1|1||{}",
+            usize::MAX
+        )),
+        Err(AssetError::Bundle { message }) if message.contains("asset package manifest line count overflow")
+    ));
 
     let (valid, _valid_bundle, _) = texture_package(
         "valid",
