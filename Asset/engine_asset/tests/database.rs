@@ -21076,6 +21076,7 @@ fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata
         .unwrap();
 
     assert_eq!(texture_output.metadata.path.as_ref(), Some(&texture_path));
+    assert_eq!(texture_output.metadata.source_hash, Some(ContentHash(101)));
     assert_eq!(
         texture_output.metadata.importer.as_deref(),
         Some("TextureImporter")
@@ -21099,6 +21100,7 @@ fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata
     assert!(texture_output.dependencies.is_empty());
 
     assert_eq!(shader_output.metadata.path.as_ref(), Some(&shader_path));
+    assert_eq!(shader_output.metadata.source_hash, Some(ContentHash(202)));
     assert_eq!(
         shader_output.metadata.importer.as_deref(),
         Some("ShaderImporter")
@@ -21164,6 +21166,7 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         .unwrap();
 
     assert_eq!(audio_output.metadata.path.as_ref(), Some(&audio_path));
+    assert_eq!(audio_output.metadata.source_hash, Some(ContentHash(303)));
     assert_eq!(
         audio_output.metadata.importer.as_deref(),
         Some("AudioImporter")
@@ -21191,6 +21194,7 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
     assert!(audio_output.dependencies.is_empty());
 
     assert_eq!(font_output.metadata.path.as_ref(), Some(&font_path));
+    assert_eq!(font_output.metadata.source_hash, Some(ContentHash(404)));
     assert_eq!(
         font_output.metadata.importer.as_deref(),
         Some("FontImporter")
@@ -21212,6 +21216,7 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
     assert!(font_output.dependencies.is_empty());
 
     assert_eq!(physics_output.metadata.path.as_ref(), Some(&physics_path));
+    assert_eq!(physics_output.metadata.source_hash, Some(ContentHash(505)));
     assert_eq!(
         physics_output.metadata.importer.as_deref(),
         Some("PhysicsMeshImporter")
