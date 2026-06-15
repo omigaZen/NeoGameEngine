@@ -1546,10 +1546,14 @@ fn database_material_importer_canonicalizes_source_and_runtime_loads_it() {
     let shader_id = database.import_asset_path(&shader_path).unwrap();
     let texture_id = database.import_asset_path(&texture_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
-    let metadata = database.registry().get(material_id).unwrap();
-    assert_eq!(metadata.importer.as_deref(), Some("MaterialImporter"));
-    assert_eq!(metadata.importer_version, 5);
-    assert_eq!(metadata.dependencies, vec![shader_id, texture_id]);
+    let material_source_hash = {
+        let metadata = database.registry().get(material_id).unwrap();
+        assert_eq!(metadata.importer.as_deref(), Some("MaterialImporter"));
+        assert_eq!(metadata.importer_version, 5);
+        assert!(metadata.source_hash.is_some());
+        assert_eq!(metadata.dependencies, vec![shader_id, texture_id]);
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         canonical
@@ -1569,6 +1573,7 @@ fn database_material_importer_canonicalizes_source_and_runtime_loads_it() {
         fs::read(config.cooked_root.join(material_path.path())).unwrap(),
         canonical
     );
+    assert_eq!(output.metadata.source_hash, material_source_hash);
 
     let mut server = AssetServer::new(AssetServerConfig {
         root: config.cooked_root.clone(),
@@ -1631,10 +1636,13 @@ fn database_material_importer_preserves_texture_metadata_round_trip() {
     let albedo_id = database.import_asset_path(&albedo_path).unwrap();
     let normal_id = database.import_asset_path(&normal_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
-    let metadata = database.registry().get(material_id).unwrap();
-    assert_eq!(metadata.importer.as_deref(), Some("MaterialImporter"));
-    assert_eq!(metadata.importer_version, 5);
-    assert_eq!(metadata.dependencies, vec![shader_id, albedo_id, normal_id]);
+    let material_source_hash = {
+        let metadata = database.registry().get(material_id).unwrap();
+        assert_eq!(metadata.importer.as_deref(), Some("MaterialImporter"));
+        assert_eq!(metadata.importer_version, 5);
+        assert_eq!(metadata.dependencies, vec![shader_id, albedo_id, normal_id]);
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         canonical
@@ -1653,6 +1661,7 @@ fn database_material_importer_preserves_texture_metadata_round_trip() {
         .cook_asset(normal_id, TargetPlatform::Windows)
         .unwrap();
     assert_eq!(output.bytes, canonical);
+    assert_eq!(output.metadata.source_hash, material_source_hash);
     assert_eq!(
         fs::read(config.cooked_root.join(material_path.path())).unwrap(),
         canonical
@@ -21879,11 +21888,15 @@ fn database_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Mesh>());
-    assert_eq!(metadata.importer.as_deref(), Some("MeshImporter"));
-    assert_eq!(metadata.importer_version, 4);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let mesh_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Mesh>());
+        assert_eq!(metadata.importer.as_deref(), Some("MeshImporter"));
+        assert_eq!(metadata.importer_version, 4);
+        assert!(metadata.source_hash.is_some());
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         expected
@@ -21893,10 +21906,8 @@ fn database_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     let expected_cooked = converted_source_binary_mesh_bytes();
     assert_eq!(output.bytes, expected_cooked);
     assert_eq!(output.version_hash, VersionHash(4));
-    assert_eq!(
-        output.metadata,
-        database.registry().get(id).unwrap().clone()
-    );
+    assert_eq!(output.metadata.source_hash, mesh_source_hash);
+    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected_cooked
@@ -21976,11 +21987,15 @@ fn database_mesh_importer_validates_binary_source_and_preserves_runtime_bytes() 
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Mesh>());
-    assert_eq!(metadata.importer.as_deref(), Some("MeshImporter"));
-    assert_eq!(metadata.importer_version, 4);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let mesh_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Mesh>());
+        assert_eq!(metadata.importer.as_deref(), Some("MeshImporter"));
+        assert_eq!(metadata.importer_version, 4);
+        assert!(metadata.source_hash.is_some());
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         source
@@ -21989,6 +22004,7 @@ fn database_mesh_importer_validates_binary_source_and_preserves_runtime_bytes() 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, binary_mesh_bytes());
     assert_eq!(output.version_hash, VersionHash(4));
+    assert_eq!(output.metadata.source_hash, mesh_source_hash);
     assert_eq!(
         output.metadata,
         database.registry().get(id).unwrap().clone()
