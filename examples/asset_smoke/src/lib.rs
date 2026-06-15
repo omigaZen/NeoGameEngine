@@ -95,6 +95,8 @@ pub struct EditorSmokeReport {
     pub bundle_group_ready: bool,
     pub material_ready_with_dependencies: bool,
     pub audio_ready_with_dependencies: bool,
+    pub audio_source_ready: bool,
+    pub audio_source_handles: usize,
     pub physics_ready_with_dependencies: bool,
     pub physics_world_mesh_ready: bool,
     pub physics_world_collider_ready: bool,
@@ -452,6 +454,11 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let mut prefab_sink = RecordingInstantiationSink::default();
     assert!(scene_instance.instantiate(&assets, &mut scene_sink));
     assert!(prefab_instance.instantiate(&assets, &mut prefab_sink));
+    let audio_source = AudioSourceComponent {
+        clip: audio.clone(),
+        looping: true,
+        volume: 0.5,
+    };
     let physics_bridge = drive_physics_world_from_asset(&assets, &physics_component);
 
     let report = EditorSmokeReport {
@@ -462,6 +469,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         bundle_group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&material),
         audio_ready_with_dependencies: assets.is_ready_with_dependencies(&audio),
+        audio_source_ready: audio_source.is_ready(&assets),
+        audio_source_handles: audio_source.asset_handles().len(),
         physics_ready_with_dependencies: assets.is_ready_with_dependencies(&physics),
         physics_world_mesh_ready: physics_bridge.mesh_ready,
         physics_world_collider_ready: physics_bridge.collider_ready,
@@ -1302,6 +1311,8 @@ mod tests {
         assert!(report.bundle_group_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.audio_ready_with_dependencies);
+        assert!(report.audio_source_ready);
+        assert_eq!(report.audio_source_handles, 1);
         assert!(report.physics_ready_with_dependencies);
         assert!(report.physics_world_mesh_ready);
         assert!(report.physics_world_collider_ready);
