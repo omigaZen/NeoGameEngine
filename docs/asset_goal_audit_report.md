@@ -2088,7 +2088,7 @@ C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
 git diff --check
 ```
 
-Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 224 tests, the default engine_asset suite passes 458 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
+Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 226 tests, the default engine_asset suite passes 460 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
 
 Passed:
 
@@ -2137,3 +2137,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture color-space preservation now also has a stable positive regression for `map_Kd -colorspace srgb`. A valid import keeps `texture.albedo.color_space=srgb`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the sRGB colorspace setting.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_linear_colorspace
+```
+
+Result: OBJ material texture color-space preservation now also has a stable positive regression for `map_Kd -colorspace linear`. A valid import keeps `texture.albedo.color_space=linear`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the linear colorspace setting.
