@@ -447,6 +447,38 @@ fn streaming_region_state_apis_report_missing_region() {
 }
 
 #[test]
+fn streaming_region_resident_toggle_is_idempotent() {
+    let mut server = server_with_textures(&[("textures/resident.texture", 12)]);
+    let path = AssetPath::parse("textures/resident.texture");
+    let region = server
+        .register_streaming_region_paths("resident", LoadPriority::Normal, &[path.clone()])
+        .unwrap();
+    let asset_id = server.id_from_path(&path).unwrap();
+
+    server.preload_streaming_region(region).unwrap();
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(1))),
+    );
+    assert_eq!(server.state_by_id(asset_id), AssetLoadState::Ready);
+
+    server.set_streaming_region_resident(region, true).unwrap();
+    server.set_streaming_region_resident(region, true).unwrap();
+    assert!(server.is_asset_resident(asset_id));
+    assert_eq!(server.unload_streaming_region(region).unwrap(), 0);
+    assert_eq!(server.state_by_id(asset_id), AssetLoadState::Ready);
+
+    server.set_streaming_region_resident(region, false).unwrap();
+    server.set_streaming_region_resident(region, false).unwrap();
+    assert!(!server.is_asset_resident(asset_id));
+    assert_eq!(server.unload_streaming_region(region).unwrap(), 1);
+    assert_eq!(server.state_by_id(asset_id), AssetLoadState::Unloaded);
+}
+
+#[test]
 fn removing_resident_streaming_regions_releases_shared_residency_counts() {
     let mut server = server_with_textures(&[("textures/shared.texture", 5)]);
     let path = AssetPath::parse("textures/shared.texture");

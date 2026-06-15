@@ -1860,3 +1860,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: `AssetPackageArtifactStore` now has explicit artifact-path escape coverage. Both the helper path resolver and `install_package_bytes()` reject `"../escape.bundle"` before any artifact write can happen, so package payloads cannot escape the artifact root.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_resident_toggle_is_idempotent
+```
+
+Result: the streaming residency toggle now has an explicit idempotence regression. Repeating `set_streaming_region_resident(..., true)` or `(..., false)` on the same region does not double-count or double-release residency, and unload behavior remains stable across repeated calls.
