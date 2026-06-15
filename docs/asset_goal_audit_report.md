@@ -1796,3 +1796,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: `AssetPackageArtifactStore::install_package_bytes()` now has explicit replacement coverage. Installing a second package with the same name returns the replaced old record, updates the registry to the newer bundle id, and keeps the new artifact bytes readable through `load_package_bytes()`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_replaces_packages_with_matching_bundle_ids
+```
+
+Result: the artifact-store replacement branch now also covers bundle-id matching, not just name matching. A new package with the same `BundleId` replaces the old registry entry, returns the old record from `replaced`, and leaves the new artifact as the readable payload for the surviving record.
