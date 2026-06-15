@@ -2193,3 +2193,19 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
 ```
 
 Result: `examples/asset_smoke` now exercises the same material texture-transform and boost metadata end to end. The editor smoke path loads a material with `texture.albedo.boost=1.25` and `texture.albedo.transform.offset/scale/turbulence`, then asserts those values survive to the runtime-loaded `Material` while the existing mesh/audio/physics/scene/prefab smoke checks continue to pass.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
+```
+
+Result: the runtime smoke path now also loads a separate normal-map material that preserves `texture.normal.bump_scale=0.35` in the runtime `Material`, giving the example suite direct coverage of another material texture option without going through the editor importer.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
+```
+
+Result: the editor smoke path keeps the earlier albedo texture-transform and boost evidence, while the runtime smoke path now also covers a separate normal-map material and preserves `texture.normal.bump_scale=0.35` in the runtime `Material`.

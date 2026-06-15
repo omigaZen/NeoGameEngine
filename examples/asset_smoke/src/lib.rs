@@ -139,6 +139,10 @@ pub fn run_smoke() -> SmokeReport {
         "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/checker.texture\nbase_color=1,1,1,1\n",
     );
     io.insert(
+        "materials/hero_normal.material",
+        "name=hero_normal\nshader=shaders/pbr.wgsl\ntexture.normal=textures/checker.texture\ntexture.normal.bump_scale=0.35\nbase_color=1,1,1,1\n",
+    );
+    io.insert(
         "scenes/hero.scene",
         "NGA_SCENE_V1\nname=hero_scene\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
     );
@@ -156,6 +160,7 @@ pub fn run_smoke() -> SmokeReport {
     let group = assets.load_group(&[
         AssetPath::parse("meshes/tri.mesh"),
         AssetPath::parse("materials/hero.material"),
+        AssetPath::parse("materials/hero_normal.material"),
         AssetPath::parse("audio/click.audio"),
         AssetPath::parse("physics/hero.physics"),
     ]);
@@ -163,6 +168,7 @@ pub fn run_smoke() -> SmokeReport {
         mesh: assets.load("meshes/tri.mesh"),
         material: assets.load("materials/hero.material"),
     };
+    let normal_material: Handle<Material> = assets.load("materials/hero_normal.material");
     let audio = AudioSourceComponent {
         clip: assets.load("audio/click.audio"),
         looping: false,
@@ -201,6 +207,7 @@ pub fn run_smoke() -> SmokeReport {
         if renderer.is_ready(&assets)
             && audio.is_ready(&assets)
             && physics.is_ready(&assets)
+            && assets.is_ready_with_dependencies(&normal_material)
             && scene.can_instantiate(&assets)
             && prefab.can_instantiate(&assets)
             && assets.group_state(&group) == AssetLoadState::Ready
@@ -231,6 +238,13 @@ pub fn run_smoke() -> SmokeReport {
         loaded: true,
     }
     .instantiate(&assets, &mut prefab_sink));
+    let normal_material_asset = assets.get(&normal_material).unwrap();
+    assert_eq!(normal_material_asset.textures.len(), 1);
+    assert_eq!(normal_material_asset.textures[0].name, "normal");
+    assert_eq!(
+        normal_material_asset.textures[0].options.bump_scale,
+        Some(0.35)
+    );
 
     let mut scene_typed = scene.clone();
     let mut prefab_typed = prefab.clone();
@@ -1145,7 +1159,7 @@ mod tests {
         assert!(report.prefab_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.group_ready);
-        assert_eq!(report.group_total_assets, 4);
+        assert_eq!(report.group_total_assets, 5);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
         assert_eq!(report.render_scene_meshes, 1);
