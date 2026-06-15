@@ -150,6 +150,29 @@ fn hot_reload_watcher_reports_batch_metadata_errors() {
 }
 
 #[test]
+fn hot_reload_watcher_replaces_existing_watch_with_latest_backend_and_metadata() {
+    let path = AssetPath::parse("textures/replaced.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+
+    server.watch_hot_reload_path(path.clone()).unwrap();
+    assert_eq!(
+        server.hot_reload_watch(&path).unwrap().backend,
+        HotReloadWatchBackend::PollingMetadata
+    );
+    assert_eq!(server.hot_reload_watches().count(), 1);
+
+    server.set_io(MemoryAssetIo::new().with_file(path.path(), texture_bytes(2, 1, 20)));
+    server
+        .watch_hot_reload_path_with_backend(path.clone(), HotReloadWatchBackend::AsyncNotification)
+        .unwrap();
+    let watch = server.hot_reload_watch(&path).unwrap();
+    assert_eq!(watch.backend, HotReloadWatchBackend::AsyncNotification);
+    assert_eq!(watch.last_metadata.size, 16);
+    assert_eq!(server.hot_reload_watches().count(), 1);
+}
+
+#[test]
 fn hot_reload_async_watch_backend_queues_notified_paths_without_polling() {
     let path = AssetPath::parse("textures/async_watch.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));

@@ -2044,3 +2044,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: streaming bundle subset registration now deduplicates repeated asset ids before region registration, so a subset request containing the same asset twice still registers a single region asset and avoids duplicate residency entries.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload hot_reload_watcher_replaces_existing_watch_with_latest_backend_and_metadata
+```
+
+Result: repeating `watch_hot_reload_path*` on the same path replaces the prior watch entry instead of duplicating it, and the latest backend selection and metadata are reflected in the watch table.
