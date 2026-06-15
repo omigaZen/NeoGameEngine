@@ -487,6 +487,10 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
     server.update_loading();
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().path,
+        Some(path.clone())
+    );
     assert!(matches!(
         server.error_by_id(texture.id()),
         Some(AssetError::Decode { .. })
@@ -499,6 +503,7 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
 
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 2);
+    assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
@@ -534,6 +539,10 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
     server.update_loading();
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().path,
+        Some(path.clone())
+    );
     assert!(matches!(
         server.error_by_id(texture.id()),
         Some(AssetError::Decode { .. })
@@ -546,6 +555,7 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
 
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 3);
+    assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
