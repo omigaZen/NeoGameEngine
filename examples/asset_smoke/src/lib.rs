@@ -740,6 +740,14 @@ pub fn run_model_smoke() -> ModelSmokeReport {
 
 fn finish_uploads(assets: &mut AssetServer) {
     let uploads = assets.drain_gpu_uploads().collect::<Vec<_>>();
+    for upload in &uploads {
+        match upload.kind {
+            GpuUploadKind::Texture | GpuUploadKind::Shader => {
+                assert_eq!(upload.metadata, GpuUploadMetadata::None);
+            }
+            _ => {}
+        }
+    }
     assets.finish_gpu_uploads(uploads.into_iter().enumerate().map(|(index, upload)| {
         GpuUploadResult::ok(upload.id, GpuResourceHandle(index as u64 + 1))
     }));
