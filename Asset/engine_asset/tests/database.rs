@@ -9674,6 +9674,25 @@ name=Clear\n\
 texture.transmission_filter=models/textures/{stem}.texture\n"
         )
         .into_bytes();
+        let material_source = if directive == "map_transmittance_color" {
+            format!(
+                "newmtl Clear\n{directive} -imfchan alpha textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        } else {
+            material_source
+        };
+        let expected_material = if directive == "map_transmittance_color" {
+            format!(
+                "# mtllib {material_library}\n\
+name=Clear\n\
+texture.transmission_filter=models/textures/{stem}.texture\n\
+texture.transmission_filter.source_channel=alpha\n"
+            )
+            .into_bytes()
+        } else {
+            expected_material
+        };
         let texture_source = texture_bytes(1, 1, texel);
         let mut io = MemoryAssetIo::new();
         io.insert(model_path.path(), model_source);
@@ -9751,6 +9770,12 @@ texture.transmission_filter=models/textures/{stem}.texture\n"
         assert_eq!(material.textures.len(), 1);
         assert_eq!(material.textures[0].name, "transmission_filter");
         assert_eq!(material.textures[0].texture.id(), texture_id);
+        if directive == "map_transmittance_color" {
+            assert_eq!(
+                material.textures[0].options.source_channel,
+                Some(MaterialTextureChannel::Alpha)
+            );
+        }
     }
 }
 
