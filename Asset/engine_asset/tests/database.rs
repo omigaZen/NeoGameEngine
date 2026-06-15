@@ -9516,6 +9516,123 @@ custom.anisotropy_rotation.float=0.1
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_additional_pbr_texture_scalar_aliases() {
+    let config = database_config("builtin_model_obj_additional_pbr_texture_scalar_aliases");
+    let model_path = AssetPath::parse("models/pbr_texture_additional_aliases.obj");
+    let mesh_path = AssetPath::parse("models/pbr_texture_additional_aliases.Panel.mesh");
+    let material_path =
+        AssetPath::parse("models/pbr_texture_additional_aliases.Material_AliasMaps.material");
+    let occlusion_path = AssetPath::parse("models/textures/alias_ambient.texture");
+    let transmission_path = AssetPath::parse("models/textures/alias_transmission.texture");
+    let model_source = b"mtllib pbr_texture_additional_aliases.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl AliasMaps
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl AliasMaps
+map_ambient textures/alias_ambient.texture
+map_transmission_filter textures/alias_transmission.texture
+"
+    .to_vec();
+    let expected_material = b"# mtllib pbr_texture_additional_aliases.mtl
+name=AliasMaps
+texture.occlusion=models/textures/alias_ambient.texture
+texture.transmission_filter=models/textures/alias_transmission.texture
+"
+    .to_vec();
+    let occlusion_source = texture_bytes(1, 1, 149);
+    let transmission_source = texture_bytes(1, 1, 150);
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/pbr_texture_additional_aliases.mtl", material_source);
+    io.insert(occlusion_path.path(), occlusion_source.clone());
+    io.insert(transmission_path.path(), transmission_source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let occlusion_id = database.import_asset_path(&occlusion_path).unwrap();
+    let transmission_id = database.import_asset_path(&transmission_path).unwrap();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/AliasMaps"]);
+    assert_eq!(material_metadata.dependencies, vec![occlusion_id, transmission_id]);
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![occlusion_id, transmission_id, mesh_id, material_id]
+    );
+
+    database
+        .cook_asset(occlusion_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(transmission_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "pbr_texture_additional_aliases",
+            vec![mesh_id, material_id, occlusion_id, transmission_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().name, "pbr_texture_additional_aliases");
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([occlusion_id, transmission_id].as_slice())
+    );
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut runtime = AssetServer::new(AssetServerConfig::default());
+    runtime.set_io(bundle_io);
+    runtime.register_builtin_loaders();
+    let mounted = runtime.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = runtime.preload_bundle(&mounted);
+    for _ in 0..8 {
+        runtime.update_loading();
+        let uploads = runtime.drain_gpu_uploads().collect::<Vec<_>>();
+        runtime.finish_gpu_uploads(uploads.into_iter().enumerate().map(|(index, upload)| {
+            GpuUploadResult::ok(upload.id, GpuResourceHandle(index as u64 + 1))
+        }));
+        if runtime.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+    assert_eq!(runtime.group_state(&group), AssetLoadState::Ready);
+    let material = runtime.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(material.textures.len(), 2);
+    assert_eq!(material.textures[0].name, "occlusion");
+    assert_eq!(material.textures[0].texture.id(), occlusion_id);
+    assert_eq!(material.textures[1].name, "transmission_filter");
+    assert_eq!(material.textures[1].texture.id(), transmission_id);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_common_pbr_texture_aliases() {
     for (directive, stem, channel, texel) in [
         ("map_diffuse", "diffuse_alias", "albedo", 110),
