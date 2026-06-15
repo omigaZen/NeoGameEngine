@@ -1628,6 +1628,40 @@ fn database_material_cooker_canonicalizes_runtime_source_bytes() {
 }
 
 #[test]
+fn database_scene_and_prefab_cookers_pass_through_runtime_bytes() {
+    let scene_path = AssetPath::parse("scenes/cooked.scene");
+    let prefab_path = AssetPath::parse("prefabs/cooked.prefab");
+    let scene_source =
+        b"NGA_SCENE_V1\nname=cooked_scene\ndependency=textures/albedo.texture\n".to_vec();
+    let prefab_source =
+        b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\nroot=Root\n".to_vec();
+    let scene_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(scene_path.clone()),
+        source_bytes: scene_source.clone(),
+    };
+    let prefab_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(prefab_path.clone()),
+        source_bytes: prefab_source.clone(),
+    };
+    let scene_metadata =
+        AssetMetadata::runtime(AssetId::new(), scene_path, AssetTypeId::of::<SceneAsset>());
+    let prefab_metadata =
+        AssetMetadata::runtime(AssetId::new(), prefab_path, AssetTypeId::of::<Prefab>());
+    let scene_cooker = SceneCooker::new();
+    let prefab_cooker = PrefabCooker::new();
+
+    let scene_output = scene_cooker.cook(&scene_ctx, &scene_metadata).unwrap();
+    let prefab_output = prefab_cooker.cook(&prefab_ctx, &prefab_metadata).unwrap();
+
+    assert_eq!(scene_output.bytes, scene_source);
+    assert_eq!(scene_output.version_hash, VersionHash(1));
+    assert_eq!(prefab_output.bytes, prefab_source);
+    assert_eq!(prefab_output.version_hash, VersionHash(1));
+}
+
+#[test]
 fn database_shader_cooker_canonicalizes_source_documents() {
     let shader_path = AssetPath::parse("shaders/cooked.wgsl");
     let source =

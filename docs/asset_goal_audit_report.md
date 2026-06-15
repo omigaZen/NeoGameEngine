@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_scene_and_prefab_cookers_pass_through_runtime_bytes
+```
+
+Result: `SceneCooker` and `PrefabCooker` now have direct pass-through round-trip evidence: scene and prefab runtime bytes are preserved unchanged and both cookers report `VersionHash(1)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_occlusion_texture_colorspace
 ```
 
