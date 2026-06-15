@@ -3913,6 +3913,55 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
         server.dependency_graph().direct_dependencies(mesh_id),
         &[lod0_id, lod1_id]
     );
+    let server_mesh_scope = server.scoped_dependency_report(mesh_id).unwrap();
+    assert!(server_mesh_scope.direct_dependencies.contains(&lod0_id));
+    assert!(server_mesh_scope.direct_dependencies.contains(&lod1_id));
+    assert!(server
+        .dependency_report_text()
+        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
+    assert!(server
+        .dependency_report_text()
+        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    assert!(server
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", lod0_id.raw())));
+    assert!(server
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", lod1_id.raw())));
+    assert!(server
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", lod0_id.raw())));
+    assert!(server
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", lod1_id.raw())));
+    let server_text_path = config.imported_root.join("mesh_lod_binding_server.txt");
+    let server_dot_path = config.imported_root.join("mesh_lod_binding_server.dot");
+    let server_json_path = config.imported_root.join("mesh_lod_binding_server.json");
+    let server_html_path = config.imported_root.join("mesh_lod_binding_server.html");
+    server
+        .save_dependency_report_text(&server_text_path)
+        .unwrap();
+    server
+        .save_dependency_report_dot(&server_dot_path)
+        .unwrap();
+    server
+        .save_dependency_report_json(&server_json_path)
+        .unwrap();
+    server
+        .save_dependency_report_html(&server_html_path)
+        .unwrap();
+    let server_text = fs::read_to_string(server_text_path).unwrap();
+    assert!(server_text.contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
+    assert!(server_text.contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    let server_dot = fs::read_to_string(server_dot_path).unwrap();
+    assert!(server_dot.contains(&format!("\"{}\" -> \"{}\";", mesh_id.raw(), lod0_id.raw())));
+    assert!(server_dot.contains(&format!("\"{}\" -> \"{}\";", mesh_id.raw(), lod1_id.raw())));
+    let server_json = fs::read_to_string(server_json_path).unwrap();
+    assert!(server_json.contains(&format!("\"{}\"", lod0_id.raw())));
+    assert!(server_json.contains(&format!("\"{}\"", lod1_id.raw())));
+    let server_html = fs::read_to_string(server_html_path).unwrap();
+    assert!(server_html.contains(&format!("<code>{}</code>", lod0_id.raw())));
+    assert!(server_html.contains(&format!("<code>{}</code>", lod1_id.raw())));
     let mesh_scope = database.scoped_dependency_report(mesh_id).unwrap();
     assert!(mesh_scope.direct_dependencies.contains(&lod0_id));
     assert!(mesh_scope.direct_dependencies.contains(&lod1_id));
