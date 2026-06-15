@@ -16502,6 +16502,11 @@ fn database_model_importer_reports_invalid_obj_free_form_attributes() {
             "OBJ hole index 1 on line 1 references missing curve2",
         ),
         (
+            "builtin_model_obj_missing_scrv_curve2",
+            "scrv 0 1 1\n",
+            "OBJ scrv index 1 on line 1 references missing curve2",
+        ),
+        (
             "builtin_model_obj_short_surface",
             "v 0 0 0\nv 1 0 0\nv 1 1 0\nvt 0 0\nvt 1 0\nvt 1 1\nvn 0 0 1\nsurf 0 1 0 1 1/1/1 2/2/1 3/3/1\nf 1 2 3\n",
             "OBJ surf on line 8 must contain at least 4 control points",
