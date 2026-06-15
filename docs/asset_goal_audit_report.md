@@ -2088,7 +2088,7 @@ C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
 git diff --check
 ```
 
-Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 220 tests, the default engine_asset suite passes 454 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
+Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 221 tests, the default engine_asset suite passes 455 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
 
 Passed:
 
@@ -2097,3 +2097,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture remap parsing now has a stable regression for malformed `-mm` tails. Supplying a fourth texture path on `map_Kd -mm ...` surfaces the expected `map_Kd texture paths` import diagnostic with model and material file context instead of silently accepting the extra path.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_material_texture_remap
+```
+
+Result: OBJ material texture remap parsing now also has a stable positive regression for `-mm` color-remap preservation. A valid `map_Kd -mm 0.2 0.7 textures/remap_albedo.texture` import keeps the remap values, preserves the resolved albedo dependency path, and loads back as a runtime `Material` whose `albedo` texture carries `color_remap=0.2,0.7`.
