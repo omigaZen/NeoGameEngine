@@ -16567,6 +16567,11 @@ fn database_model_importer_reports_invalid_obj_free_form_attributes() {
             "OBJ con index 1 on line 7 references missing curve2",
         ),
         (
+            "builtin_model_obj_missing_connection_range_value",
+            "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvp 0 0\nvp 1 0\ncurv2 1 2\nsurf 0 1 0 1 1 2 3 4\nsurf 0 1 0 1 4 3 2 1\ncon 1 0\nf 1 2 3\n",
+            "missing OBJ con range value on line 10",
+        ),
+        (
             "builtin_model_obj_non_finite_connection_range",
             "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvp 0 0\nvp 1 0\ncurv2 1 2\nsurf 0 1 0 1 1 2 3 4\nsurf 0 1 0 1 4 3 2 1\ncon 1 0 NaN 1 2 0 1 1\nf 1 2 3\n",
             "OBJ con range value must be finite on line 10",
