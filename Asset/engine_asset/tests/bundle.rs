@@ -1088,6 +1088,14 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         AssetPackageRegistry::from_text(&invalid_bundle_id_text),
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package bundle id")
     ));
+    let invalid_priority_text =
+        dependency_registry
+            .to_text()
+            .replacen("package|1|0|", "package|1|abc|", 1);
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_priority_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package priority")
+    ));
     let missing_package_line_text = dependency_registry
         .to_text()
         .replace("packages=1", "packages=2");
