@@ -1263,6 +1263,33 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
     assert_eq!(registry.packages().len(), 1);
     assert!(store.verify_registry(&registry).unwrap().all_available());
 
+    let keep_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(12),
+                "artifact_keep",
+                AssetIoLayerKind::Patch,
+                0,
+                "patches/artifact_keep.bundle",
+            ),
+            &patch_bundle,
+        )
+        .unwrap();
+    assert!(keep_install.artifact_path.exists());
+
+    let kept = store
+        .remove_package(&mut registry, "artifact_keep", false)
+        .unwrap();
+    assert_eq!(kept.removed.name, "artifact_keep");
+    assert!(!kept.artifact_removed);
+    assert!(kept.artifact_path.exists());
+    assert_eq!(
+        store.load_package_bytes(&kept.removed).unwrap(),
+        patch_bundle
+    );
+    assert_eq!(registry.packages().len(), 1);
+
     let _ = std::fs::remove_dir_all(&root);
 }
 

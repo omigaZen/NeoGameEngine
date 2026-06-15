@@ -1772,3 +1772,11 @@ git diff --check
 ```
 
 Result: the latest database pass is clean after the `OBJ mtllib` quoted-label fix and the non-UTF-8 material-library regression addition. `database_model_importer_reports_invalid_obj_face_index` now passes with the quoted `bad.mtl#Variant` label case, the full database suite passes 215 tests, the default engine_asset suite passes 415 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
+```
+
+Result: bundle artifact removal now has explicit coverage for both artifact-deleting and artifact-preserving paths. `delete_artifact=true` still removes the file and updates the registry, while `delete_artifact=false` keeps the artifact on disk, returns `artifact_removed=false`, and still allows `load_package_bytes()` to read the preserved payload after the logical registry removal.

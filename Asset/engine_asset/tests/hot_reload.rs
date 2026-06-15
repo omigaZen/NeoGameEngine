@@ -299,7 +299,10 @@ fn hot_reload_async_watch_backend_start_and_stop_are_idempotent() {
     assert!(server
         .notify_hot_reload_async_watch_change(path.clone())
         .unwrap());
-    assert_eq!(server.hot_reload_async_watch_report().pending_notifications, 1);
+    assert_eq!(
+        server.hot_reload_async_watch_report().pending_notifications,
+        1
+    );
 
     let first_stop = server.stop_hot_reload_async_watch_backend().unwrap();
     assert!(!first_stop.is_running());
@@ -311,10 +314,11 @@ fn hot_reload_async_watch_backend_start_and_stop_are_idempotent() {
     assert_eq!(second_stop.pending_notifications, 0);
     assert_eq!(second_stop.dropped_notifications, 1);
 
-    assert!(!server
-        .notify_hot_reload_async_watch_change(path)
-        .unwrap());
-    assert_eq!(server.hot_reload_async_watch_report().dropped_notifications, 2);
+    assert!(!server.notify_hot_reload_async_watch_change(path).unwrap());
+    assert_eq!(
+        server.hot_reload_async_watch_report().dropped_notifications,
+        2
+    );
 }
 
 #[test]
