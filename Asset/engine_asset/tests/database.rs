@@ -21578,11 +21578,14 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
-    assert_eq!(metadata.importer.as_deref(), Some("TextureImporter"));
-    assert_eq!(metadata.importer_version, 3);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let texture_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
+        assert_eq!(metadata.importer.as_deref(), Some("TextureImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         expected
@@ -21591,10 +21594,8 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
-    assert_eq!(
-        output.metadata,
-        database.registry().get(id).unwrap().clone()
-    );
+    assert_eq!(output.metadata.source_hash, texture_source_hash);
+    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22275,11 +22276,14 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
-    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 3);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let shader_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
+        assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         expected
@@ -22288,10 +22292,8 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
-    assert_eq!(
-        output.metadata,
-        database.registry().get(id).unwrap().clone()
-    );
+    assert_eq!(output.metadata.source_hash, shader_source_hash);
+    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22351,11 +22353,14 @@ fn database_shader_importer_preserves_glsl_source_language() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
-    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 3);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let shader_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
+        assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         expected
@@ -22364,10 +22369,8 @@ fn database_shader_importer_preserves_glsl_source_language() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
-    assert_eq!(
-        output.metadata,
-        database.registry().get(id).unwrap().clone()
-    );
+    assert_eq!(output.metadata.source_hash, shader_source_hash);
+    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22420,11 +22423,14 @@ fn database_shader_importer_preserves_spv_source_language() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
-    let metadata = database.registry().get(id).unwrap();
-    assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
-    assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
-    assert_eq!(metadata.importer_version, 3);
-    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    let shader_source_hash = {
+        let metadata = database.registry().get(id).unwrap();
+        assert_eq!(metadata.asset_type, AssetTypeId::of::<Shader>());
+        assert_eq!(metadata.importer.as_deref(), Some("ShaderImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+        metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
         expected
@@ -22433,10 +22439,8 @@ fn database_shader_importer_preserves_spv_source_language() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
-    assert_eq!(
-        output.metadata,
-        database.registry().get(id).unwrap().clone()
-    );
+    assert_eq!(output.metadata.source_hash, shader_source_hash);
+    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
