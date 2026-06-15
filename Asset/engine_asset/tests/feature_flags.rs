@@ -432,8 +432,12 @@ fn bundle_feature_entry_points_match_gate() {
             server.mount_bundle_bytes(b"not a bundle"),
             Err(AssetError::Bundle { .. })
         ));
-        assert!(database.build_bundle(&bundle_build).is_ok());
-        assert!(database.build_bundle_bytes(&bundle_build).is_ok());
+        let bundle_output = database.build_bundle(&bundle_build).unwrap();
+        assert_eq!(bundle_output.asset_count, 0);
+        assert_eq!(bundle_output.bytes, database.build_bundle_bytes(&bundle_build).unwrap());
+        let reader = BundleReader::from_bytes(&bundle_output.bytes).unwrap();
+        assert_eq!(reader.manifest().name, "empty");
+        assert!(reader.manifest().entries.is_empty());
     } else {
         assert_eq!(
             server.mount_bundle_bytes(b"not a bundle"),
