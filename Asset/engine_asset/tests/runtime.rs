@@ -7,6 +7,10 @@ fn server_with_io(io: MemoryAssetIo) -> AssetServer {
     server
 }
 
+fn io_source_hash(io: &MemoryAssetIo, path: &str) -> ContentHash {
+    io.metadata(path).unwrap().hash.unwrap()
+}
+
 fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&width.to_le_bytes());
@@ -687,6 +691,8 @@ fn material_load_applies_texture_metadata() {
         "materials/sampled.material",
         "name=sampled\ntexture.albedo.sampler.address=clamp_to_edge\ntexture.albedo.sampler.filter=nearest\ntexture.albedo.transform.offset=0.25,0.5,0\ntexture.albedo.transform.scale=2,3,1\ntexture.albedo.transform.turbulence=0.01,0.02,0.03\ntexture.albedo.bump_scale=0.3\ntexture.albedo.color_remap=0.1,0.9\ntexture.albedo.source_channel=green\ntexture.albedo.boost=1.5\ntexture.albedo.blend_u=false\ntexture.albedo.blend_v=true\ntexture.albedo.color_correction=true\ntexture.albedo.color_space=srgb\ntexture.albedo.projection=sphere\ntexture.albedo.texture_resolution=1024\ntexture.albedo=textures/albedo.texture\nemissive=0.1,0.2,0.3\nalpha_cutoff=0.45\nalpha_mode=mask\ndouble_sided=true\ndepth_write=false\ndepth_test=false\n",
     );
+    let material_source_hash = io_source_hash(&io, "materials/sampled.material");
+    let texture_source_hash = io_source_hash(&io, "textures/albedo.texture");
     let mut server = server_with_io(io);
 
     let material: Handle<Material> = server.load("materials/sampled.material");
@@ -732,6 +738,17 @@ fn material_load_applies_texture_metadata() {
         Some(MaterialTextureProjection::Sphere)
     );
     assert_eq!(loaded.textures[0].options.texture_resolution, Some(1024));
+    assert_eq!(
+        server.metadata(material.id()).unwrap().source_hash,
+        Some(material_source_hash)
+    );
+    assert_eq!(
+        server
+            .metadata(loaded.textures[0].texture.id())
+            .unwrap()
+            .source_hash,
+        Some(texture_source_hash)
+    );
     assert_eq!(loaded.properties.emissive, [0.1, 0.2, 0.3]);
     assert_eq!(loaded.properties.alpha_cutoff, Some(0.45));
     assert_eq!(loaded.render_state.alpha_mode, AlphaMode::Mask);
@@ -806,6 +823,7 @@ legacy_float=0.5
 #[test]
 fn shader_load_reaches_ready_after_renderer_upload_handoff_and_selects_compute_stage() {
     let io = MemoryAssetIo::new().with_file("shaders/compute.wgsl", shader_bytes());
+    let shader_source_hash = io_source_hash(&io, "shaders/compute.wgsl");
     let mut server = server_with_io(io);
 
     let shader: Handle<Shader> = server.load("shaders/compute.wgsl#compute");
@@ -835,6 +853,10 @@ fn shader_load_reaches_ready_after_renderer_upload_handoff_and_selects_compute_s
         &loaded.stages[0].source,
         ShaderSource::Wgsl(source) if source.contains("@compute")
     ));
+    assert_eq!(
+        server.metadata(shader.id()).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
     let reflection = loaded.reflection.as_ref().unwrap();
     assert_eq!(
         reflection.bind_groups,
@@ -881,6 +903,7 @@ fn shader_load_populates_vertex_reflection_metadata() {
 fn shader_spirv_load_reaches_ready_after_renderer_upload_handoff() {
     let bytes = spirv_bytes();
     let io = MemoryAssetIo::new().with_file("shaders/compute.spv", bytes.clone());
+    let shader_source_hash = io_source_hash(&io, "shaders/compute.spv");
     let mut server = server_with_io(io);
 
     let shader: Handle<Shader> = server.load("shaders/compute.spv#compute");
@@ -913,6 +936,10 @@ fn shader_spirv_load_reaches_ready_after_renderer_upload_handoff() {
             if words.as_slice()
                 == [0x0723_0203, 0x0001_0000, 0x0000_0000, 0x0000_0000]
     ));
+    assert_eq!(
+        server.metadata(shader.id()).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
     assert!(loaded.reflection.is_none());
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(23)));
 }
@@ -921,6 +948,7 @@ fn shader_spirv_load_reaches_ready_after_renderer_upload_handoff() {
 fn shader_glsl_load_reaches_ready_without_reflection_after_renderer_upload_handoff() {
     let bytes = glsl_shader_bytes();
     let io = MemoryAssetIo::new().with_file("shaders/compute.glsl", bytes.clone());
+    let shader_source_hash = io_source_hash(&io, "shaders/compute.glsl");
     let mut server = server_with_io(io);
 
     let shader: Handle<Shader> = server.load("shaders/compute.glsl#compute");
@@ -951,6 +979,10 @@ fn shader_glsl_load_reaches_ready_without_reflection_after_renderer_upload_hando
         &loaded.stages[0].source,
         ShaderSource::Glsl(source) if source == "#version 450\nlayout(location = 0) in vec3 position;\nvoid main() {}\n"
     ));
+    assert_eq!(
+        server.metadata(shader.id()).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
     assert!(loaded.reflection.is_none());
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(24)));
 }
@@ -1445,6 +1477,7 @@ fn invalid_mesh_skin_weight_total_fails_with_decode_error_and_event() {
 #[test]
 fn audio_load_reaches_ready_without_renderer_upload() {
     let io = MemoryAssetIo::new().with_file("audio/click.audio", audio_bytes());
+    let audio_source_hash = io_source_hash(&io, "audio/click.audio");
     let mut server = server_with_io(io);
 
     let audio: Handle<AudioClip> = server.load("audio/click.audio");
@@ -1458,6 +1491,10 @@ fn audio_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.duration_seconds, 2.0 / 48000.0);
     assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1000, -1000, 0]));
     assert!(!loaded.streaming);
+    assert_eq!(
+        server.metadata(audio.id()).unwrap().source_hash,
+        Some(audio_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -1512,6 +1549,7 @@ fn opus_ogg_audio_load_reaches_ready_as_streaming() {
 fn wav_audio_load_reaches_ready_without_renderer_upload() {
     let wav = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
     let io = MemoryAssetIo::new().with_file("audio/click.wav", wav);
+    let audio_source_hash = io_source_hash(&io, "audio/click.wav");
     let mut server = server_with_io(io);
 
     let audio: Handle<AudioClip> = server.load("audio/click.wav");
@@ -1525,6 +1563,10 @@ fn wav_audio_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.duration_seconds, 2.0 / 44_100.0);
     assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1000, -1000, 500]));
     assert!(!loaded.streaming);
+    assert_eq!(
+        server.metadata(audio.id()).unwrap().source_hash,
+        Some(audio_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -2332,6 +2374,7 @@ fn invalid_physics_mesh_payload_fails_with_decode_error_and_event() {
 #[test]
 fn texture_load_reaches_ready_after_renderer_upload_handoff() {
     let io = MemoryAssetIo::new().with_file("textures/checker.texture", texture_bytes(2, 2, 255));
+    let texture_source_hash = io_source_hash(&io, "textures/checker.texture");
     let mut server = server_with_io(io);
 
     let texture: Handle<Texture> = server.load("textures/checker.texture");
@@ -2354,6 +2397,10 @@ fn texture_load_reaches_ready_after_renderer_upload_handoff() {
     let loaded = server.get(&texture).unwrap();
     assert_eq!((loaded.width, loaded.height), (2, 2));
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(7)));
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        Some(texture_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -2369,6 +2416,9 @@ fn material_load_waits_for_shader_and_texture_dependencies() {
         "materials/hero.material",
         "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
     );
+    let material_source_hash = io_source_hash(&io, "materials/hero.material");
+    let shader_source_hash = io_source_hash(&io, "shaders/pbr.wgsl");
+    let texture_source_hash = io_source_hash(&io, "textures/albedo.texture");
     let mut server = server_with_io(io);
 
     let material: Handle<Material> = server.load("materials/hero.material");
@@ -2407,6 +2457,18 @@ fn material_load_waits_for_shader_and_texture_dependencies() {
     assert_eq!(loaded.name.as_deref(), Some("hero"));
     assert_eq!(loaded.shader.as_ref().unwrap().id(), shader_id);
     assert_eq!(loaded.textures[0].texture.id(), texture_id);
+    assert_eq!(
+        server.metadata(material.id()).unwrap().source_hash,
+        Some(material_source_hash)
+    );
+    assert_eq!(
+        server.metadata(shader_id).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
+    assert_eq!(
+        server.metadata(texture_id).unwrap().source_hash,
+        Some(texture_source_hash)
+    );
 }
 
 #[test]
@@ -2420,6 +2482,9 @@ fn scene_load_waits_for_dependency_paths_and_exposes_handles() {
         "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
     );
     io.insert("scenes/level.scene", scene_bytes());
+    let scene_source_hash = io_source_hash(&io, "scenes/level.scene");
+    let mesh_source_hash = io_source_hash(&io, "meshes/tri.mesh");
+    let material_source_hash = io_source_hash(&io, "materials/hero.material");
     let mut server = server_with_io(io);
 
     let scene: Handle<SceneAsset> = server.load("scenes/level.scene");
@@ -2452,6 +2517,18 @@ fn scene_load_waits_for_dependency_paths_and_exposes_handles() {
     assert_eq!(loaded.entities[1].name.as_deref(), Some("Hero"));
     assert_eq!(loaded.entities[1].parent, Some(0));
     assert_eq!(loaded.dependencies.len(), 2);
+    assert_eq!(
+        server.metadata(scene.id()).unwrap().source_hash,
+        Some(scene_source_hash)
+    );
+    assert_eq!(
+        server.metadata(mesh_id).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
+    assert_eq!(
+        server.metadata(material_id).unwrap().source_hash,
+        Some(material_source_hash)
+    );
     assert!(loaded.dependencies.iter().any(|dependency| {
         dependency.id() == mesh_id
             && dependency.asset_type() == Mesh::TYPE_ID
@@ -2586,6 +2663,9 @@ fn prefab_load_waits_for_dependency_paths_and_exposes_handles() {
         "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
     );
     io.insert("prefabs/hero.prefab", prefab_bytes());
+    let prefab_source_hash = io_source_hash(&io, "prefabs/hero.prefab");
+    let mesh_source_hash = io_source_hash(&io, "meshes/tri.mesh");
+    let material_source_hash = io_source_hash(&io, "materials/hero.material");
     let mut server = server_with_io(io);
 
     let prefab: Handle<Prefab> = server.load("prefabs/hero.prefab");
@@ -2623,6 +2703,18 @@ fn prefab_load_waits_for_dependency_paths_and_exposes_handles() {
     assert_eq!(loaded.children[0].name.as_deref(), Some("Weapon"));
     assert_eq!(loaded.children[0].parent, Some(0));
     assert_eq!(loaded.dependencies.len(), 2);
+    assert_eq!(
+        server.metadata(prefab.id()).unwrap().source_hash,
+        Some(prefab_source_hash)
+    );
+    assert_eq!(
+        server.metadata(mesh_id).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
+    assert_eq!(
+        server.metadata(material_id).unwrap().source_hash,
+        Some(material_source_hash)
+    );
     assert!(loaded.dependencies.iter().any(|dependency| {
         dependency.id() == mesh_id
             && dependency.asset_type() == Mesh::TYPE_ID

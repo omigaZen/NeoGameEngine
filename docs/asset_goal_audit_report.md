@@ -2412,6 +2412,19 @@ Result: hot-reload recovery now also pins source-hash metadata. A reload-by-path
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime texture_load_reaches_ready_after_renderer_upload_handoff
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime shader_spirv_load_reaches_ready_after_renderer_upload_handoff
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime audio_load_reaches_ready_without_renderer_upload
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime material_load_waits_for_shader_and_texture_dependencies
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime scene_load_waits_for_dependency_paths_and_exposes_handles
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime prefab_load_waits_for_dependency_paths_and_exposes_handles
+```
+
+Result: direct runtime loads now also pin source-hash metadata on representative texture, shader, audio, material, scene, and prefab paths. The new runtime loader coverage proves that `AssetServer::load` stores the IO metadata hash on ready assets as they move through dependency resolution and GPU handoff, instead of only in hot-reload recovery.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches
 ```
 
