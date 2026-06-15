@@ -6447,13 +6447,14 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Rough
 pR 0.35
-map_Ns -imfchan green textures/spec_exponent.texture
+map_Ns -imfchan green -colorspace Non-Color textures/spec_exponent.texture
 "
     .to_vec();
     let expected_material = b"# mtllib rough.mtl
 name=Rough
 texture.roughness=models/textures/spec_exponent.texture
 texture.roughness.source_channel=green
+texture.roughness.color_space=non_color
 roughness=0.35
 "
     .to_vec();
@@ -6550,6 +6551,10 @@ roughness=0.35
     assert_eq!(
         material.textures[0].options.source_channel,
         Some(MaterialTextureChannel::Green)
+    );
+    assert_eq!(
+        material.textures[0].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
     );
 }
 

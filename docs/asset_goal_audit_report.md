@@ -2209,3 +2209,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
 ```
 
 Result: the editor smoke path keeps the earlier albedo texture-transform and boost evidence, while the runtime smoke path now also covers a separate normal-map material, preserves `texture.normal.bump_scale=0.35` in the runtime `Material`, carries two audio clips through distinct `AudioSourceComponent` bridges, and includes standalone `Skeleton`/`AnimationClip` readiness plus `SkinnedMeshRendererComponent` scene/prefab coverage.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database roughness_extensions
+```
+
+Result: the roughness texture regression now also preserves `texture.roughness.color_space=non_color` for `map_Ns -colorspace Non-Color` in addition to the existing roughness source-channel evidence, and the runtime-loaded `Material` carries the same color-space setting through the bundle path.
