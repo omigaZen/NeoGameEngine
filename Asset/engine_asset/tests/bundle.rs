@@ -2045,6 +2045,28 @@ fn asset_package_dependency_compatibility_reports_separator_diagnostics() {
 }
 
 #[test]
+fn mounted_bundle_registry_reports_manifest_line_count_overflow() {
+    let registry = MountedBundleRegistry::new(vec![MountedBundle {
+        id: BundleId(1),
+        name: "overflow".to_owned(),
+        manifest: BundleManifest {
+            name: "overflow".to_owned(),
+            compression: CompressionKind::None,
+            chunks: Vec::new(),
+            entries: Vec::new(),
+        },
+    }]);
+    let overflow_text =
+        registry
+            .to_text()
+            .replacen("bundle|1|5", &format!("bundle|1|{}", usize::MAX), 1);
+    assert!(matches!(
+        MountedBundleRegistry::from_text(&overflow_text),
+        Err(AssetError::Bundle { message }) if message.contains("mounted bundle manifest line count overflow")
+    ));
+}
+
+#[test]
 fn asset_package_asset_override_report_tracks_semantic_policy_issues() {
     let base_dependency = AssetId::new();
     let base_material = AssetId::new();

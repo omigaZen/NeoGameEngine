@@ -1980,3 +1980,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: registry text parsing now also rejects missing and malformed `packages=` lines explicitly. A registry with no `packages=` line returns `missing \`packages=\` line`, and a wrong prefix returns `expected \`packages=\` line` before any package parsing starts.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bundle_registry_reports_manifest_line_count_overflow
+```
+
+Result: mounted bundle registry parsing now also rejects manifest line count overflow explicitly. Replacing the serialized mounted bundle manifest line count with `usize::MAX` returns `mounted bundle manifest line count overflow` before any slice of the manifest payload is attempted.
