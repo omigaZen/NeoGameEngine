@@ -2399,7 +2399,7 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_and_specular_texture_maps
 ```
 
-Result: the core OBJ model-importer path and representative material-property/color variants now also pin source-hash metadata: the generated mesh/material subresources keep source-hash fields stable through import and sidecar reload, while the OBJ source test still round-trips the generated mesh/material bytes and dependency graph through cook, bundle, and runtime preload.
+Result: the core OBJ model-importer path and representative material-property/color variants now also pin source-hash metadata: the generated mesh/material subresources keep source-hash fields stable through import and sidecar reload, while the OBJ source test still round-trips the generated mesh/material bytes and dependency graph through cook, bundle, and runtime preload. The common alpha and PBR texture-alias loop coverage now also preserves the generated material source-hash through sidecar reload alongside the same round-tripped texture/material bytes.
 
 Passed:
 

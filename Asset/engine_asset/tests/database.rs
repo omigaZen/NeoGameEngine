@@ -8123,6 +8123,9 @@ alpha_mode=blend\n"
             .registry()
             .metadata_by_path(&material_path)
             .unwrap();
+        assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+        assert!(material_metadata.source_hash.is_some());
+        let material_source_hash = material_metadata.source_hash;
         let material_id = material_metadata.id;
 
         assert_eq!(material_metadata.labels, vec!["Material/Cutout"]);
@@ -8162,6 +8165,17 @@ alpha_mode=blend\n"
         );
         assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
         assert_eq!(reader.read_path(&alpha_path).unwrap(), alpha_source);
+        database.save_all_metadata_sidecars().unwrap();
+        let mut loaded_sidecars = AssetDatabase::new(config.clone());
+        loaded_sidecars.load_metadata_sidecars().unwrap();
+        assert_eq!(
+            loaded_sidecars
+                .registry()
+                .metadata_by_path(&material_path)
+                .unwrap()
+                .source_hash,
+            material_source_hash
+        );
 
         let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
         let mut server = AssetServer::new(AssetServerConfig::default());
@@ -9775,6 +9789,9 @@ texture.transmission_filter.source_channel=alpha\n"
             .registry()
             .metadata_by_path(&material_path)
             .unwrap();
+        assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+        assert!(material_metadata.source_hash.is_some());
+        let material_source_hash = material_metadata.source_hash;
         let material_id = material_metadata.id;
 
         assert_eq!(material_metadata.labels, vec!["Material/Clear"]);
@@ -9786,6 +9803,14 @@ texture.transmission_filter.source_channel=alpha\n"
         assert_eq!(
             database.registry().get(model_id).unwrap().dependencies,
             vec![texture_id, mesh_id, material_id]
+        );
+        assert_eq!(
+            database
+                .registry()
+                .metadata_by_path(&material_path)
+                .unwrap()
+                .source_hash,
+            material_source_hash
         );
 
         database
@@ -9934,6 +9959,9 @@ texture.{channel}.color_space=non_color\n\
             .registry()
             .metadata_by_path(&material_path)
             .unwrap();
+        assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+        assert!(material_metadata.source_hash.is_some());
+        let material_source_hash = material_metadata.source_hash;
         let material_id = material_metadata.id;
 
         assert_eq!(material_metadata.labels, vec!["Material/Extensions"]);
@@ -9945,6 +9973,17 @@ texture.{channel}.color_space=non_color\n\
         assert_eq!(
             database.registry().get(model_id).unwrap().dependencies,
             vec![texture_id, mesh_id, material_id]
+        );
+        database.save_all_metadata_sidecars().unwrap();
+        let mut loaded_sidecars = AssetDatabase::new(config.clone());
+        loaded_sidecars.load_metadata_sidecars().unwrap();
+        assert_eq!(
+            loaded_sidecars
+                .registry()
+                .metadata_by_path(&material_path)
+                .unwrap()
+                .source_hash,
+            material_source_hash
         );
 
         database
@@ -10092,6 +10131,9 @@ texture.{channel}.color_space=non_color\n"
             .registry()
             .metadata_by_path(&material_path)
             .unwrap();
+        assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+        assert!(material_metadata.source_hash.is_some());
+        let material_source_hash = material_metadata.source_hash;
         let material_id = material_metadata.id;
 
         assert_eq!(material_metadata.labels, vec!["Material/Surface"]);
@@ -10131,6 +10173,17 @@ texture.{channel}.color_space=non_color\n"
         );
         assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
         assert_eq!(reader.read_path(&texture_path).unwrap(), texture_source);
+        database.save_all_metadata_sidecars().unwrap();
+        let mut loaded_sidecars = AssetDatabase::new(config.clone());
+        loaded_sidecars.load_metadata_sidecars().unwrap();
+        assert_eq!(
+            loaded_sidecars
+                .registry()
+                .metadata_by_path(&material_path)
+                .unwrap()
+                .source_hash,
+            material_source_hash
+        );
 
         let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
         let mut server = AssetServer::new(AssetServerConfig::default());
