@@ -18877,6 +18877,86 @@ fn database_animation_and_skeleton_cookers_canonicalize_source_documents() {
 }
 
 #[test]
+fn database_animation_and_skeleton_cookers_canonicalize_runtime_and_source_bytes() {
+    let animation_runtime_path = AssetPath::parse("animations/cooked_runtime.animation");
+    let skeleton_runtime_path = AssetPath::parse("skeletons/cooked_runtime.skeleton");
+    let animation_runtime_expected = animation_runtime_bytes();
+    let skeleton_runtime_expected = skeleton_runtime_bytes();
+    let animation_runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(animation_runtime_path.clone()),
+        source_bytes: animation_runtime_expected.clone(),
+    };
+    let skeleton_runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(skeleton_runtime_path.clone()),
+        source_bytes: skeleton_runtime_expected.clone(),
+    };
+    let animation_runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        animation_runtime_path,
+        AssetTypeId::of::<AnimationClip>(),
+    );
+    let skeleton_runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        skeleton_runtime_path,
+        AssetTypeId::of::<Skeleton>(),
+    );
+    let animation_source_path = AssetPath::parse("animations/from_source.animation");
+    let skeleton_source_path = AssetPath::parse("skeletons/from_source.skeleton");
+    let animation_source_expected = animation_runtime_bytes();
+    let skeleton_source_expected = skeleton_runtime_bytes();
+    let animation_source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(animation_source_path.clone()),
+        source_bytes: animation_source_bytes(),
+    };
+    let skeleton_source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(skeleton_source_path.clone()),
+        source_bytes: skeleton_source_bytes(),
+    };
+    let animation_source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        animation_source_path,
+        AssetTypeId::of::<AnimationClip>(),
+    );
+    let skeleton_source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        skeleton_source_path,
+        AssetTypeId::of::<Skeleton>(),
+    );
+    let animation_cooker = AnimationCooker::new();
+    let skeleton_cooker = SkeletonCooker::new();
+
+    let animation_runtime_output = animation_cooker
+        .cook(&animation_runtime_ctx, &animation_runtime_metadata)
+        .unwrap();
+    let skeleton_runtime_output = skeleton_cooker
+        .cook(&skeleton_runtime_ctx, &skeleton_runtime_metadata)
+        .unwrap();
+    let animation_source_output = animation_cooker
+        .cook(&animation_source_ctx, &animation_source_metadata)
+        .unwrap();
+    let skeleton_source_output = skeleton_cooker
+        .cook(&skeleton_source_ctx, &skeleton_source_metadata)
+        .unwrap();
+
+    assert_eq!(animation_runtime_output.bytes, animation_runtime_expected);
+    assert_eq!(animation_runtime_output.version_hash, VersionHash(2));
+    assert_eq!(animation_runtime_output.metadata, animation_runtime_metadata);
+    assert_eq!(skeleton_runtime_output.bytes, skeleton_runtime_expected);
+    assert_eq!(skeleton_runtime_output.version_hash, VersionHash(2));
+    assert_eq!(skeleton_runtime_output.metadata, skeleton_runtime_metadata);
+    assert_eq!(animation_source_output.bytes, animation_source_expected);
+    assert_eq!(animation_source_output.version_hash, VersionHash(2));
+    assert_eq!(animation_source_output.metadata, animation_source_metadata);
+    assert_eq!(skeleton_source_output.bytes, skeleton_source_expected);
+    assert_eq!(skeleton_source_output.version_hash, VersionHash(2));
+    assert_eq!(skeleton_source_output.metadata, skeleton_source_metadata);
+}
+
+#[test]
 fn database_texture_cooker_canonicalizes_source_documents() {
     let config = database_config("texture_cooker_source_conversion");
     let path = AssetPath::parse("textures/generated.texture");

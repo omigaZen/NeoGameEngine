@@ -91,6 +91,14 @@ Result: `AudioCooker` now has direct runtime/WAV round-trip evidence: runtime au
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_animation_and_skeleton_cookers_canonicalize_runtime_and_source_bytes
+```
+
+Result: `AnimationCooker` and `SkeletonCooker` now have direct runtime/source round-trip evidence: runtime animation/skeleton bytes stay unchanged, validated source documents canonicalize to the same runtime bytes, and both paths report `VersionHash(2)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_texture_cooker_canonicalizes_runtime_and_source_bytes
 ```
 
