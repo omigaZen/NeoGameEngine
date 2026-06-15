@@ -2354,7 +2354,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_scene_and_prefab_importers_preserve_runtime_documents_and_dependencies
 ```
 
-Result: `SceneImporter` and `PrefabImporter` now have direct importer evidence: scene and prefab source documents preserve their runtime bytes, register dependency ids through `ImportContext`, and report `VersionHash(1)` with importer/version/source metadata intact.
+Result: `SceneImporter` and `PrefabImporter` now have direct importer evidence: scene and prefab source documents preserve their runtime bytes, register dependency ids through `ImportContext`, and report `VersionHash(1)` with importer/version/source-hash metadata and stable `SceneAsset`/`Prefab` types intact.
 
 Passed:
 

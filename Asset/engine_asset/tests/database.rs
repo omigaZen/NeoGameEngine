@@ -20949,6 +20949,8 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
     let texture_id = AssetId::new();
     let material_id = AssetId::new();
     let mesh_id = AssetId::new();
+    let scene_hash = ContentHash(606);
+    let prefab_hash = ContentHash(707);
     let mut registry = AssetRegistry::new();
     registry.insert(AssetMetadata::runtime(
         texture_id,
@@ -20968,12 +20970,12 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
     let scene_source = SourceAsset {
         path: scene_path.clone(),
         bytes: scene_bytes.clone(),
-        hash: ContentHash(0),
+        hash: scene_hash,
     };
     let prefab_source = SourceAsset {
         path: prefab_path.clone(),
         bytes: prefab_bytes.clone(),
-        hash: ContentHash(0),
+        hash: prefab_hash,
     };
     let scene_importer = SceneImporter::new();
     let prefab_importer = PrefabImporter::new();
@@ -20989,6 +20991,7 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
         .unwrap();
 
     assert_eq!(scene_output.metadata.path.as_ref(), Some(&scene_path));
+    assert_eq!(scene_output.metadata.asset_type, SceneAsset::TYPE_ID);
     assert_eq!(
         scene_output.metadata.importer.as_deref(),
         Some("SceneImporter")
@@ -21002,17 +21005,20 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
         scene_output.metadata.cooked_path.as_ref(),
         Some(&scene_path)
     );
+    assert_eq!(scene_output.metadata.source_hash, Some(scene_hash));
     assert_eq!(scene_output.metadata.version_hash, Some(VersionHash(1)));
     assert_eq!(scene_output.version_hash, VersionHash(1));
     assert_eq!(scene_output.generated.len(), 1);
     assert_eq!(scene_output.generated[0].bytes, scene_bytes);
     assert_eq!(scene_output.generated[0].path, scene_path);
+    assert_eq!(scene_output.generated[0].asset_type, SceneAsset::TYPE_ID);
     assert_eq!(
         scene_output.dependencies,
         vec![texture_id, material_id, mesh_id]
     );
 
     assert_eq!(prefab_output.metadata.path.as_ref(), Some(&prefab_path));
+    assert_eq!(prefab_output.metadata.asset_type, Prefab::TYPE_ID);
     assert_eq!(
         prefab_output.metadata.importer.as_deref(),
         Some("PrefabImporter")
@@ -21026,11 +21032,13 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
         prefab_output.metadata.cooked_path.as_ref(),
         Some(&prefab_path)
     );
+    assert_eq!(prefab_output.metadata.source_hash, Some(prefab_hash));
     assert_eq!(prefab_output.metadata.version_hash, Some(VersionHash(1)));
     assert_eq!(prefab_output.version_hash, VersionHash(1));
     assert_eq!(prefab_output.generated.len(), 1);
     assert_eq!(prefab_output.generated[0].bytes, prefab_bytes);
     assert_eq!(prefab_output.generated[0].path, prefab_path);
+    assert_eq!(prefab_output.generated[0].asset_type, Prefab::TYPE_ID);
     assert_eq!(
         prefab_output.dependencies,
         vec![texture_id, material_id, mesh_id]
