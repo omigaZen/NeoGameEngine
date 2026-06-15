@@ -1733,11 +1733,8 @@ fn database_material_cooker_canonicalizes_runtime_and_source_bytes() {
         source_path: Some(runtime_path.clone()),
         source_bytes: runtime_bytes.clone(),
     };
-    let runtime_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        runtime_path,
-        AssetTypeId::of::<Material>(),
-    );
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Material>());
     let source_path = AssetPath::parse("materials/from_source.material");
     let source_bytes = b"# comment\n name = hero \n shader = shaders/pbr.wgsl \n texture.albedo = textures/albedo.texture \n base_color = 1, 0.5, 0.25, 1 \n roughness = 0.7 \n".to_vec();
     let source_ctx = CookContext {
@@ -1745,11 +1742,8 @@ fn database_material_cooker_canonicalizes_runtime_and_source_bytes() {
         source_path: Some(source_path.clone()),
         source_bytes: source_bytes.clone(),
     };
-    let source_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        source_path,
-        AssetTypeId::of::<Material>(),
-    );
+    let source_metadata =
+        AssetMetadata::runtime(AssetId::new(), source_path, AssetTypeId::of::<Material>());
     let cooker = MaterialCooker::new();
     let expected = b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1, 0.5, 0.25, 1\nroughness=0.7\n".to_vec();
 
@@ -1770,8 +1764,7 @@ fn database_scene_and_prefab_cookers_pass_through_runtime_bytes() {
     let prefab_path = AssetPath::parse("prefabs/cooked.prefab");
     let scene_source =
         b"NGA_SCENE_V1\nname=cooked_scene\ndependency=textures/albedo.texture\n".to_vec();
-    let prefab_source =
-        b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\nroot=Root\n".to_vec();
+    let prefab_source = b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\nroot=Root\n".to_vec();
     let scene_ctx = CookContext {
         target: TargetPlatform::Windows,
         source_path: Some(scene_path.clone()),
@@ -1825,7 +1818,9 @@ fn database_font_and_physics_mesh_cookers_pass_through_runtime_bytes() {
     let physics_cooker = PhysicsMeshCooker::new();
 
     let font_output = font_cooker.cook(&font_ctx, &font_metadata).unwrap();
-    let physics_output = physics_cooker.cook(&physics_ctx, &physics_metadata).unwrap();
+    let physics_output = physics_cooker
+        .cook(&physics_ctx, &physics_metadata)
+        .unwrap();
 
     assert_eq!(font_output.bytes, font_source);
     assert_eq!(font_output.version_hash, VersionHash(2));
@@ -1847,8 +1842,7 @@ fn database_font_cooker_canonicalizes_runtime_and_source_bytes() {
     let runtime_metadata =
         AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Font>());
     let source_path = AssetPath::parse("fonts/from_source.font");
-    let source_bytes =
-        b"NGA_FONT_V1\nfamily=Mono\nglyph=char=A;size=1x1;bitmap=255\n".to_vec();
+    let source_bytes = b"NGA_FONT_V1\nfamily=Mono\nglyph=char=A;size=1x1;bitmap=255\n".to_vec();
     let source_ctx = CookContext {
         target: TargetPlatform::Windows,
         source_path: Some(source_path.clone()),
@@ -2006,11 +2000,8 @@ fn database_shader_cooker_canonicalizes_runtime_and_source_bytes() {
         source_path: Some(runtime_path.clone()),
         source_bytes: runtime_bytes.clone(),
     };
-    let runtime_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        runtime_path,
-        AssetTypeId::of::<Shader>(),
-    );
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Shader>());
     let source_path = AssetPath::parse("shaders/from_source.wgsl");
     let source_bytes =
         b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nstage=fragment\n---\n  @fragment fn main() {}\n"
@@ -3916,12 +3907,16 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
     let server_mesh_scope = server.scoped_dependency_report(mesh_id).unwrap();
     assert!(server_mesh_scope.direct_dependencies.contains(&lod0_id));
     assert!(server_mesh_scope.direct_dependencies.contains(&lod1_id));
-    assert!(server
-        .dependency_report_text()
-        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
-    assert!(server
-        .dependency_report_text()
-        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    assert!(server.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        mesh_id.raw(),
+        lod0_id.raw()
+    )));
+    assert!(server.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        mesh_id.raw(),
+        lod1_id.raw()
+    )));
     assert!(server
         .dependency_report_json()
         .contains(&format!("\"{}\"", lod0_id.raw())));
@@ -3941,9 +3936,7 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
     server
         .save_dependency_report_text(&server_text_path)
         .unwrap();
-    server
-        .save_dependency_report_dot(&server_dot_path)
-        .unwrap();
+    server.save_dependency_report_dot(&server_dot_path).unwrap();
     server
         .save_dependency_report_json(&server_json_path)
         .unwrap();
@@ -3965,12 +3958,16 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
     let mesh_scope = database.scoped_dependency_report(mesh_id).unwrap();
     assert!(mesh_scope.direct_dependencies.contains(&lod0_id));
     assert!(mesh_scope.direct_dependencies.contains(&lod1_id));
-    assert!(database
-        .dependency_report_text()
-        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
-    assert!(database
-        .dependency_report_text()
-        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    assert!(database.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        mesh_id.raw(),
+        lod0_id.raw()
+    )));
+    assert!(database.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        mesh_id.raw(),
+        lod1_id.raw()
+    )));
     assert!(database
         .dependency_report_json()
         .contains(&format!("\"{}\"", lod0_id.raw())));
@@ -8434,7 +8431,7 @@ usemtl Lit
 f 1 2 3
 "
     .to_vec();
-let material_source = b"newmtl Lit
+    let material_source = b"newmtl Lit
 map_Ka -imfchan green -colorspace Non-Color textures/panel_ao.texture
 map_Ke -imfchan red -colorspace Non-Color textures/panel_emissive.texture
 "
@@ -15104,6 +15101,91 @@ i 0 1 2
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_accepts_quoted_obj_display_attributes() {
+    let config = database_config("builtin_model_obj_quoted_display_attributes");
+    let model_path = AssetPath::parse("models/quoted_display_attributes.obj");
+    let mesh_path = AssetPath::parse("models/quoted_display_attributes.QuotedDisplay.mesh");
+    let model_source = b"o QuotedDisplay
+maplib \"procedural maps/detail.map\"
+usemap \"Checker Map\"
+shadow_obj \"shadows/soft shadow.obj\"
+trace_obj \"rays/primary ray.obj\"
+CTECH \"cparm\" 8
+stech \"cspace\" 0.125
+mg \"7\" \"0.5\"
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["QuotedDisplay"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "quoted_display_attributes",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_accepts_obj_render_object_off_attributes() {
     let config = database_config("builtin_model_obj_render_object_off_attributes");
     let model_path = AssetPath::parse("models/render_object_off.obj");
@@ -18884,11 +18966,8 @@ fn database_texture_cooker_canonicalizes_runtime_and_source_bytes() {
         source_path: Some(runtime_path.clone()),
         source_bytes: runtime_bytes.clone(),
     };
-    let runtime_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        runtime_path,
-        AssetTypeId::of::<Texture>(),
-    );
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Texture>());
     let source_path = AssetPath::parse("textures/from_source.texture");
     let source_bytes = b"NGA_TEXTURE_SOURCE_V1\nsize=2x1\nrgba=17,17,17,17,17,17,17,17\n".to_vec();
     let source_ctx = CookContext {
@@ -18896,11 +18975,8 @@ fn database_texture_cooker_canonicalizes_runtime_and_source_bytes() {
         source_path: Some(source_path.clone()),
         source_bytes: source_bytes.clone(),
     };
-    let source_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        source_path,
-        AssetTypeId::of::<Texture>(),
-    );
+    let source_metadata =
+        AssetMetadata::runtime(AssetId::new(), source_path, AssetTypeId::of::<Texture>());
     let cooker = TextureCooker::new();
 
     let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
@@ -18923,11 +18999,8 @@ fn database_audio_cooker_canonicalizes_runtime_and_wav_bytes() {
         source_path: Some(runtime_path.clone()),
         source_bytes: runtime_bytes.clone(),
     };
-    let runtime_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        runtime_path,
-        AssetTypeId::of::<AudioClip>(),
-    );
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<AudioClip>());
     let wav_path = AssetPath::parse("audio/from_wav.audio");
     let mut wav_samples = Vec::new();
     for sample in [0.0f32, 0.5, -0.5] {
@@ -18939,11 +19012,8 @@ fn database_audio_cooker_canonicalizes_runtime_and_wav_bytes() {
         source_path: Some(wav_path.clone()),
         source_bytes: wav_bytes.clone(),
     };
-    let wav_metadata = AssetMetadata::runtime(
-        AssetId::new(),
-        wav_path,
-        AssetTypeId::of::<AudioClip>(),
-    );
+    let wav_metadata =
+        AssetMetadata::runtime(AssetId::new(), wav_path, AssetTypeId::of::<AudioClip>());
     let cooker = AudioCooker::new();
     let expected = b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=1\nformat=f32\nsamples=0,0.5,-0.5\nstreaming=false\n".to_vec();
 
@@ -19135,28 +19205,52 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
         .unwrap();
 
     assert_eq!(scene_output.metadata.path.as_ref(), Some(&scene_path));
-    assert_eq!(scene_output.metadata.importer.as_deref(), Some("SceneImporter"));
+    assert_eq!(
+        scene_output.metadata.importer.as_deref(),
+        Some("SceneImporter")
+    );
     assert_eq!(scene_output.metadata.importer_version, 1);
-    assert_eq!(scene_output.metadata.source_path.as_ref(), Some(&scene_path));
-    assert_eq!(scene_output.metadata.cooked_path.as_ref(), Some(&scene_path));
+    assert_eq!(
+        scene_output.metadata.source_path.as_ref(),
+        Some(&scene_path)
+    );
+    assert_eq!(
+        scene_output.metadata.cooked_path.as_ref(),
+        Some(&scene_path)
+    );
     assert_eq!(scene_output.metadata.version_hash, Some(VersionHash(1)));
     assert_eq!(scene_output.version_hash, VersionHash(1));
     assert_eq!(scene_output.generated.len(), 1);
     assert_eq!(scene_output.generated[0].bytes, scene_bytes);
     assert_eq!(scene_output.generated[0].path, scene_path);
-    assert_eq!(scene_output.dependencies, vec![texture_id, material_id, mesh_id]);
+    assert_eq!(
+        scene_output.dependencies,
+        vec![texture_id, material_id, mesh_id]
+    );
 
     assert_eq!(prefab_output.metadata.path.as_ref(), Some(&prefab_path));
-    assert_eq!(prefab_output.metadata.importer.as_deref(), Some("PrefabImporter"));
+    assert_eq!(
+        prefab_output.metadata.importer.as_deref(),
+        Some("PrefabImporter")
+    );
     assert_eq!(prefab_output.metadata.importer_version, 1);
-    assert_eq!(prefab_output.metadata.source_path.as_ref(), Some(&prefab_path));
-    assert_eq!(prefab_output.metadata.cooked_path.as_ref(), Some(&prefab_path));
+    assert_eq!(
+        prefab_output.metadata.source_path.as_ref(),
+        Some(&prefab_path)
+    );
+    assert_eq!(
+        prefab_output.metadata.cooked_path.as_ref(),
+        Some(&prefab_path)
+    );
     assert_eq!(prefab_output.metadata.version_hash, Some(VersionHash(1)));
     assert_eq!(prefab_output.version_hash, VersionHash(1));
     assert_eq!(prefab_output.generated.len(), 1);
     assert_eq!(prefab_output.generated[0].bytes, prefab_bytes);
     assert_eq!(prefab_output.generated[0].path, prefab_path);
-    assert_eq!(prefab_output.dependencies, vec![texture_id, material_id, mesh_id]);
+    assert_eq!(
+        prefab_output.dependencies,
+        vec![texture_id, material_id, mesh_id]
+    );
 }
 
 #[test]
@@ -19195,8 +19289,14 @@ fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata
         Some("TextureImporter")
     );
     assert_eq!(texture_output.metadata.importer_version, 3);
-    assert_eq!(texture_output.metadata.source_path.as_ref(), Some(&texture_path));
-    assert_eq!(texture_output.metadata.cooked_path.as_ref(), Some(&texture_path));
+    assert_eq!(
+        texture_output.metadata.source_path.as_ref(),
+        Some(&texture_path)
+    );
+    assert_eq!(
+        texture_output.metadata.cooked_path.as_ref(),
+        Some(&texture_path)
+    );
     assert_eq!(texture_output.metadata.source_hash, Some(ContentHash(101)));
     assert_eq!(texture_output.metadata.version_hash, Some(VersionHash(3)));
     assert_eq!(texture_output.version_hash, VersionHash(3));
@@ -19212,8 +19312,14 @@ fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata
         Some("ShaderImporter")
     );
     assert_eq!(shader_output.metadata.importer_version, 3);
-    assert_eq!(shader_output.metadata.source_path.as_ref(), Some(&shader_path));
-    assert_eq!(shader_output.metadata.cooked_path.as_ref(), Some(&shader_path));
+    assert_eq!(
+        shader_output.metadata.source_path.as_ref(),
+        Some(&shader_path)
+    );
+    assert_eq!(
+        shader_output.metadata.cooked_path.as_ref(),
+        Some(&shader_path)
+    );
     assert_eq!(shader_output.metadata.source_hash, Some(ContentHash(202)));
     assert_eq!(shader_output.metadata.version_hash, Some(VersionHash(3)));
     assert_eq!(shader_output.version_hash, VersionHash(3));
@@ -19266,10 +19372,19 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         .unwrap();
 
     assert_eq!(audio_output.metadata.path.as_ref(), Some(&audio_path));
-    assert_eq!(audio_output.metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(
+        audio_output.metadata.importer.as_deref(),
+        Some("AudioImporter")
+    );
     assert_eq!(audio_output.metadata.importer_version, 3);
-    assert_eq!(audio_output.metadata.source_path.as_ref(), Some(&audio_path));
-    assert_eq!(audio_output.metadata.cooked_path.as_ref(), Some(&audio_path));
+    assert_eq!(
+        audio_output.metadata.source_path.as_ref(),
+        Some(&audio_path)
+    );
+    assert_eq!(
+        audio_output.metadata.cooked_path.as_ref(),
+        Some(&audio_path)
+    );
     assert_eq!(audio_output.metadata.source_hash, Some(ContentHash(303)));
     assert_eq!(audio_output.metadata.version_hash, Some(VersionHash(3)));
     assert_eq!(audio_output.version_hash, VersionHash(3));
@@ -19284,7 +19399,10 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
     assert!(audio_output.dependencies.is_empty());
 
     assert_eq!(font_output.metadata.path.as_ref(), Some(&font_path));
-    assert_eq!(font_output.metadata.importer.as_deref(), Some("FontImporter"));
+    assert_eq!(
+        font_output.metadata.importer.as_deref(),
+        Some("FontImporter")
+    );
     assert_eq!(font_output.metadata.importer_version, 3);
     assert_eq!(font_output.metadata.source_path.as_ref(), Some(&font_path));
     assert_eq!(font_output.metadata.cooked_path.as_ref(), Some(&font_path));
@@ -19307,8 +19425,14 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         Some("PhysicsMeshImporter")
     );
     assert_eq!(physics_output.metadata.importer_version, 2);
-    assert_eq!(physics_output.metadata.source_path.as_ref(), Some(&physics_path));
-    assert_eq!(physics_output.metadata.cooked_path.as_ref(), Some(&physics_path));
+    assert_eq!(
+        physics_output.metadata.source_path.as_ref(),
+        Some(&physics_path)
+    );
+    assert_eq!(
+        physics_output.metadata.cooked_path.as_ref(),
+        Some(&physics_path)
+    );
     assert_eq!(physics_output.metadata.source_hash, Some(ContentHash(505)));
     assert_eq!(physics_output.metadata.version_hash, Some(VersionHash(2)));
     assert_eq!(physics_output.version_hash, VersionHash(2));
@@ -19316,8 +19440,7 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
     assert_eq!(physics_output.generated[0].path, physics_path);
     assert_eq!(
         physics_output.generated[0].bytes,
-        b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1.5 0 0\nv 0 1 0\ni 0 1 2\n"
-            .to_vec()
+        b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1.5 0 0\nv 0 1 0\ni 0 1 2\n".to_vec()
     );
     assert_eq!(physics_output.generated[0].asset_type, PhysicsMesh::TYPE_ID);
     assert!(physics_output.dependencies.is_empty());
@@ -19575,7 +19698,10 @@ fn database_animation_and_skeleton_cookers_canonicalize_runtime_and_source_bytes
 
     assert_eq!(animation_runtime_output.bytes, animation_runtime_expected);
     assert_eq!(animation_runtime_output.version_hash, VersionHash(2));
-    assert_eq!(animation_runtime_output.metadata, animation_runtime_metadata);
+    assert_eq!(
+        animation_runtime_output.metadata,
+        animation_runtime_metadata
+    );
     assert_eq!(skeleton_runtime_output.bytes, skeleton_runtime_expected);
     assert_eq!(skeleton_runtime_output.version_hash, VersionHash(2));
     assert_eq!(skeleton_runtime_output.metadata, skeleton_runtime_metadata);
@@ -21268,7 +21394,10 @@ fn database_audio_importer_preserves_binary_wav_bytes() {
     );
 
     database.cook_asset(id, TargetPlatform::Windows).unwrap();
-    assert_eq!(fs::read(config.cooked_root.join(path.path())).unwrap(), expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
 
     let mut server = AssetServer::new(AssetServerConfig {
         root: config.cooked_root.clone(),
@@ -21922,8 +22051,12 @@ fn database_font_importer_preserves_binary_font_bytes() {
     let opentype_loaded = server.get(&opentype).unwrap();
     assert_eq!(truetype_loaded.family_name, "roundtrip");
     assert_eq!(opentype_loaded.family_name, "roundtrip");
-    assert!(matches!(truetype_loaded.data, FontData::TrueType(ref bytes) if bytes == &truetype_bytes));
-    assert!(matches!(opentype_loaded.data, FontData::OpenType(ref bytes) if bytes == &opentype_bytes));
+    assert!(
+        matches!(truetype_loaded.data, FontData::TrueType(ref bytes) if bytes == &truetype_bytes)
+    );
+    assert!(
+        matches!(opentype_loaded.data, FontData::OpenType(ref bytes) if bytes == &opentype_bytes)
+    );
 }
 
 #[test]

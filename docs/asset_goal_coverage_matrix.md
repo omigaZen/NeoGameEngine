@@ -14,7 +14,7 @@ Status meanings follow `docs/asset_goal.md`: `Implemented` requires reachable pu
 | Missing | 0 | No current coverage-matrix row is classified as missing; remaining repository-implementable gaps are tracked as partial rows. |
 | External Blocked | 0 | No true external blocker identified in this slice. |
 
-Recent evidence: OBJ `shadow_obj` / `trace_obj` now has explicit `off`-state acceptance coverage in the database importer tests, so the render-object branch is no longer only exercised through path-based ignored-payload cases. `AssetServer` package-registry save/load wrappers now also have a direct round-trip test plus a missing-file IO failure check, so the registry wrapper path is no longer only implied by the lower-level registry type tests.
+Recent evidence: quoted OBJ `maplib` / `usemap` display-attribute parsing now has explicit acceptance coverage in the database importer tests, so the display/render marker branch is no longer only exercised through unquoted or path-based ignored-payload cases. `AssetServer` package-registry save/load wrappers now also have a direct round-trip test plus a missing-file IO failure check, so the registry wrapper path is no longer only implied by the lower-level registry type tests.
 
 ## Runtime Core
 
