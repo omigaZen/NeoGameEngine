@@ -3913,6 +3913,27 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
         server.dependency_graph().direct_dependencies(mesh_id),
         &[lod0_id, lod1_id]
     );
+    let mesh_scope = database.scoped_dependency_report(mesh_id).unwrap();
+    assert!(mesh_scope.direct_dependencies.contains(&lod0_id));
+    assert!(mesh_scope.direct_dependencies.contains(&lod1_id));
+    assert!(database
+        .dependency_report_text()
+        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
+    assert!(database
+        .dependency_report_text()
+        .contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    assert!(database
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", lod0_id.raw())));
+    assert!(database
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", lod1_id.raw())));
+    assert!(database
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", lod0_id.raw())));
+    assert!(database
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", lod1_id.raw())));
 
     let scoped_text_path = config.imported_root.join("mesh_lod_binding.txt");
     let scoped_dot_path = config.imported_root.join("mesh_lod_binding.dot");
