@@ -21269,33 +21269,27 @@ fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtim
     let animation_id = database.import_asset_path(&animation_path).unwrap();
     let skeleton_id = database.import_asset_path(&skeleton_path).unwrap();
 
-    assert_eq!(
-        database.registry().get(animation_id).unwrap().asset_type,
-        AnimationClip::TYPE_ID
-    );
-    assert_eq!(
-        database.registry().get(skeleton_id).unwrap().asset_type,
-        Skeleton::TYPE_ID
-    );
-    assert!(database
-        .registry()
-        .get(animation_id)
-        .unwrap()
-        .dependencies
-        .is_empty());
-    assert!(database
-        .registry()
-        .get(skeleton_id)
-        .unwrap()
-        .dependencies
-        .is_empty());
+    let animation_source_hash = {
+        let metadata = database.registry().get(animation_id).unwrap();
+        assert_eq!(metadata.asset_type, AnimationClip::TYPE_ID);
+        assert_eq!(metadata.dependencies, Vec::<AssetId>::new());
+        metadata.source_hash
+    };
+    let skeleton_source_hash = {
+        let metadata = database.registry().get(skeleton_id).unwrap();
+        assert_eq!(metadata.asset_type, Skeleton::TYPE_ID);
+        assert_eq!(metadata.dependencies, Vec::<AssetId>::new());
+        metadata.source_hash
+    };
 
-    database
+    let animation_output = database
         .cook_asset(animation_id, TargetPlatform::Windows)
         .unwrap();
-    database
+    let skeleton_output = database
         .cook_asset(skeleton_id, TargetPlatform::Windows)
         .unwrap();
+    assert_eq!(animation_output.metadata.source_hash, animation_source_hash);
+    assert_eq!(skeleton_output.metadata.source_hash, skeleton_source_hash);
 
     assert_eq!(
         fs::read(config.imported_root.join(animation_path.path())).unwrap(),
