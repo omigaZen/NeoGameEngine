@@ -9639,7 +9639,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Coat
 map_RMA -imfchan red -colorspace Non-Color textures/packed_rma.texture
-map_ORM -imfchan green -clamp on textures/packed_orm.texture
+map_ORM -imfchan green -clamp on -colorspace Non-Color textures/packed_orm.texture
 "
     .to_vec();
     let expected_material = b"# mtllib packed_pbr.mtl
@@ -9650,6 +9650,7 @@ texture.rma.color_space=non_color
 texture.orm=models/textures/packed_orm.texture
 texture.orm.sampler.address=clamp_to_edge
 texture.orm.source_channel=green
+texture.orm.color_space=non_color
 "
     .to_vec();
     let rma_source = texture_bytes(1, 1, 46);
