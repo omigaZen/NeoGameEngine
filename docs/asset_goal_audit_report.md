@@ -1804,3 +1804,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: the artifact-store replacement branch now also covers bundle-id matching, not just name matching. A new package with the same `BundleId` replaces the old registry entry, returns the old record from `replaced`, and leaves the new artifact as the readable payload for the surviving record.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_add_asset_reports_missing_region
+```
+
+Result: the streaming region API now has an explicit missing-region regression for `add_asset_to_streaming_region()`. Calling it with an unknown `StreamingRegionId` returns the expected `AddressNotFound` error instead of silently creating state or mutating a different region.

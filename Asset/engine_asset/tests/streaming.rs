@@ -377,6 +377,19 @@ fn streaming_region_add_asset_rejects_unknown_extension() {
 }
 
 #[test]
+fn streaming_region_add_asset_reports_missing_region() {
+    let mut server = server_with_textures(&[("textures/extra.texture", 11)]);
+    let missing = StreamingRegionId(999);
+    let err = server
+        .add_asset_to_streaming_region(missing, &AssetPath::parse("textures/extra.texture"))
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        AssetError::AddressNotFound { address } if address.contains("streaming region")
+    ));
+}
+
+#[test]
 fn removing_resident_streaming_regions_releases_shared_residency_counts() {
     let mut server = server_with_textures(&[("textures/shared.texture", 5)]);
     let path = AssetPath::parse("textures/shared.texture");
