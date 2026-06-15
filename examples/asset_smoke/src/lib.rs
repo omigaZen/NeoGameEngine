@@ -30,6 +30,8 @@ use engine_renderer::prelude::{
 pub struct SmokeReport {
     pub render_ready: bool,
     pub audio_ready: bool,
+    pub skeleton_ready: bool,
+    pub animation_ready: bool,
     pub physics_ready: bool,
     pub scene_ready: bool,
     pub prefab_ready: bool,
@@ -81,6 +83,8 @@ pub struct SmokeReport {
     pub audio_handles: usize,
     pub audio_alt_ready: bool,
     pub audio_alt_handles: usize,
+    pub skeleton_handles: usize,
+    pub animation_handles: usize,
     pub physics_handles: usize,
     pub events: usize,
     pub ready_events: usize,
@@ -102,6 +106,10 @@ pub struct EditorSmokeReport {
     pub audio_alt_ready_with_dependencies: bool,
     pub audio_alt_source_ready: bool,
     pub audio_alt_source_handles: usize,
+    pub skeleton_ready_with_dependencies: bool,
+    pub skeleton_handles: usize,
+    pub animation_ready_with_dependencies: bool,
+    pub animation_handles: usize,
     pub physics_ready_with_dependencies: bool,
     pub physics_world_mesh_ready: bool,
     pub physics_world_collider_ready: bool,
@@ -157,6 +165,8 @@ pub fn run_smoke() -> SmokeReport {
     );
     io.insert("audio/click.audio", audio_bytes());
     io.insert("audio/click_alt.audio", audio_bytes_alt());
+    io.insert("skeletons/hero.skeleton", skeleton_bytes());
+    io.insert("animations/idle.animation", animation_bytes());
     io.insert("physics/hero.physics", physics_mesh_bytes());
 
     let mut assets = AssetServer::new(AssetServerConfig::default());
@@ -169,6 +179,8 @@ pub fn run_smoke() -> SmokeReport {
         AssetPath::parse("materials/hero_normal.material"),
         AssetPath::parse("audio/click.audio"),
         AssetPath::parse("audio/click_alt.audio"),
+        AssetPath::parse("skeletons/hero.skeleton"),
+        AssetPath::parse("animations/idle.animation"),
         AssetPath::parse("physics/hero.physics"),
     ]);
     let renderer = MeshRendererComponent {
@@ -186,6 +198,8 @@ pub fn run_smoke() -> SmokeReport {
         looping: true,
         volume: 0.25,
     };
+    let skeleton: Handle<Skeleton> = assets.load("skeletons/hero.skeleton");
+    let animation: Handle<AnimationClip> = assets.load("animations/idle.animation");
     let physics = PhysicsColliderComponent {
         mesh: assets.load("physics/hero.physics"),
         dynamic: true,
@@ -219,6 +233,8 @@ pub fn run_smoke() -> SmokeReport {
         if renderer.is_ready(&assets)
             && audio.is_ready(&assets)
             && audio_alt.is_ready(&assets)
+            && assets.is_ready_with_dependencies(&skeleton)
+            && assets.is_ready_with_dependencies(&animation)
             && physics.is_ready(&assets)
             && assets.is_ready_with_dependencies(&normal_material)
             && scene.can_instantiate(&assets)
@@ -288,6 +304,10 @@ pub fn run_smoke() -> SmokeReport {
         render_ready: renderer.is_ready(&assets),
         audio_ready: audio.is_ready(&assets),
         audio_alt_handles: audio_alt.asset_handles().len(),
+        skeleton_ready: assets.is_ready_with_dependencies(&skeleton),
+        animation_ready: assets.is_ready_with_dependencies(&animation),
+        skeleton_handles: 1,
+        animation_handles: 1,
         physics_ready: physics.is_ready(&assets),
         scene_ready: scene.can_instantiate(&assets),
         prefab_ready: prefab.can_instantiate(&assets),
@@ -356,6 +376,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let material_path = AssetPath::parse("materials/editor.material");
     let audio_path = AssetPath::parse("audio/editor.audio");
     let audio_alt_path = AssetPath::parse("audio/editor_alt.audio");
+    let skeleton_path = AssetPath::parse("skeletons/editor.skeleton");
+    let animation_path = AssetPath::parse("animations/editor.animation");
     let physics_path = AssetPath::parse("physics/editor.physics");
     let scene_path = AssetPath::parse("scenes/editor.scene");
     let prefab_path = AssetPath::parse("prefabs/editor.prefab");
@@ -367,6 +389,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     io.insert(material_path.path(), material_source);
     io.insert(audio_path.path(), audio_bytes());
     io.insert(audio_alt_path.path(), audio_bytes_alt());
+    io.insert(skeleton_path.path(), skeleton_source_bytes());
+    io.insert(animation_path.path(), animation_source_bytes());
     io.insert(physics_path.path(), physics_mesh_bytes());
     io.insert(
         scene_path.path(),
@@ -395,6 +419,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let material_id = database.import_asset_path(&material_path).unwrap();
     let audio_id = database.import_asset_path(&audio_path).unwrap();
     let audio_alt_id = database.import_asset_path(&audio_alt_path).unwrap();
+    let skeleton_id = database.import_asset_path(&skeleton_path).unwrap();
+    let animation_id = database.import_asset_path(&animation_path).unwrap();
     let physics_id = database.import_asset_path(&physics_path).unwrap();
     let scene_id = database.import_asset_path(&scene_path).unwrap();
     let prefab_id = database.import_asset_path(&prefab_path).unwrap();
@@ -404,6 +430,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         material_id,
         audio_id,
         audio_alt_id,
+        skeleton_id,
+        animation_id,
         physics_id,
         scene_id,
         prefab_id,
@@ -418,6 +446,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
                 mesh_id,
                 audio_id,
                 audio_alt_id,
+                skeleton_id,
+                animation_id,
                 physics_id,
                 prefab_id,
                 scene_id,
@@ -435,6 +465,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let material: Handle<Material> = assets.load(material_path);
     let audio: Handle<AudioClip> = assets.load(audio_path);
     let audio_alt: Handle<AudioClip> = assets.load(audio_alt_path);
+    let skeleton: Handle<Skeleton> = assets.load(skeleton_path);
+    let animation: Handle<AnimationClip> = assets.load(animation_path);
     let physics: Handle<PhysicsMesh> = assets.load(physics_path);
     let scene: Handle<SceneAsset> = assets.load(scene_path);
     let prefab: Handle<Prefab> = assets.load(prefab_path);
@@ -470,6 +502,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
             && assets.is_ready_with_dependencies(&material)
             && assets.is_ready_with_dependencies(&audio)
             && assets.is_ready_with_dependencies(&audio_alt)
+            && assets.is_ready_with_dependencies(&skeleton)
+            && assets.is_ready_with_dependencies(&animation)
             && assets.is_ready_with_dependencies(&physics)
             && assets.is_ready_with_dependencies(&scene)
             && assets.is_ready_with_dependencies(&prefab)
@@ -519,8 +553,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
 
     let report = EditorSmokeReport {
         scanned_sources,
-        imported_assets: 8,
-        cooked_assets: 8,
+        imported_assets: 10,
+        cooked_assets: 10,
         bundled_assets: bundle.asset_count,
         bundle_group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&material),
@@ -530,6 +564,10 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         audio_alt_ready_with_dependencies: assets.is_ready_with_dependencies(&audio_alt),
         audio_alt_source_ready: audio_alt_source.is_ready(&assets),
         audio_alt_source_handles: audio_alt_source.asset_handles().len(),
+        skeleton_ready_with_dependencies: assets.is_ready_with_dependencies(&skeleton),
+        skeleton_handles: 1,
+        animation_ready_with_dependencies: assets.is_ready_with_dependencies(&animation),
+        animation_handles: 1,
         physics_ready_with_dependencies: assets.is_ready_with_dependencies(&physics),
         physics_world_mesh_ready: physics_bridge.mesh_ready,
         physics_world_collider_ready: physics_bridge.collider_ready,
@@ -718,6 +756,24 @@ fn audio_bytes() -> Vec<u8> {
 
 fn audio_bytes_alt() -> Vec<u8> {
     b"NGA_AUDIO_V1\nsample_rate=48000\nchannels=2\nformat=i16\nsamples=0,500,-500,0\nstreaming=false\n"
+        .to_vec()
+}
+
+fn skeleton_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_V1\nbone=Root\n".to_vec()
+}
+
+fn skeleton_source_bytes() -> Vec<u8> {
+    b"NGA_SKELETON_SOURCE_V1\nbone=Root\n".to_vec()
+}
+
+fn animation_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_V1\nduration=1\nticks_per_second=24\ntrack=node:Hero\ntranslation=0:0,0,0\nrotation=0:0,0,0,1\nscale=0:1,1,1\n"
+        .to_vec()
+}
+
+fn animation_source_bytes() -> Vec<u8> {
+    b"NGA_ANIMATION_SOURCE_V1\nduration=1\nticks_per_second=24\ntrack=node:Hero\ntranslation=0:0,0,0\nrotation=0:0,0,0,1\nscale=0:1,1,1\n"
         .to_vec()
 }
 
@@ -1190,12 +1246,14 @@ mod tests {
         assert!(report.render_ready);
         assert!(report.audio_ready);
         assert!(report.audio_alt_ready);
+        assert!(report.skeleton_ready);
+        assert!(report.animation_ready);
         assert!(report.physics_ready);
         assert!(report.scene_ready);
         assert!(report.prefab_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.group_ready);
-        assert_eq!(report.group_total_assets, 6);
+        assert_eq!(report.group_total_assets, 8);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
         assert_eq!(report.render_scene_meshes, 1);
@@ -1274,6 +1332,8 @@ mod tests {
         assert_eq!(report.render_handles, 2);
         assert_eq!(report.audio_handles, 1);
         assert_eq!(report.audio_alt_handles, 1);
+        assert_eq!(report.skeleton_handles, 1);
+        assert_eq!(report.animation_handles, 1);
         assert_eq!(report.physics_handles, 1);
         assert!(report.events >= 6);
         assert!(report.ready_events >= 6);
@@ -1370,10 +1430,10 @@ mod tests {
     fn editor_smoke_imports_cooks_bundles_and_loads_runtime_output() {
         let report = run_editor_smoke();
 
-        assert_eq!(report.scanned_sources, 8);
-        assert_eq!(report.imported_assets, 8);
-        assert_eq!(report.cooked_assets, 8);
-        assert_eq!(report.bundled_assets, 8);
+        assert_eq!(report.scanned_sources, 10);
+        assert_eq!(report.imported_assets, 10);
+        assert_eq!(report.cooked_assets, 10);
+        assert_eq!(report.bundled_assets, 10);
         assert!(report.bundle_group_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.audio_ready_with_dependencies);
@@ -1382,6 +1442,10 @@ mod tests {
         assert!(report.audio_alt_ready_with_dependencies);
         assert!(report.audio_alt_source_ready);
         assert_eq!(report.audio_alt_source_handles, 1);
+        assert!(report.skeleton_ready_with_dependencies);
+        assert_eq!(report.skeleton_handles, 1);
+        assert!(report.animation_ready_with_dependencies);
+        assert_eq!(report.animation_handles, 1);
         assert!(report.physics_ready_with_dependencies);
         assert!(report.physics_world_mesh_ready);
         assert!(report.physics_world_collider_ready);
