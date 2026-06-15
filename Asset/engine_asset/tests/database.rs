@@ -3914,6 +3914,35 @@ fn database_model_importer_records_mesh_lod_binding_metadata() {
         &[lod0_id, lod1_id]
     );
 
+    let scoped_text_path = config.imported_root.join("mesh_lod_binding.txt");
+    let scoped_dot_path = config.imported_root.join("mesh_lod_binding.dot");
+    let scoped_json_path = config.imported_root.join("mesh_lod_binding.json");
+    let scoped_html_path = config.imported_root.join("mesh_lod_binding.html");
+    database
+        .save_scoped_dependency_report_text(mesh_id, &scoped_text_path)
+        .unwrap();
+    database
+        .save_scoped_dependency_report_dot(mesh_id, &scoped_dot_path)
+        .unwrap();
+    database
+        .save_scoped_dependency_report_json(mesh_id, &scoped_json_path)
+        .unwrap();
+    database
+        .save_scoped_dependency_report_html(mesh_id, &scoped_html_path)
+        .unwrap();
+    let scoped_text = fs::read_to_string(scoped_text_path).unwrap();
+    assert!(scoped_text.contains(&format!("edge|{}|{}", mesh_id.raw(), lod0_id.raw())));
+    assert!(scoped_text.contains(&format!("edge|{}|{}", mesh_id.raw(), lod1_id.raw())));
+    let scoped_dot = fs::read_to_string(scoped_dot_path).unwrap();
+    assert!(scoped_dot.contains(&format!("\"{}\" -> \"{}\";", mesh_id.raw(), lod0_id.raw())));
+    assert!(scoped_dot.contains(&format!("\"{}\" -> \"{}\";", mesh_id.raw(), lod1_id.raw())));
+    let scoped_json = fs::read_to_string(scoped_json_path).unwrap();
+    assert!(scoped_json.contains(&format!("\"{}\"", lod0_id.raw())));
+    assert!(scoped_json.contains(&format!("\"{}\"", lod1_id.raw())));
+    let scoped_html = fs::read_to_string(scoped_html_path).unwrap();
+    assert!(scoped_html.contains(&format!("<code>{}</code>", lod0_id.raw())));
+    assert!(scoped_html.contains(&format!("<code>{}</code>", lod1_id.raw())));
+
     let unknown_config = database_config("builtin_model_unknown_mesh_lod_binding");
     let model_path = AssetPath::parse("models/unknown_lod_binding.model");
     let mut io = MemoryAssetIo::new();
