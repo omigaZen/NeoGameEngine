@@ -1158,10 +1158,18 @@ fn database_dependency_report_saves_text_dot_json_and_html_exports() {
     let html_path = config.imported_root.join("dependencies.html");
     let scoped_json_path = config.imported_root.join("scene_dependencies.json");
     let scoped_html_path = config.imported_root.join("scene_dependencies.html");
+    let scoped_text_path = config.imported_root.join("scene_dependencies.txt");
+    let scoped_dot_path = config.imported_root.join("scene_dependencies.dot");
     database.save_dependency_report_text(&text_path).unwrap();
     database.save_dependency_report_dot(&dot_path).unwrap();
     database.save_dependency_report_json(&json_path).unwrap();
     database.save_dependency_report_html(&html_path).unwrap();
+    database
+        .save_scoped_dependency_report_text(scene_id, &scoped_text_path)
+        .unwrap();
+    database
+        .save_scoped_dependency_report_dot(scene_id, &scoped_dot_path)
+        .unwrap();
     database
         .save_scoped_dependency_report_json(scene_id, &scoped_json_path)
         .unwrap();
@@ -1230,6 +1238,15 @@ fn database_dependency_report_saves_text_dot_json_and_html_exports() {
     assert!(scoped_html.contains("Asset Dependency Scope"));
     assert!(scoped_html.contains(&format!("data-root=\"{}\"", scene_id.raw())));
     assert!(scoped_html.contains(&format!("<code>{}</code>", material_id.raw())));
+    let scoped_text = fs::read_to_string(scoped_text_path).unwrap();
+    assert!(scoped_text.contains(&format!("asset|{}", scene_id.raw())));
+    assert!(scoped_text.contains(&format!("edge|{}|{}", scene_id.raw(), material_id.raw())));
+    let scoped_dot = fs::read_to_string(scoped_dot_path).unwrap();
+    assert!(scoped_dot.contains(&format!(
+        "\"{}\" -> \"{}\";",
+        scene_id.raw(),
+        material_id.raw()
+    )));
     assert!(matches!(
         database.scoped_dependency_report(AssetId::from_u128(0xfeed_cafe)),
         Err(AssetError::AssetNotFound { .. })
