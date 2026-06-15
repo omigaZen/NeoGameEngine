@@ -9978,6 +9978,181 @@ texture.arm.color_space=non_color
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_preserves_obj_pbr_packed_long_name_texture_aliases() {
+    let config = database_config("builtin_model_obj_pbr_packed_long_name_texture_aliases");
+    let model_path = AssetPath::parse("models/packed_long_aliases.obj");
+    let mesh_paths = [
+        AssetPath::parse("models/packed_long_aliases.ShortPanel.mesh"),
+        AssetPath::parse("models/packed_long_aliases.LongPanel.mesh"),
+    ];
+    let material_paths = [
+        AssetPath::parse("models/packed_long_aliases.Material_OcclusionRoughnessMetallic.material"),
+        AssetPath::parse("models/packed_long_aliases.Material_OcclusionRoughness_Metallic.material"),
+    ];
+    let texture_paths = [
+        AssetPath::parse("models/textures/packed_occlusionroughnessmetallic.texture"),
+        AssetPath::parse("models/textures/packed_occlusion_roughness_metallic.texture"),
+    ];
+    let model_source = b"mtllib packed_long_aliases.mtl
+o ShortPanel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl OcclusionRoughnessMetallic
+f 1 2 3
+o LongPanel
+v 0 0 1
+v 1 0 1
+v 0 1 1
+usemtl OcclusionRoughness_Metallic
+f 4 5 6
+"
+    .to_vec();
+    let material_source = b"newmtl OcclusionRoughnessMetallic
+map_occlusionroughnessmetallic -imfchan red -colorspace Non-Color textures/packed_occlusionroughnessmetallic.texture
+newmtl OcclusionRoughness_Metallic
+map_occlusion_roughness_metallic -imfchan green -clamp on -colorspace Non-Color textures/packed_occlusion_roughness_metallic.texture
+"
+    .to_vec();
+    let expected_materials = [
+        b"# mtllib packed_long_aliases.mtl
+name=OcclusionRoughnessMetallic
+texture.orm=models/textures/packed_occlusionroughnessmetallic.texture
+texture.orm.source_channel=red
+texture.orm.color_space=non_color
+"
+        .to_vec(),
+        b"# mtllib packed_long_aliases.mtl
+name=OcclusionRoughness_Metallic
+texture.orm=models/textures/packed_occlusion_roughness_metallic.texture
+texture.orm.sampler.address=clamp_to_edge
+texture.orm.source_channel=green
+texture.orm.color_space=non_color
+"
+        .to_vec(),
+    ];
+    let texture_sources = [texture_bytes(1, 1, 55), texture_bytes(1, 1, 56)];
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/packed_long_aliases.mtl", material_source);
+    for (path, source) in texture_paths.iter().zip(texture_sources.iter()) {
+        io.insert(path.path(), source.clone());
+    }
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let texture_ids = texture_paths
+        .iter()
+        .map(|path| database.import_asset_path(path).unwrap())
+        .collect::<Vec<_>>();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_ids = mesh_paths
+        .iter()
+        .map(|path| database.registry().metadata_by_path(path).unwrap().id)
+        .collect::<Vec<_>>();
+    let material_ids = material_paths
+        .iter()
+        .enumerate()
+        .map(|(index, path)| {
+            let metadata = database.registry().metadata_by_path(path).unwrap();
+            assert_eq!(metadata.dependencies, vec![texture_ids[index]]);
+            assert_eq!(
+                fs::read(config.imported_root.join(path.path())).unwrap(),
+                expected_materials[index]
+            );
+            metadata.id
+        })
+        .collect::<Vec<_>>();
+
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(
+        model_dependencies.len(),
+        texture_ids.len() + mesh_ids.len() + material_ids.len()
+    );
+    for id in texture_ids
+        .iter()
+        .chain(mesh_ids.iter())
+        .chain(material_ids.iter())
+    {
+        assert!(model_dependencies.contains(id));
+    }
+
+    for id in texture_ids
+        .iter()
+        .chain(mesh_ids.iter())
+        .chain(material_ids.iter())
+    {
+        database.cook_asset(*id, TargetPlatform::Windows).unwrap();
+    }
+    let mut bundle_ids = Vec::new();
+    bundle_ids.extend(mesh_ids.iter().copied());
+    bundle_ids.extend(material_ids.iter().copied());
+    bundle_ids.extend(texture_ids.iter().copied());
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "pbr_packed_long_name_texture_aliases",
+            bundle_ids,
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    for index in 0..material_ids.len() {
+        assert_eq!(
+            reader.manifest().dependencies(mesh_ids[index]),
+            Some([material_ids[index]].as_slice())
+        );
+        assert_eq!(
+            reader.manifest().dependencies(material_ids[index]),
+            Some([texture_ids[index]].as_slice())
+        );
+        assert_eq!(
+            reader.read_path(&material_paths[index]).unwrap(),
+            expected_materials[index]
+        );
+        assert_eq!(reader.read_path(&texture_paths[index]).unwrap(), texture_sources[index]);
+    }
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..12 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let expected_channels = [MaterialTextureChannel::Red, MaterialTextureChannel::Green];
+    for index in 0..material_ids.len() {
+        assert_eq!(
+            server
+                .dependency_graph()
+                .direct_dependencies(material_ids[index]),
+            &texture_ids[index..=index]
+        );
+        let material = server.get_by_id::<Material>(material_ids[index]).unwrap();
+        assert_eq!(material.textures.len(), 1);
+        assert_eq!(material.textures[0].name, "orm");
+        assert_eq!(material.textures[0].texture.id(), texture_ids[index]);
+        assert_eq!(
+            material.textures[0].options.source_channel,
+            Some(expected_channels[index])
+        );
+        assert_eq!(
+            material.textures[0].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_packed_pbr_long_name_texture_aliases() {
     for (directive, stem, channel, texel) in [
         (
