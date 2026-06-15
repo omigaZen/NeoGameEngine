@@ -104,7 +104,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_texture_cooker_canonicalizes_runtime_and_source_bytes
 ```
 
-Result: TextureCooker now has direct runtime/source round-trip evidence: runtime texture bytes stay unchanged, NGA_TEXTURE_SOURCE_V1 source documents canonicalize to the same runtime bytes, and both paths report VersionHash(2).
+Result: TextureCooker now has direct runtime/source round-trip evidence: runtime texture bytes stay unchanged, NGA_TEXTURE_SOURCE_V1 source documents canonicalize to the same runtime bytes, and both paths report VersionHash(2) while preserving the expected runtime metadata.
 
 Passed:
 

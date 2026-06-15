@@ -19786,6 +19786,11 @@ fn database_builtin_texture_cooker_writes_runtime_loadable_output() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, bytes);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         bytes
@@ -20591,6 +20596,11 @@ fn database_texture_cooker_canonicalizes_source_documents() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
