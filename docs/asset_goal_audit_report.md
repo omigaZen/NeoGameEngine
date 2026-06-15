@@ -2432,3 +2432,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: the artifact store path now also exercises Zstd-compressed package artifacts. Installing a Zstd bundle through `AssetPackageArtifactStore` preserves payload size/hash, and `build_composite_io()` can read the compressed package payload back through a composite IO layer with the expected texture bytes.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_face_outline_aliases
+```
+
+Result: the OBJ face-outline alias now has a positive regression. `fo` face lines are accepted as regular OBJ faces, import into a generated mesh subresource, preserve dependency metadata, and round-trip through database cook/bundle/runtime preload with the same triangle geometry as `f` faces.
