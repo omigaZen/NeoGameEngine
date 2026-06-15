@@ -12363,20 +12363,22 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Kn
-map_Kn -bm 0.4 textures/kn_normal.texture
+map_Kn -bm 0.4 -imfchan blue textures/kn_normal.texture
 newmtl Normal
-map_normal textures/normal_map.texture
+map_normal -imfchan blue textures/normal_map.texture
 "
     .to_vec();
-    let expected_kn_material = b"# mtllib normal_map_aliases.mtl
+let expected_kn_material = b"# mtllib normal_map_aliases.mtl
 name=Kn
 texture.normal=models/textures/kn_normal.texture
 texture.normal.bump_scale=0.4
+texture.normal.source_channel=blue
 "
     .to_vec();
     let expected_normal_material = b"# mtllib normal_map_aliases.mtl
 name=Normal
 texture.normal=models/textures/normal_map.texture
+texture.normal.source_channel=blue
 "
     .to_vec();
     let mut io = MemoryAssetIo::new();
