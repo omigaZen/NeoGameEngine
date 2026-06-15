@@ -3276,6 +3276,20 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     assert!(server.is_ready(&zstd_handle));
     assert_eq!(server.state_by_id(zstd_handle.id()), AssetLoadState::Ready);
 
+    let removed = store
+        .remove_package(&mut registry, "artifact_zstd_patch", true)
+        .unwrap();
+    assert_eq!(removed.removed.name, "artifact_zstd_patch");
+    assert!(removed.artifact_removed);
+    assert!(!removed.artifact_path.exists());
+    assert!(store.verify_registry(&registry).unwrap().all_available());
+    let restored = server.restore_asset_package_registry(registry.clone()).unwrap();
+    assert_eq!(restored.len(), 1);
+    assert_eq!(server.asset_package_registry().packages().len(), 1);
+    assert!(server.mounted_bundle(base_record_seed.bundle_id).is_some());
+    assert!(server.mounted_bundle(BundleId(83)).is_none());
+    assert!(server.is_ready(&base_handle));
+
     let _ = std::fs::remove_dir_all(&root);
 }
 

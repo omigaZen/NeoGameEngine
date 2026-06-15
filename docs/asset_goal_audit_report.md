@@ -2404,6 +2404,14 @@ Result: `AssetServer::activate_asset_package_registry_from_artifacts()` now has 
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
+```
+
+Result: the Zstd artifact-registry regression now also covers package removal and restore. Removing the Zstd package deletes its artifact, keeps the remaining base package available, and a subsequent `restore_asset_package_registry()` shrinks the mounted registry back to the surviving base bundle without disturbing the ready texture.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
 ```
 
