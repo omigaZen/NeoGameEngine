@@ -9973,18 +9973,21 @@ usemtl Surface\n\
 f 1 2 3\n"
         )
         .into_bytes();
-        let material_source =
-            if directive == "map_emissive" || directive == "map_emission" {
+        let material_source = if directive == "map_emissive"
+            || directive == "map_emission"
+            || directive == "map_normalgl"
+            || directive == "map_normaldx"
+        {
                 format!(
-                    "newmtl Surface\n{directive} -imfchan red -colorspace Non-Color textures/{stem}.texture\n"
+                    "newmtl Surface\n{directive} -imfchan blue -colorspace Non-Color textures/{stem}.texture\n"
                 )
                 .into_bytes()
-            } else {
-                format!(
-                    "newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
-                )
-                .into_bytes()
-            };
+        } else {
+            format!(
+                "newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        };
         let expected_material = format!(
             "# mtllib {material_library}\n\
 name=Surface\n\
@@ -9992,12 +9995,16 @@ texture.{channel}=models/textures/{stem}.texture\n\
 texture.{channel}.color_space=non_color\n"
         )
         .into_bytes();
-        let expected_material = if directive == "map_emissive" || directive == "map_emission" {
+        let expected_material = if directive == "map_emissive"
+            || directive == "map_emission"
+            || directive == "map_normalgl"
+            || directive == "map_normaldx"
+        {
             format!(
                 "# mtllib {material_library}\n\
 name=Surface\n\
 texture.{channel}=models/textures/{stem}.texture\n\
-texture.{channel}.source_channel=red\n\
+texture.{channel}.source_channel=blue\n\
 texture.{channel}.color_space=non_color\n"
             )
             .into_bytes()
