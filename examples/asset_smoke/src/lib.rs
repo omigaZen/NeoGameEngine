@@ -976,6 +976,8 @@ impl InstantiationSink for RecordingInstantiationSink {
 
 struct RecordingTypedHostInstantiationSink {
     next_entity: u64,
+    spawn_error_at: Option<usize>,
+    attach_error_at: Option<(usize, usize)>,
     events: Vec<String>,
     asset_handles: usize,
 }
@@ -984,6 +986,23 @@ impl RecordingTypedHostInstantiationSink {
     fn with_first_entity(first_entity: u64) -> Self {
         Self {
             next_entity: first_entity,
+            spawn_error_at: None,
+            attach_error_at: None,
+            events: Vec::new(),
+            asset_handles: 0,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_errors(
+        first_entity: u64,
+        spawn_error_at: Option<usize>,
+        attach_error_at: Option<(usize, usize)>,
+    ) -> Self {
+        Self {
+            next_entity: first_entity,
+            spawn_error_at,
+            attach_error_at,
             events: Vec::new(),
             asset_handles: 0,
         }
@@ -1000,6 +1019,9 @@ impl TypedHostInstantiationSink for RecordingTypedHostInstantiationSink {
         name: Option<&str>,
         parent: Option<&Self::Entity>,
     ) -> Result<Self::Entity, Self::Error> {
+        if self.spawn_error_at == Some(entity_index) {
+            return Err(format!("spawn:{entity_index}"));
+        }
         let entity = self.next_entity;
         self.next_entity += 1;
         self.events
@@ -1014,6 +1036,9 @@ impl TypedHostInstantiationSink for RecordingTypedHostInstantiationSink {
         component_index: usize,
         component: EcsComponentInstance,
     ) -> Result<(), Self::Error> {
+        if self.attach_error_at == Some((entity_index, component_index)) {
+            return Err(format!("attach:{entity_index}:{component_index}"));
+        }
         let handle_count = component.asset_handles().len();
         self.asset_handles += handle_count;
         self.events.push(format!(
@@ -1136,6 +1161,91 @@ mod tests {
         assert!(report.ready_events >= 6);
         assert!(report.dependency_events >= 2);
         assert_eq!(report.failed_events, 0);
+    }
+
+    #[test]
+    fn smoke_typed_host_error_paths_leave_instances_unloaded() {
+        let mut assets = AssetServer::new(AssetServerConfig::default());
+        assets.register_asset_type::<SceneAsset>();
+        assets.register_asset_type::<Prefab>();
+        let scene_id = AssetId::new();
+        let prefab_id = AssetId::new();
+        assets.storage_mut::<SceneAsset>().unwrap().insert(
+            scene_id,
+            SceneAsset {
+                name: "scene".to_owned(),
+                entities: vec![SerializedEntity {
+                    name: Some("Root".to_owned()),
+                    parent: None,
+                    components: vec![SerializedComponent {
+                        type_name: "Transform".to_owned(),
+                        data: b"translation=0,0,0".to_vec(),
+                    }],
+                }],
+                dependencies: Vec::new(),
+            },
+        );
+        assets.storage_mut::<Prefab>().unwrap().insert(
+            prefab_id,
+            Prefab {
+                root: SerializedEntity {
+                    name: Some("Prefab".to_owned()),
+                    parent: None,
+                    components: vec![SerializedComponent {
+                        type_name: "Transform".to_owned(),
+                        data: b"translation=0,0,0".to_vec(),
+                    }],
+                },
+                children: vec![SerializedEntity {
+                    name: Some("Prefab_child".to_owned()),
+                    parent: Some(0),
+                    components: vec![SerializedComponent {
+                        type_name: "Transform".to_owned(),
+                        data: b"translation=1,0,0".to_vec(),
+                    }],
+                }],
+                dependencies: Vec::new(),
+            },
+        );
+
+        let mut scene = SceneInstanceComponent {
+            scene: Handle::<SceneAsset>::strong(scene_id),
+            loaded: false,
+        };
+        let mut prefab = PrefabInstanceComponent {
+            prefab: Handle::<Prefab>::strong(prefab_id),
+            loaded: false,
+        };
+        let mut scene_sink =
+            RecordingTypedHostInstantiationSink::with_errors(300, None, Some((0, 0)));
+        let mut prefab_sink = RecordingTypedHostInstantiationSink::with_errors(400, Some(1), None);
+
+        let scene_error = scene
+            .instantiate_typed_host(&mut assets, &mut scene_sink)
+            .unwrap_err();
+        let prefab_error = prefab
+            .instantiate_typed_host(&mut assets, &mut prefab_sink)
+            .unwrap_err();
+
+        assert!(matches!(
+            scene_error,
+            TypedHostInstantiationError::Sink(message) if message == "attach:0:0"
+        ));
+        assert!(matches!(
+            prefab_error,
+            TypedHostInstantiationError::Sink(message) if message == "spawn:1"
+        ));
+        assert!(!scene.loaded);
+        assert!(!prefab.loaded);
+        assert_eq!(scene_sink.events.len(), 1);
+        assert_eq!(prefab_sink.events.len(), 2);
+        assert_eq!(
+            prefab_sink.events,
+            vec![
+                "spawn:0:400:Some(\"Prefab\"):None".to_owned(),
+                "attach:400:0:0:Transform:0".to_owned(),
+            ]
+        );
     }
 
     #[test]
