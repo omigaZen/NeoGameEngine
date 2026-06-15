@@ -13974,6 +13974,81 @@ base_color=0,0,1,1
 }
 
 #[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_accepts_quoted_obj_call_sources() {
+    let config = database_config("builtin_model_obj_quoted_call_sources");
+    let model_path = AssetPath::parse("models/quoted_call.obj");
+    let include_path = AssetPath::parse("models/parts/quoted assembly.obj");
+    let mesh_path = AssetPath::parse("models/quoted_call.QuotedAssembly.mesh");
+    let model_source = b"call \"parts/quoted assembly.obj\"\n".to_vec();
+    let include_source = b"o QuotedAssembly\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(include_path.path(), include_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["QuotedAssembly"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "quoted_call_sources",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
 fn database_model_importer_includes_nested_obj_call_relative_material_libraries() {
     let config = database_config("builtin_model_obj_nested_call_relative_material_libraries");
     let model_path = AssetPath::parse("models/assembled.obj");
@@ -14944,8 +15019,7 @@ fn database_model_importer_parses_obj_quoted_line_continuations() {
     let config = database_config("builtin_model_obj_quoted_line_continuations");
     let model_path = AssetPath::parse("models/continued_quoted.obj");
     let mesh_path = AssetPath::parse("models/continued_quoted.Continued.mesh");
-    let material_path =
-        AssetPath::parse("models/continued_quoted.Material_Red_Metal.material");
+    let material_path = AssetPath::parse("models/continued_quoted.Material_Red_Metal.material");
     let model_source = br#"mtllib "continued\
  quoted.mtl"
 o Continued
