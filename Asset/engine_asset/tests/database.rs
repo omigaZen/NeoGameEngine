@@ -22483,6 +22483,11 @@ fn database_audio_importer_applies_streaming_setting_override() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
 
     let mut server = AssetServer::new(AssetServerConfig {
         root: config.cooked_root.clone(),
