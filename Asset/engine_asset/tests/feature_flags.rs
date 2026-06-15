@@ -692,8 +692,12 @@ fn hot_reload_feature_entry_points_match_gate() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_io(io);
     server.register_builtin_loaders();
+    let status = asset_feature_status(AssetFeature::HotReload);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::HotReload));
+    assert_eq!(status.name, "hot_reload");
 
     if asset_feature_enabled(AssetFeature::HotReload) {
+        assert_eq!(require_asset_feature(AssetFeature::HotReload), Ok(()));
         server.watch_hot_reload_path(path.clone()).unwrap();
         let watch = server.hot_reload_watch(&path).unwrap();
         assert_eq!(watch.backend, HotReloadWatchBackend::PollingMetadata);
@@ -733,6 +737,12 @@ fn hot_reload_feature_entry_points_match_gate() {
             Err(AssetError::AssetNotFound { .. })
         ));
     } else {
+        assert_eq!(
+            require_asset_feature(AssetFeature::HotReload),
+            Err(AssetError::Unsupported(
+                "asset hot_reload feature is disabled"
+            ))
+        );
         assert_eq!(
             server.queue_hot_reload_id(AssetId::new()),
             Err(AssetError::Unsupported(
@@ -815,9 +825,13 @@ fn hot_reload_feature_entry_points_match_gate() {
 fn streaming_feature_entry_points_match_gate() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     let _missing_region = StreamingRegionId(42);
+    let status = asset_feature_status(AssetFeature::Streaming);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Streaming));
+    assert_eq!(status.name, "streaming");
 
     #[cfg(feature = "streaming")]
     {
+        assert_eq!(require_asset_feature(AssetFeature::Streaming), Ok(()));
         let region = server
             .register_streaming_region_paths("empty", LoadPriority::Low, &[])
             .unwrap();
@@ -836,6 +850,12 @@ fn streaming_feature_entry_points_match_gate() {
 
     #[cfg(not(feature = "streaming"))]
     {
+        assert_eq!(
+            require_asset_feature(AssetFeature::Streaming),
+            Err(AssetError::Unsupported(
+                "asset streaming feature is disabled"
+            ))
+        );
         assert_eq!(
             server.register_streaming_region_paths("empty", LoadPriority::Low, &[]),
             Err(AssetError::Unsupported(
