@@ -1648,6 +1648,62 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
         composite.read("textures/albedo.texture").unwrap(),
         patch_albedo
     );
+
+    #[cfg(feature = "zstd")]
+    {
+        let zstd_preview = BundleWriter::build_bytes_with_options(
+            "artifact_zstd_preview",
+            BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
+                BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
+            ),
+            vec![
+                BundleAsset {
+                    id: AssetId::new(),
+                    asset_type: AssetTypeId::of::<Texture>(),
+                    path: AssetPath::parse("textures/zstd_base.texture"),
+                    bytes: texture_bytes(1, 1, 8),
+                    dependencies: Vec::new(),
+                },
+                BundleAsset {
+                    id: AssetId::new(),
+                    asset_type: AssetTypeId::of::<Texture>(),
+                    path: AssetPath::parse("textures/zstd_patch.texture"),
+                    bytes: texture_bytes(1, 1, 9),
+                    dependencies: Vec::new(),
+                },
+            ],
+        )
+        .unwrap();
+        let zstd_install = store
+            .install_package_bytes(
+                &mut registry,
+                AssetPackageInstallRequest::new(
+                    BundleId(13),
+                    "artifact_zstd",
+                    AssetIoLayerKind::Patch,
+                    1,
+                    "patches/artifact_zstd.bundle",
+                ),
+                &zstd_preview,
+            )
+            .unwrap();
+        assert!(zstd_install.artifact_path.exists());
+        assert_eq!(zstd_install.payload_size, zstd_preview.len() as u64);
+        assert_eq!(zstd_install.payload_hash, content_hash(&zstd_preview));
+        let zstd_composite = store.build_composite_io(&registry).unwrap();
+        assert_eq!(
+            zstd_composite.read("textures/zstd_patch.texture").unwrap(),
+            texture_bytes(1, 1, 9)
+        );
+        assert_eq!(
+            zstd_composite
+                .metadata("textures/zstd_patch.texture")
+                .unwrap()
+                .hash,
+            Some(content_hash(&texture_bytes(1, 1, 9)))
+        );
+    }
+
     let registry_path = root.join("packages.txt");
     registry.save_to_file(&registry_path).unwrap();
     assert_eq!(
@@ -1666,7 +1722,7 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
         Err(AssetError::Io { message }) if message.contains("failed to read") && message.contains("artifact_patch.bundle")
     ));
     assert!(!removed.conflicts.has_conflicts());
-    assert_eq!(registry.packages().len(), 1);
+    assert_eq!(registry.packages().len(), 2);
     assert!(store.verify_registry(&registry).unwrap().all_available());
 
     let keep_install = store
@@ -1694,7 +1750,7 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
         store.load_package_bytes(&kept.removed).unwrap(),
         patch_bundle
     );
-    assert_eq!(registry.packages().len(), 1);
+    assert_eq!(registry.packages().len(), 2);
 
     let _ = std::fs::remove_dir_all(&root);
 }

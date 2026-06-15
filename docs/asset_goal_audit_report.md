@@ -2392,3 +2392,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_write
 ```
 
 Result: the file-backed Zstd regression now also verifies read and range diagnostics from `BundleAssetIo`. Reopening the bundle from disk keeps `read_with_report` / `read_range_with_report` path metadata and Zstd chunk-compression reporting stable, not just the plain `read`/`metadata` success path.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
+```
+
+Result: the artifact store path now also exercises Zstd-compressed package artifacts. Installing a Zstd bundle through `AssetPackageArtifactStore` preserves payload size/hash, and `build_composite_io()` can read the compressed package payload back through a composite IO layer with the expected texture bytes.
