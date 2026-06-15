@@ -54,7 +54,9 @@ fn database_config(name: &str) -> AssetDatabaseConfig {
 #[test]
 fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
     let mut server = AssetServer::new(AssetServerConfig::default());
-    assert!(!asset_feature_status(AssetFeature::AsyncLoading).enabled);
+    let status = asset_feature_status(AssetFeature::AsyncLoading);
+    assert!(!status.enabled);
+    assert_eq!(status.name, "async_loading");
     assert_eq!(
         server.set_async_loading_enabled(true),
         Err(AssetError::Unsupported(
@@ -66,7 +68,7 @@ fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
     let report = server.loading_policy_report();
     assert_eq!(
         report.async_loading_feature,
-        asset_feature_status(AssetFeature::AsyncLoading)
+        status
     );
     assert_eq!(
         report.parallel_feature,
@@ -99,11 +101,14 @@ fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
 fn enabled_async_loading_config_reports_worker_execution_mode() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_async_loading_enabled(true).unwrap();
+    let status = asset_feature_status(AssetFeature::AsyncLoading);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::AsyncLoading));
+    assert_eq!(status.name, "async_loading");
 
     let report = server.loading_policy_report();
     assert_eq!(
         report.async_loading_feature,
-        asset_feature_status(AssetFeature::AsyncLoading)
+        status
     );
     assert_eq!(
         report.parallel_feature,
@@ -115,6 +120,7 @@ fn enabled_async_loading_config_reports_worker_execution_mode() {
     assert!(report.diagnostics.is_empty());
     assert!(report.first_error().is_none());
     assert_eq!(server.validate_loading_policy(), Ok(()));
+    assert_eq!(require_asset_feature(AssetFeature::AsyncLoading), Ok(()));
 }
 
 #[test]
@@ -150,7 +156,9 @@ fn disabled_editor_feature_reports_visible_unsupported_diagnostic() {
 #[test]
 fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
     let mut server = AssetServer::new(AssetServerConfig::default());
-    assert!(!asset_feature_status(AssetFeature::Parallel).enabled);
+    let status = asset_feature_status(AssetFeature::Parallel);
+    assert!(!status.enabled);
+    assert_eq!(status.name, "parallel");
     assert_eq!(
         server.set_parallel_worker_threads(2),
         Err(AssetError::Unsupported(
@@ -166,7 +174,7 @@ fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
     );
     assert_eq!(
         report.parallel_feature,
-        asset_feature_status(AssetFeature::Parallel)
+        status
     );
     assert_eq!(report.requested_worker_threads, 2);
     assert_eq!(report.effective_worker_threads, 0);
@@ -196,6 +204,9 @@ fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
 fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_parallel_worker_threads(4).unwrap();
+    let status = asset_feature_status(AssetFeature::Parallel);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Parallel));
+    assert_eq!(status.name, "parallel");
 
     let report = server.loading_policy_report();
     assert_eq!(
@@ -212,6 +223,7 @@ fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
     assert!(report.first_error().is_none());
     assert_eq!(report.require_supported(), Ok(()));
     assert_eq!(report.mode, AssetLoadingExecutionMode::Synchronous);
+    assert_eq!(require_asset_feature(AssetFeature::Parallel), Ok(()));
 }
 
 #[cfg(all(feature = "async_loading", feature = "parallel"))]
@@ -220,6 +232,9 @@ fn enabled_async_parallel_config_reports_effective_worker_count() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_async_loading_enabled(true).unwrap();
     server.set_parallel_worker_threads(4).unwrap();
+    let status = asset_feature_status(AssetFeature::Parallel);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Parallel));
+    assert_eq!(status.name, "parallel");
 
     let report = server.loading_policy_report();
     assert_eq!(
@@ -236,6 +251,7 @@ fn enabled_async_parallel_config_reports_effective_worker_count() {
     assert!(report.diagnostics.is_empty());
     assert!(report.first_error().is_none());
     assert_eq!(report.require_supported(), Ok(()));
+    assert_eq!(require_asset_feature(AssetFeature::Parallel), Ok(()));
 }
 
 #[test]
