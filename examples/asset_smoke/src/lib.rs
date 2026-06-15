@@ -157,11 +157,11 @@ pub fn run_smoke() -> SmokeReport {
     );
     io.insert(
         "scenes/hero.scene",
-        "NGA_SCENE_V1\nname=hero_scene\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
+        "NGA_SCENE_V1\nname=hero_scene\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\ndependency=skeletons/hero.skeleton\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\nentity=SkinnedHero;parent=1\ncomponent=SkinnedMeshRenderer|mesh=meshes/tri.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material\n",
     );
     io.insert(
         "prefabs/hero.prefab",
-        "NGA_PREFAB_V1\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
+        "NGA_PREFAB_V1\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\ndependency=skeletons/hero.skeleton\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\nchild=SkinnedWeapon;parent=0\ncomponent=SkinnedMeshRenderer|mesh=meshes/tri.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material\n",
     );
     io.insert("audio/click.audio", audio_bytes());
     io.insert("audio/click_alt.audio", audio_bytes_alt());
@@ -394,12 +394,12 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     io.insert(physics_path.path(), physics_mesh_bytes());
     io.insert(
         scene_path.path(),
-        b"NGA_SCENE_V1\nname=editor_scene\ndependency=textures/editor.texture\ndependency=materials/editor.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Child;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\n"
+        b"NGA_SCENE_V1\nname=editor_scene\ndependency=textures/editor.texture\ndependency=materials/editor.material\ndependency=skeletons/editor.skeleton\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Child;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\nentity=SkinnedChild;parent=1\ncomponent=SkinnedMeshRenderer|mesh=meshes/editor.mesh;skeleton=skeletons/editor.skeleton;material=materials/editor.material\n"
             .to_vec(),
     );
     io.insert(
         prefab_path.path(),
-        b"NGA_PREFAB_V1\ndependency=textures/editor.texture\ndependency=materials/editor.material\nroot=EditorRoot\ncomponent=Transform|translation=1,0,0\nchild=EditorChild;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\n"
+        b"NGA_PREFAB_V1\ndependency=textures/editor.texture\ndependency=materials/editor.material\ndependency=skeletons/editor.skeleton\nroot=EditorRoot\ncomponent=Transform|translation=1,0,0\nchild=EditorChild;parent=0\ncomponent=MeshRenderer|mesh=meshes/editor.mesh;material=materials/editor.material\nchild=SkinnedEditorChild;parent=0\ncomponent=SkinnedMeshRenderer|mesh=meshes/editor.mesh;skeleton=skeletons/editor.skeleton;material=materials/editor.material\n"
             .to_vec(),
     );
 
@@ -1279,16 +1279,16 @@ mod tests {
         assert!(report.physics_world_collider_ready);
         assert!(report.physics_world_ray_hit);
         assert_eq!(report.physics_world_triangles, 1);
-        assert_eq!(report.scene_commands, 4);
-        assert_eq!(report.prefab_commands, 4);
-        assert_eq!(report.scene_sink_events, 4);
-        assert_eq!(report.prefab_sink_events, 4);
-        assert_eq!(report.scene_typed_entities, 2);
-        assert_eq!(report.prefab_typed_entities, 2);
-        assert_eq!(report.scene_typed_components, 2);
-        assert_eq!(report.prefab_typed_components, 2);
-        assert_eq!(report.scene_typed_asset_handles, 2);
-        assert_eq!(report.prefab_typed_asset_handles, 2);
+        assert_eq!(report.scene_commands, 6);
+        assert_eq!(report.prefab_commands, 6);
+        assert_eq!(report.scene_sink_events, 6);
+        assert_eq!(report.prefab_sink_events, 6);
+        assert_eq!(report.scene_typed_entities, 3);
+        assert_eq!(report.prefab_typed_entities, 3);
+        assert_eq!(report.scene_typed_components, 3);
+        assert_eq!(report.prefab_typed_components, 3);
+        assert_eq!(report.scene_typed_asset_handles, 5);
+        assert_eq!(report.prefab_typed_asset_handles, 5);
         assert!(report.scene_typed_loaded);
         assert!(report.prefab_typed_loaded);
         assert_eq!(
@@ -1299,6 +1299,8 @@ mod tests {
                 "spawn:1:Some(\"Hero\"):Some(0)".to_owned(),
                 "attach:1:MeshRenderer:mesh=meshes/tri.mesh;material=materials/hero.material"
                     .to_owned(),
+                "spawn:2:Some(\"SkinnedHero\"):Some(1)".to_owned(),
+                "attach:2:SkinnedMeshRenderer:mesh=meshes/tri.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material".to_owned(),
             ]
         );
         assert_eq!(
@@ -1309,6 +1311,8 @@ mod tests {
                 "spawn:1:Some(\"Weapon\"):Some(0)".to_owned(),
                 "attach:1:MeshRenderer:mesh=meshes/tri.mesh;material=materials/hero.material"
                     .to_owned(),
+                "spawn:2:Some(\"SkinnedWeapon\"):Some(0)".to_owned(),
+                "attach:2:SkinnedMeshRenderer:mesh=meshes/tri.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material".to_owned(),
             ]
         );
         assert_eq!(
@@ -1318,6 +1322,8 @@ mod tests {
                 "attach:100:0:0:Transform:0".to_owned(),
                 "spawn:1:101:Some(\"Hero\"):Some(100)".to_owned(),
                 "attach:101:1:0:MeshRenderer:2".to_owned(),
+                "spawn:2:102:Some(\"SkinnedHero\"):Some(101)".to_owned(),
+                "attach:102:2:0:SkinnedMeshRenderer:3".to_owned(),
             ]
         );
         assert_eq!(
@@ -1327,6 +1333,8 @@ mod tests {
                 "attach:200:0:0:Transform:0".to_owned(),
                 "spawn:1:201:Some(\"Weapon\"):Some(200)".to_owned(),
                 "attach:201:1:0:MeshRenderer:2".to_owned(),
+                "spawn:2:202:Some(\"SkinnedWeapon\"):Some(200)".to_owned(),
+                "attach:202:2:0:SkinnedMeshRenderer:3".to_owned(),
             ]
         );
         assert_eq!(report.render_handles, 2);
@@ -1454,10 +1462,10 @@ mod tests {
         assert!(report.scene_ready_with_dependencies);
         assert!(report.prefab_ready_with_dependencies);
         assert_eq!(report.runtime_dependencies, 1);
-        assert_eq!(report.scene_dependencies, 3);
-        assert_eq!(report.prefab_dependencies, 3);
-        assert_eq!(report.scene_commands, 4);
-        assert_eq!(report.prefab_commands, 4);
+        assert_eq!(report.scene_dependencies, 4);
+        assert_eq!(report.prefab_dependencies, 4);
+        assert_eq!(report.scene_commands, 6);
+        assert_eq!(report.prefab_commands, 6);
         assert!(report.ready_events >= 2);
         assert_eq!(report.failed_events, 0);
     }
