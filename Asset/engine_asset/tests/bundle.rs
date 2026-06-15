@@ -599,7 +599,9 @@ fn bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches() {
     assert_eq!(report.cache_status, BundleChunkCacheStatus::Hit);
     assert_eq!(bundle_io.chunk_cache_stats().cache_hits, 1);
     assert_eq!(
-        bundle_io.read_range("textures/first.texture", 0, 8).unwrap(),
+        bundle_io
+            .read_range("textures/first.texture", 0, 8)
+            .unwrap(),
         first[0..8]
     );
     assert_eq!(
@@ -915,8 +917,14 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
         .find(|entry| entry.id != texture_id)
         .map(|entry| entry.id)
         .unwrap();
-    assert_eq!(manifest.dependencies(second_id), Some([texture_id].as_slice()));
-    assert_eq!(manifest.chunk(0).unwrap().compression, CompressionKind::Zstd);
+    assert_eq!(
+        manifest.dependencies(second_id),
+        Some([texture_id].as_slice())
+    );
+    assert_eq!(
+        manifest.chunk(0).unwrap().compression,
+        CompressionKind::Zstd
+    );
 
     let file_bytes = std::fs::read(&path).unwrap();
     let reader = BundleReader::from_bytes_with_loading_policy(
@@ -967,9 +975,16 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
         .unwrap();
     assert_eq!(read_bytes, first);
     assert_eq!(read_report.chunk_compression, CompressionKind::Zstd);
-    assert_eq!(read_report.path, Some(AssetPath::parse("textures/persisted_zstd.texture")));
+    assert_eq!(
+        read_report.path,
+        Some(AssetPath::parse("textures/persisted_zstd.texture"))
+    );
     let (_, range_report) = bundle_io
-        .read_range_with_report("textures/persisted_zstd_extra.texture", 0, second.len() as u64)
+        .read_range_with_report(
+            "textures/persisted_zstd_extra.texture",
+            0,
+            second.len() as u64,
+        )
         .unwrap();
     assert_eq!(range_report.chunk_compression, CompressionKind::Zstd);
     assert_eq!(
@@ -990,7 +1005,9 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
         Some(content_hash(&second))
     );
     assert_eq!(
-        bundle_io.read("textures/persisted_zstd_extra.texture").unwrap(),
+        bundle_io
+            .read("textures/persisted_zstd_extra.texture")
+            .unwrap(),
         second
     );
 
@@ -1681,9 +1698,8 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
     {
         let zstd_preview = BundleWriter::build_bytes_with_options(
             "artifact_zstd_preview",
-            BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
-                BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
-            ),
+            BundleBuildOptions::new(CompressionKind::Zstd)
+                .with_chunk_policy(BundleChunkPartitionPolicy::MaxUncompressedBytes(1)),
             vec![
                 BundleAsset {
                     id: AssetId::new(),
@@ -1794,9 +1810,8 @@ fn asset_package_artifact_store_installs_and_builds_zstd_audio_package_files() {
     let audio_bytes = ogg_vorbis_audio_bytes(44_100, 2);
     let audio_bundle = BundleWriter::build_bytes_with_options(
         "artifact_audio_zstd",
-        BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
-            BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
-        ),
+        BundleBuildOptions::new(CompressionKind::Zstd)
+            .with_chunk_policy(BundleChunkPartitionPolicy::MaxUncompressedBytes(1)),
         vec![BundleAsset {
             id: AssetId::new(),
             asset_type: AssetTypeId::of::<AudioClip>(),
@@ -1825,9 +1840,7 @@ fn asset_package_artifact_store_installs_and_builds_zstd_audio_package_files() {
     assert_eq!(install.payload_hash, content_hash(&audio_bundle));
 
     let composite = store.build_composite_io(&registry).unwrap();
-    let (read_bytes, read_report) = composite
-        .read_with_diagnostics("audio/voice.ogg")
-        .unwrap();
+    let (read_bytes, read_report) = composite.read_with_diagnostics("audio/voice.ogg").unwrap();
     assert_eq!(read_bytes, audio_bytes);
     assert_eq!(read_report.layer.name, "artifact_audio_zstd");
     assert_eq!(read_report.layer.kind, AssetIoLayerKind::Patch);
@@ -1845,11 +1858,17 @@ fn asset_package_artifact_store_installs_and_builds_zstd_audio_package_files() {
     let loaded_registry = AssetPackageRegistry::load_from_file(&registry_path).unwrap();
     assert_eq!(loaded_registry, registry);
     assert_eq!(
-        store.build_composite_io(&loaded_registry).unwrap().read("audio/voice.ogg").unwrap(),
+        store
+            .build_composite_io(&loaded_registry)
+            .unwrap()
+            .read("audio/voice.ogg")
+            .unwrap(),
         audio_bytes
     );
 
-    let removed = store.remove_package(&mut registry, "artifact_audio_zstd", true).unwrap();
+    let removed = store
+        .remove_package(&mut registry, "artifact_audio_zstd", true)
+        .unwrap();
     assert_eq!(removed.removed.name, "artifact_audio_zstd");
     assert!(removed.artifact_removed);
     assert!(!removed.artifact_path.exists());
@@ -3269,9 +3288,8 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     );
     let zstd_bundle = BundleWriter::build_bytes_with_options(
         "artifact_zstd_patch",
-        BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
-            BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
-        ),
+        BundleBuildOptions::new(CompressionKind::Zstd)
+            .with_chunk_policy(BundleChunkPartitionPolicy::MaxUncompressedBytes(1)),
         vec![
             BundleAsset {
                 id: AssetId::new(),
@@ -3323,9 +3341,7 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     assert_eq!(zstd_install.payload_hash, content_hash(&zstd_bundle));
     let composite = store.build_composite_io(&registry).unwrap();
     assert_eq!(
-        composite
-            .read("textures/zstd_extra_a.texture")
-            .unwrap(),
+        composite.read("textures/zstd_extra_a.texture").unwrap(),
         texture_bytes(1, 1, 36)
     );
     assert_eq!(
@@ -3405,7 +3421,9 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     assert!(removed.artifact_removed);
     assert!(!removed.artifact_path.exists());
     assert!(store.verify_registry(&registry).unwrap().all_available());
-    let restored = server.restore_asset_package_registry(registry.clone()).unwrap();
+    let restored = server
+        .restore_asset_package_registry(registry.clone())
+        .unwrap();
     assert_eq!(restored.len(), 1);
     assert_eq!(server.asset_package_registry().packages().len(), 1);
     assert!(server.mounted_bundle(base_record_seed.bundle_id).is_some());
@@ -3549,6 +3567,64 @@ fn mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount() {
     assert_eq!(restored_server.group_state(&group), AssetLoadState::Ready);
 
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bundles() {
+    let path = temp_file("asset_server_package_registry", "txt");
+    let _ = std::fs::remove_file(&path);
+    let (base, _, _) = texture_package(
+        "server_base",
+        AssetIoLayerKind::BaseBundle,
+        0,
+        BundleId(61),
+        "packages/server_base.nga_bundle",
+        vec![("textures/server_base.texture", texture_bytes(1, 1, 11))],
+    );
+    let (patch, _, _) = texture_package(
+        "server_patch",
+        AssetIoLayerKind::Patch,
+        1,
+        BundleId(62),
+        "packages/server_patch.nga_bundle",
+        vec![("textures/server_patch.texture", texture_bytes(1, 1, 22))],
+    );
+    let registry = AssetPackageRegistry::new(vec![base.clone(), patch.clone()]).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    let mounted = server
+        .restore_asset_package_registry(registry.clone())
+        .unwrap();
+
+    server.save_asset_package_registry(&path).unwrap();
+    let saved_registry = AssetPackageRegistry::load_from_file(&path).unwrap();
+    assert_eq!(saved_registry, registry);
+
+    let mut restored_server = AssetServer::new(AssetServerConfig::default());
+    let restored = restored_server.load_asset_package_registry(&path).unwrap();
+    assert_eq!(restored, mounted);
+    assert_eq!(restored_server.mounted_bundles().count(), 2);
+    assert_eq!(
+        restored_server.mounted_bundle(base.bundle_id).unwrap().name,
+        "server_base"
+    );
+    assert_eq!(
+        restored_server
+            .mounted_bundle(patch.bundle_id)
+            .unwrap()
+            .name,
+        "server_patch"
+    );
+
+    let missing_path = temp_file("asset_server_missing_package_registry", "txt");
+    let missing_error = restored_server
+        .load_asset_package_registry(&missing_path)
+        .unwrap_err();
+    assert!(matches!(
+        missing_error,
+        AssetError::Io { message }
+            if message.contains("failed to read") && message.contains(&missing_path.display().to_string())
+    ));
+    assert_eq!(restored_server.mounted_bundles().count(), 2);
 }
 
 #[test]
