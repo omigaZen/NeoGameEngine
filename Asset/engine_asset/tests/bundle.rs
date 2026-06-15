@@ -846,6 +846,104 @@ fn bundle_writer_writes_file_and_returns_manifest() {
 }
 
 #[test]
+#[cfg(feature = "zstd")]
+fn bundle_writer_writes_zstd_file_and_returns_manifest() {
+    let path = temp_file("bundle_write_zstd_file", "bundle");
+    let _ = std::fs::remove_file(&path);
+    let texture_id = AssetId::new();
+    let first = texture_bytes(2, 2, 31);
+    let second = texture_bytes(1, 1, 32);
+
+    let manifest = BundleWriter::write_file(
+        &path,
+        "persisted_zstd_textures",
+        CompressionKind::Zstd,
+        vec![
+            BundleAsset {
+                id: texture_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/persisted_zstd.texture"),
+                bytes: first.clone(),
+                dependencies: vec![],
+            },
+            BundleAsset {
+                id: AssetId::new(),
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/persisted_zstd_extra.texture"),
+                bytes: second.clone(),
+                dependencies: vec![texture_id],
+            },
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(manifest.name, "persisted_zstd_textures");
+    assert_eq!(manifest.compression, CompressionKind::Zstd);
+    assert_eq!(manifest.entries.len(), 2);
+    assert_eq!(manifest.chunk(0).unwrap().compression, CompressionKind::Zstd);
+
+    let file_bytes = std::fs::read(&path).unwrap();
+    let reader = BundleReader::from_bytes_with_loading_policy(
+        &file_bytes,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(reader.manifest().name, "persisted_zstd_textures");
+    assert_eq!(reader.manifest().compression, CompressionKind::Zstd);
+    assert_eq!(reader.manifest().entries.len(), 2);
+    assert_eq!(reader.chunk_cache_stats().max_decoded_chunks, Some(1));
+
+    let prefetch = reader
+        .prefetch_paths(&[
+            AssetPath::parse("textures/persisted_zstd.texture"),
+            AssetPath::parse("textures/persisted_zstd_extra.texture"),
+        ])
+        .unwrap();
+    assert_eq!(prefetch.decoded_chunks.len(), 1);
+    assert_eq!(prefetch.evicted_chunks.len(), 0);
+
+    let (range, report) = reader
+        .read_path_range_with_report(&AssetPath::parse("textures/persisted_zstd.texture"), 0, 8)
+        .unwrap();
+    assert_eq!(range, first[0..8]);
+    assert_eq!(report.chunk_compression, CompressionKind::Zstd);
+    assert!(matches!(
+        BundleAssetIo::from_bytes_with_loading_policy(
+            &file_bytes,
+            BundleChunkLoadingPolicy::OnDemandCachedLimited {
+                max_decoded_chunks: 1,
+            },
+        ),
+        Ok(_)
+    ));
+
+    let bundle_io = BundleAssetIo::from_bytes_with_loading_policy(
+        &file_bytes,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        bundle_io
+            .read_range("textures/persisted_zstd.texture", 0, first.len() as u64)
+            .unwrap(),
+        first
+    );
+    assert_eq!(
+        bundle_io
+            .metadata("textures/persisted_zstd_extra.texture")
+            .unwrap()
+            .hash,
+        Some(content_hash(&second))
+    );
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn bundle_asset_io_supports_read_range_metadata_list_and_missing_entry_errors() {
     let bytes = texture_bytes(1, 1, 12);
     let (_id, bundle) = texture_bundle("textures/albedo.texture", bytes.clone());

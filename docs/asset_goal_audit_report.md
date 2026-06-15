@@ -2368,3 +2368,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_zstd_
 ```
 
 Result: the Zstd bundle path now has a non-empty on-demand cached regression in addition to the empty-manifest smoke. A multi-chunk Zstd bundle now exercises `prefetch_path`/`prefetch_chunk`/`prefetch_paths` cache misses, LRU eviction, chunk cache statistics, and `BundleChunkReadReport` cache-hit behavior while still round-tripping the expected compressed chunk metadata.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_writer_writes_zstd_file_and_returns_manifest
+```
+
+Result: the Zstd bundle path now also has a file-backed write/read regression. Writing a multi-chunk Zstd bundle to disk now preserves the manifest name/compression/entry count, and reading the file back through `BundleReader` and `BundleAssetIo` keeps the compressed metadata, chunk cache policy, path reads, and dependent entry metadata stable.
