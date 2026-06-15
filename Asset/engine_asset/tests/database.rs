@@ -8816,20 +8816,25 @@ pc 0.6
 PCR 0.15
 ANISO 0.8
 ANISOR 0.1
-map_Ps textures/pbr_sheen.texture
-map_Pc textures/pbr_clearcoat.texture
-map_Pcr textures/pbr_clearcoat_roughness.texture
-map_aniso textures/pbr_anisotropy.texture
-map_anisor textures/pbr_anisotropy_rotation.texture
+map_Ps -colorspace Non-Color textures/pbr_sheen.texture
+map_Pc -colorspace Non-Color textures/pbr_clearcoat.texture
+map_Pcr -colorspace Non-Color textures/pbr_clearcoat_roughness.texture
+map_aniso -colorspace Non-Color textures/pbr_anisotropy.texture
+map_anisor -colorspace Non-Color textures/pbr_anisotropy_rotation.texture
 "
     .to_vec();
     let expected_material = b"# mtllib pbr.mtl
 name=Coat
 texture.sheen=models/textures/pbr_sheen.texture
+texture.sheen.color_space=non_color
 texture.clearcoat=models/textures/pbr_clearcoat.texture
+texture.clearcoat.color_space=non_color
 texture.clearcoat_roughness=models/textures/pbr_clearcoat_roughness.texture
+texture.clearcoat_roughness.color_space=non_color
 texture.anisotropy=models/textures/pbr_anisotropy.texture
+texture.anisotropy.color_space=non_color
 texture.anisotropy_rotation=models/textures/pbr_anisotropy_rotation.texture
+texture.anisotropy_rotation.color_space=non_color
 custom.sheen.float=0.25
 custom.clearcoat.float=0.6
 custom.clearcoat_roughness.float=0.15
@@ -8969,6 +8974,10 @@ custom.anisotropy_rotation.float=0.1
     for (index, name) in texture_names.iter().enumerate() {
         assert_eq!(material.textures[index].name, *name);
         assert_eq!(material.textures[index].texture.id(), texture_ids[index]);
+        assert_eq!(
+            material.textures[index].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
+        );
     }
 }
 
@@ -9987,7 +9996,9 @@ fn database_model_importer_preserves_obj_pbr_packed_long_name_texture_aliases() 
     ];
     let material_paths = [
         AssetPath::parse("models/packed_long_aliases.Material_OcclusionRoughnessMetallic.material"),
-        AssetPath::parse("models/packed_long_aliases.Material_OcclusionRoughness_Metallic.material"),
+        AssetPath::parse(
+            "models/packed_long_aliases.Material_OcclusionRoughness_Metallic.material",
+        ),
     ];
     let texture_paths = [
         AssetPath::parse("models/textures/packed_occlusionroughnessmetallic.texture"),
@@ -10110,7 +10121,10 @@ texture.orm.color_space=non_color
             reader.read_path(&material_paths[index]).unwrap(),
             expected_materials[index]
         );
-        assert_eq!(reader.read_path(&texture_paths[index]).unwrap(), texture_sources[index]);
+        assert_eq!(
+            reader.read_path(&texture_paths[index]).unwrap(),
+            texture_sources[index]
+        );
     }
 
     let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
