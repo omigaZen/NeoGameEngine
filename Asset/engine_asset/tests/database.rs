@@ -8132,11 +8132,11 @@ f 7 8 9
 "
     .to_vec();
     let material_source = b"newmtl RawAo
-map_AO -imfchan r textures/raw_ao.texture
+map_AO -imfchan r -colorspace Non-Color textures/raw_ao.texture
 newmtl NamedAo
-map_Occlusion -imfchan blue textures/named_ao.texture
+map_Occlusion -imfchan blue -colorspace Non-Color textures/named_ao.texture
 newmtl LongAo
-map_ambient_occlusion -imfchan G textures/long_ao.texture
+map_ambient_occlusion -imfchan G -colorspace Non-Color textures/long_ao.texture
 "
     .to_vec();
     let expected_materials = [
@@ -8144,18 +8144,21 @@ map_ambient_occlusion -imfchan G textures/long_ao.texture
 name=RawAo
 texture.occlusion=models/textures/raw_ao.texture
 texture.occlusion.source_channel=red
+texture.occlusion.color_space=non_color
 "
         .to_vec(),
         b"# mtllib ao_aliases.mtl
 name=NamedAo
 texture.occlusion=models/textures/named_ao.texture
 texture.occlusion.source_channel=blue
+texture.occlusion.color_space=non_color
 "
         .to_vec(),
         b"# mtllib ao_aliases.mtl
 name=LongAo
 texture.occlusion=models/textures/long_ao.texture
 texture.occlusion.source_channel=green
+texture.occlusion.color_space=non_color
 "
         .to_vec(),
     ];
@@ -8285,6 +8288,10 @@ texture.occlusion.source_channel=green
         assert_eq!(
             material.textures[0].options.source_channel,
             Some(expected_channels[index])
+        );
+        assert_eq!(
+            material.textures[0].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
         );
     }
 }
