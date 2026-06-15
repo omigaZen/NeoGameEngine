@@ -18943,6 +18943,105 @@ fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata
 }
 
 #[test]
+fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and_metadata() {
+    let audio_path = AssetPath::parse("audio/imported.audio");
+    let font_path = AssetPath::parse("fonts/imported.font");
+    let physics_path = AssetPath::parse("physics/imported.physics");
+    let audio_source = SourceAsset {
+        path: audio_path.clone(),
+        bytes: b"NGA_AUDIO_SOURCE_V1\nsample_rate=44100\nchannels=1\nformat=f32\nsamples=0.0,0.5,-0.5\nstreaming=false\n"
+            .to_vec(),
+        hash: ContentHash(303),
+    };
+    let font_source = SourceAsset {
+        path: font_path.clone(),
+        bytes: b"NGA_FONT_SOURCE_V1\n# canonical order should not depend on source order\nglyph = char=B; size=1x1; bitmap=128\nfamily = Debug Sans\nglyph=char=A;size=2x1;bitmap=0, 255\n"
+            .to_vec(),
+        hash: ContentHash(404),
+    };
+    let physics_source = SourceAsset {
+        path: physics_path.clone(),
+        bytes: b"NGA_PHYSICS_MESH_SOURCE_V1\n# source accepts key/value and directive forms\nkind = tri_mesh\nvertex = 0.0, 0.0, 0.0\nv 1.50 0 0\nv 0 1 0\ntriangle = 0, 1, 2\n"
+            .to_vec(),
+        hash: ContentHash(505),
+    };
+    let audio_importer = AudioImporter::new();
+    let font_importer = FontImporter::new();
+    let physics_importer = PhysicsMeshImporter::new();
+    let settings = ImporterSettings::default();
+    let mut audio_ctx = ImportContext::default();
+    let mut font_ctx = ImportContext::default();
+    let mut physics_ctx = ImportContext::default();
+
+    let audio_output = audio_importer
+        .import(&mut audio_ctx, &audio_source, &settings)
+        .unwrap();
+    let font_output = font_importer
+        .import(&mut font_ctx, &font_source, &settings)
+        .unwrap();
+    let physics_output = physics_importer
+        .import(&mut physics_ctx, &physics_source, &settings)
+        .unwrap();
+
+    assert_eq!(audio_output.metadata.path.as_ref(), Some(&audio_path));
+    assert_eq!(audio_output.metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(audio_output.metadata.importer_version, 3);
+    assert_eq!(audio_output.metadata.source_path.as_ref(), Some(&audio_path));
+    assert_eq!(audio_output.metadata.cooked_path.as_ref(), Some(&audio_path));
+    assert_eq!(audio_output.metadata.source_hash, Some(ContentHash(303)));
+    assert_eq!(audio_output.metadata.version_hash, Some(VersionHash(3)));
+    assert_eq!(audio_output.version_hash, VersionHash(3));
+    assert_eq!(audio_output.generated.len(), 1);
+    assert_eq!(audio_output.generated[0].path, audio_path);
+    assert_eq!(
+        audio_output.generated[0].bytes,
+        b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=1\nformat=f32\nsamples=0,0.5,-0.5\nstreaming=false\n"
+            .to_vec()
+    );
+    assert_eq!(audio_output.generated[0].asset_type, AudioClip::TYPE_ID);
+    assert!(audio_output.dependencies.is_empty());
+
+    assert_eq!(font_output.metadata.path.as_ref(), Some(&font_path));
+    assert_eq!(font_output.metadata.importer.as_deref(), Some("FontImporter"));
+    assert_eq!(font_output.metadata.importer_version, 3);
+    assert_eq!(font_output.metadata.source_path.as_ref(), Some(&font_path));
+    assert_eq!(font_output.metadata.cooked_path.as_ref(), Some(&font_path));
+    assert_eq!(font_output.metadata.source_hash, Some(ContentHash(404)));
+    assert_eq!(font_output.metadata.version_hash, Some(VersionHash(3)));
+    assert_eq!(font_output.version_hash, VersionHash(3));
+    assert_eq!(font_output.generated.len(), 1);
+    assert_eq!(font_output.generated[0].path, font_path);
+    assert_eq!(
+        font_output.generated[0].bytes,
+        b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\nglyph=char=B;size=1x1;bitmap=128\n"
+            .to_vec()
+    );
+    assert_eq!(font_output.generated[0].asset_type, Font::TYPE_ID);
+    assert!(font_output.dependencies.is_empty());
+
+    assert_eq!(physics_output.metadata.path.as_ref(), Some(&physics_path));
+    assert_eq!(
+        physics_output.metadata.importer.as_deref(),
+        Some("PhysicsMeshImporter")
+    );
+    assert_eq!(physics_output.metadata.importer_version, 2);
+    assert_eq!(physics_output.metadata.source_path.as_ref(), Some(&physics_path));
+    assert_eq!(physics_output.metadata.cooked_path.as_ref(), Some(&physics_path));
+    assert_eq!(physics_output.metadata.source_hash, Some(ContentHash(505)));
+    assert_eq!(physics_output.metadata.version_hash, Some(VersionHash(2)));
+    assert_eq!(physics_output.version_hash, VersionHash(2));
+    assert_eq!(physics_output.generated.len(), 1);
+    assert_eq!(physics_output.generated[0].path, physics_path);
+    assert_eq!(
+        physics_output.generated[0].bytes,
+        b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1.5 0 0\nv 0 1 0\ni 0 1 2\n"
+            .to_vec()
+    );
+    assert_eq!(physics_output.generated[0].asset_type, PhysicsMesh::TYPE_ID);
+    assert!(physics_output.dependencies.is_empty());
+}
+
+#[test]
 fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtime_docs() {
     let config = database_config("builtin_animation_skeleton_import_cook_load");
     let animation_path = AssetPath::parse("animations/hero.animation");
