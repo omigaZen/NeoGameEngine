@@ -9,7 +9,6 @@ fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     bytes.extend(std::iter::repeat(value).take(width as usize * height as usize * 4));
     bytes
 }
-
 fn texture_rgba_bytes(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&width.to_le_bytes());
@@ -7033,16 +7032,18 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Glass
-map_Tf -imfchan g textures/glass_filter.texture
-map_Ni -imfchan blue textures/glass_ior.texture
+map_Tf -imfchan g -colorspace Non-Color textures/glass_filter.texture
+map_Ni -imfchan blue -colorspace Non-Color textures/glass_ior.texture
 "
     .to_vec();
     let expected_material = b"# mtllib optics.mtl
 name=Glass
 texture.transmission_filter=models/textures/glass_filter.texture
 texture.transmission_filter.source_channel=green
+texture.transmission_filter.color_space=non_color
 texture.index_of_refraction=models/textures/glass_ior.texture
 texture.index_of_refraction.source_channel=blue
+texture.index_of_refraction.color_space=non_color
 "
     .to_vec();
     let transmission_source = texture_bytes(1, 1, 91);
@@ -7159,6 +7160,14 @@ texture.index_of_refraction.source_channel=blue
     assert_eq!(
         material.textures[1].options.source_channel,
         Some(MaterialTextureChannel::Blue)
+    );
+    assert_eq!(
+        material.textures[1].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
+    );
+    assert_eq!(
+        material.textures[0].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
     );
 }
 
@@ -9624,7 +9633,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Quoted
 map_Kd -clamp on \"textures/painted albedo.texture\" -imfchan red
-map_Ks 'textures/polished specular.texture' -imfchan blue
+map_Ks 'textures/polished specular.texture' -imfchan blue -colorspace Non-Color
 "
     .to_vec();
     let expected_material = b"# mtllib quoted_texture_paths.mtl
@@ -9634,6 +9643,7 @@ texture.albedo.sampler.address=clamp_to_edge
 texture.albedo.source_channel=red
 texture.specular=models/textures/polished specular.texture
 texture.specular.source_channel=blue
+texture.specular.color_space=non_color
 "
     .to_vec();
     let albedo_source = texture_bytes(1, 1, 127);
@@ -9736,6 +9746,10 @@ texture.specular.source_channel=blue
     assert_eq!(
         material.textures[1].options.source_channel,
         Some(MaterialTextureChannel::Blue)
+    );
+    assert_eq!(
+        material.textures[1].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
     );
 }
 
@@ -10705,7 +10719,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Lit
 map_Ka textures/material_occlusion.texture
-map_Ks -imfchan BLUE textures/material_specular.texture
+map_Ks -imfchan BLUE -colorspace Non-Color textures/material_specular.texture
 "
     .to_vec();
     let expected_material = b"# mtllib material_maps.mtl
@@ -10713,6 +10727,7 @@ name=Lit
 texture.occlusion=models/textures/material_occlusion.texture
 texture.specular=models/textures/material_specular.texture
 texture.specular.source_channel=blue
+texture.specular.color_space=non_color
 "
     .to_vec();
     let occlusion_source = texture_bytes(1, 1, 101);

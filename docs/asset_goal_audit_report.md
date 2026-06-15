@@ -1,6 +1,6 @@
 # NeoGameEngine Asset Goal Audit Report
 
-Last updated: 2026-06-10
+Last updated: 2026-06-15
 
 ## Scope Audited
 
@@ -55,6 +55,21 @@ Runtime MVP slice now exists in `engine_asset`:
 - Smoke example: `examples/asset_smoke`.
 
 ## Verification Commands
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_roughness_extensions
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_and_specular_texture_maps
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_quoted_material_texture_paths
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_transmission_and_ior_texture_maps
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: roughness, ambient/specular, quoted specular, and transmission/IOR texture-map regressions now preserve the expected `Non-Color` texture color-space metadata through generated material text, sidecars, bundle manifests, and runtime `Material` loads; full database passed 235 tests; full engine_asset passed cleanly under quiet mode; no-default-features check passed; whitespace check passed.
 
 Passed:
 
