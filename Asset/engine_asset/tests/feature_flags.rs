@@ -86,6 +86,12 @@ fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
             "asset async_loading feature is disabled"
         ))
     );
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].feature, AssetFeature::AsyncLoading);
+    assert!(matches!(
+        &report.diagnostics[0].error,
+        Some(AssetError::Unsupported(message)) if *message == AssetFeature::AsyncLoading.unsupported_message()
+    ));
 }
 
 #[cfg(feature = "async_loading")]
@@ -148,6 +154,12 @@ fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
             "asset parallel feature is disabled"
         ))
     );
+    assert_eq!(report.diagnostics.len(), 1);
+    assert_eq!(report.diagnostics[0].feature, AssetFeature::Parallel);
+    assert!(matches!(
+        &report.diagnostics[0].error,
+        Some(AssetError::Unsupported(message)) if *message == AssetFeature::Parallel.unsupported_message()
+    ));
 }
 
 #[cfg(feature = "parallel")]
