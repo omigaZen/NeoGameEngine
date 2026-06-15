@@ -87,8 +87,11 @@ fn enabled_async_loading_config_reports_worker_execution_mode() {
     let report = server.loading_policy_report();
     assert!(report.async_loading_feature.enabled);
     assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
+    assert_eq!(report.requested_async_loading, true);
+    assert_eq!(report.effective_worker_threads, 1);
+    assert!(report.diagnostics.is_empty());
     assert!(report.first_error().is_none());
-    assert!(server.validate_loading_policy().is_ok());
+    assert_eq!(server.validate_loading_policy(), Ok(()));
 }
 
 #[cfg(not(feature = "parallel"))]
