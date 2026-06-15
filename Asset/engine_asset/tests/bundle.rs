@@ -2092,6 +2092,17 @@ fn asset_server_rejects_packages_for_runtime_version_too_old() {
             if message.contains("base_runtime_gate") && message.contains("requires runtime package version 2, current runtime is 1")
     ));
     assert!(server.asset_package_registry().packages().is_empty());
+
+    let upgraded_policy = AssetPackageUpdatePolicy::new(2);
+    let activation = server
+        .activate_asset_package_registry(
+            AssetPackageRegistry::new(vec![gated]).unwrap(),
+            upgraded_policy,
+        )
+        .unwrap();
+    assert!(activation.report.is_compatible());
+    assert_eq!(activation.mounted_bundles.len(), 1);
+    assert_eq!(server.asset_package_registry().packages().len(), 1);
 }
 
 #[test]

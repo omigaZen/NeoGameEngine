@@ -1741,6 +1741,14 @@ Result: the bundle suite stays green with 28 tests, including the new runtime-ve
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_server_rejects_packages_for_runtime_version_too_old
+```
+
+Result: the runtime-version gate regression now exercises both sides of the policy: runtime version `1` rejects the gated package, while `AssetPackageUpdatePolicy::new(2)` accepts and mounts the same package. This proves the compatibility check is policy-driven rather than hardcoded to the default runtime version.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
 C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
