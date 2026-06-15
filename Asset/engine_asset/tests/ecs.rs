@@ -776,6 +776,46 @@ fn typed_host_instantiation_materialization_error_does_not_spawn_or_mark_loaded(
 }
 
 #[test]
+fn scene_typed_host_instantiation_reports_missing_parent_without_marking_loaded() {
+    let scene_id = AssetId::new();
+    let scene_handle = Handle::<SceneAsset>::strong(scene_id);
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.register_asset_type::<SceneAsset>();
+    server.storage_mut::<SceneAsset>().unwrap().insert(
+        scene_id,
+        SceneAsset {
+            name: "level".to_owned(),
+            entities: vec![SerializedEntity {
+                name: Some("Orphan".to_owned()),
+                parent: Some(99),
+                components: Vec::new(),
+            }],
+            dependencies: Vec::new(),
+        },
+    );
+
+    let mut component = SceneInstanceComponent {
+        scene: scene_handle,
+        loaded: false,
+    };
+    let mut host = RecordingTypedHostInstantiationSink::with_first_entity(60);
+    let error = component
+        .instantiate_typed_host(&mut server, &mut host)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TypedHostInstantiationError::MissingParent {
+            entity_index: 0,
+            parent_index: 99,
+        }
+    );
+    assert!(!component.loaded);
+    assert!(host.spawns.is_empty());
+    assert!(host.attachments.is_empty());
+}
+
+#[test]
 fn scene_host_instantiation_reports_missing_parent_without_marking_loaded() {
     let scene_id = AssetId::new();
     let scene_handle = Handle::<SceneAsset>::strong(scene_id);
@@ -805,6 +845,56 @@ fn scene_host_instantiation_reports_missing_parent_without_marking_loaded() {
         error,
         HostInstantiationError::MissingParent {
             entity_index: 0,
+            parent_index: 99,
+        }
+    );
+    assert!(!component.loaded);
+    assert!(host.spawns.is_empty());
+    assert!(host.attachments.is_empty());
+}
+
+#[test]
+fn prefab_typed_host_instantiation_reports_missing_parent_without_marking_loaded() {
+    let prefab_id = AssetId::new();
+    let prefab_handle = Handle::<Prefab>::strong(prefab_id);
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.register_asset_type::<Prefab>();
+    server.storage_mut::<Prefab>().unwrap().insert(
+        prefab_id,
+        Prefab {
+            root: SerializedEntity {
+                name: Some("Hero".to_owned()),
+                parent: None,
+                components: vec![SerializedComponent {
+                    type_name: "Transform".to_owned(),
+                    data: b"translation=0,0,0".to_vec(),
+                }],
+            },
+            children: vec![SerializedEntity {
+                name: Some("Weapon".to_owned()),
+                parent: Some(99),
+                components: vec![SerializedComponent {
+                    type_name: "MeshRenderer".to_owned(),
+                    data: b"mesh=meshes/weapon.mesh;material=materials/weapon.material".to_vec(),
+                }],
+            }],
+            dependencies: Vec::new(),
+        },
+    );
+
+    let mut component = PrefabInstanceComponent {
+        prefab: prefab_handle,
+        loaded: false,
+    };
+    let mut host = RecordingTypedHostInstantiationSink::with_first_entity(70);
+    let error = component
+        .instantiate_typed_host(&mut server, &mut host)
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        TypedHostInstantiationError::MissingParent {
+            entity_index: 1,
             parent_index: 99,
         }
     );
