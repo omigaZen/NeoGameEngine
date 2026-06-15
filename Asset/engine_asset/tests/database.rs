@@ -1255,6 +1255,34 @@ fn database_dependency_report_saves_text_dot_json_and_html_exports() {
         database.scoped_dependency_report_html(AssetId::from_u128(0xfeed_cafe)),
         Err(AssetError::AssetNotFound { .. })
     ));
+    assert!(matches!(
+        database.save_scoped_dependency_report_text(
+            AssetId::from_u128(0xfeed_cafe),
+            config.imported_root.join("missing_scope.txt")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        database.save_scoped_dependency_report_dot(
+            AssetId::from_u128(0xfeed_cafe),
+            config.imported_root.join("missing_scope.dot")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        database.save_scoped_dependency_report_json(
+            AssetId::from_u128(0xfeed_cafe),
+            config.imported_root.join("missing_scope.json")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        database.save_scoped_dependency_report_html(
+            AssetId::from_u128(0xfeed_cafe),
+            config.imported_root.join("missing_scope.html")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
 }
 
 #[derive(Clone)]

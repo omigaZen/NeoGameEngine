@@ -272,6 +272,34 @@ fn scoped_dependency_report_exports_root_subgraph_and_missing_root_errors() {
         server.scoped_dependency_report_html(AssetId::from_u128(0xdead_beef)),
         Err(AssetError::AssetNotFound { .. })
     ));
+    assert!(matches!(
+        server.save_scoped_dependency_report_text(
+            AssetId::from_u128(0xdead_beef),
+            std::env::temp_dir().join("missing_scoped_dependency.txt")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        server.save_scoped_dependency_report_dot(
+            AssetId::from_u128(0xdead_beef),
+            std::env::temp_dir().join("missing_scoped_dependency.dot")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        server.save_scoped_dependency_report_json(
+            AssetId::from_u128(0xdead_beef),
+            std::env::temp_dir().join("missing_scoped_dependency.json")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
+    assert!(matches!(
+        server.save_scoped_dependency_report_html(
+            AssetId::from_u128(0xdead_beef),
+            std::env::temp_dir().join("missing_scoped_dependency.html")
+        ),
+        Err(AssetError::AssetNotFound { .. })
+    ));
 }
 
 #[derive(Clone, Debug)]
