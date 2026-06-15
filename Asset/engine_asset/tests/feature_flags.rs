@@ -137,7 +137,9 @@ fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
     assert!(report.parallel_feature.enabled);
     assert_eq!(report.requested_worker_threads, 4);
     assert_eq!(report.effective_worker_threads, 0);
+    assert!(report.diagnostics.is_empty());
     assert!(report.first_error().is_none());
+    assert_eq!(report.require_supported(), Ok(()));
     assert_eq!(report.mode, AssetLoadingExecutionMode::Synchronous);
 }
 
@@ -149,10 +151,13 @@ fn enabled_async_parallel_config_reports_effective_worker_count() {
     server.set_parallel_worker_threads(4).unwrap();
 
     let report = server.loading_policy_report();
+    assert!(report.parallel_feature.enabled);
     assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
     assert_eq!(report.requested_worker_threads, 4);
     assert_eq!(report.effective_worker_threads, 4);
+    assert!(report.diagnostics.is_empty());
     assert!(report.first_error().is_none());
+    assert_eq!(report.require_supported(), Ok(()));
 }
 
 #[test]
