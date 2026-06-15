@@ -1722,6 +1722,7 @@ fn database_material_cooker_canonicalizes_runtime_source_bytes() {
 
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(output.metadata, metadata);
 }
 
 #[test]
@@ -1787,8 +1788,10 @@ fn database_scene_and_prefab_cookers_pass_through_runtime_bytes() {
 
     assert_eq!(scene_output.bytes, scene_source);
     assert_eq!(scene_output.version_hash, VersionHash(1));
+    assert_eq!(scene_output.metadata, scene_metadata);
     assert_eq!(prefab_output.bytes, prefab_source);
     assert_eq!(prefab_output.version_hash, VersionHash(1));
+    assert_eq!(prefab_output.metadata, prefab_metadata);
 }
 
 #[test]
