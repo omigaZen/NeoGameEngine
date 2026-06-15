@@ -590,8 +590,12 @@ fn bundle_feature_entry_points_match_gate() {
     let database = AssetDatabase::new(database_config("disabled_bundle_build"));
     let bundle_build = AssetDatabaseBundleBuild::new("empty", Vec::new());
     let bundle_registry_path = database_config("disabled_bundle_registry").registry_path;
+    let status = asset_feature_status(AssetFeature::Bundle);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Bundle));
+    assert_eq!(status.name, "bundle");
 
     if asset_feature_enabled(AssetFeature::Bundle) {
+        assert_eq!(require_asset_feature(AssetFeature::Bundle), Ok(()));
         assert!(matches!(
             server.mount_bundle_bytes(b"not a bundle"),
             Err(AssetError::Bundle { .. })
@@ -603,6 +607,10 @@ fn bundle_feature_entry_points_match_gate() {
         assert_eq!(reader.manifest().name, "empty");
         assert!(reader.manifest().entries.is_empty());
     } else {
+        assert_eq!(
+            require_asset_feature(AssetFeature::Bundle),
+            Err(AssetError::Unsupported("asset bundle feature is disabled"))
+        );
         assert_eq!(
             server.mount_bundle_bytes(b"not a bundle"),
             Err(AssetError::Unsupported("asset bundle feature is disabled"))
