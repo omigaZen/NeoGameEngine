@@ -21398,6 +21398,11 @@ fn database_shader_importer_preserves_glsl_source_language() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22915,7 +22920,17 @@ fn database_font_importer_preserves_binary_font_bytes() {
         .cook_asset(opentype_id, TargetPlatform::Windows)
         .unwrap();
     assert_eq!(truetype_output.bytes, truetype_bytes);
+    assert_eq!(truetype_output.version_hash, VersionHash(2));
+    assert_eq!(
+        truetype_output.metadata,
+        database.registry().get(truetype_id).unwrap().clone()
+    );
     assert_eq!(opentype_output.bytes, opentype_bytes);
+    assert_eq!(opentype_output.version_hash, VersionHash(2));
+    assert_eq!(
+        opentype_output.metadata,
+        database.registry().get(opentype_id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(truetype_path.path())).unwrap(),
         truetype_bytes
@@ -23061,6 +23076,11 @@ fn database_physics_mesh_importer_canonicalizes_source_to_runtime_bytes() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(1));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
