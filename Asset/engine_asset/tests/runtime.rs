@@ -2392,6 +2392,14 @@ fn material_load_waits_for_shader_and_texture_dependencies() {
 
     finish_all_uploads(&mut server);
     assert_eq!(server.state(&material), AssetLoadState::UploadingGpu);
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].kind, GpuUploadKind::Material);
+    assert_eq!(uploads[0].metadata, GpuUploadMetadata::None);
+    server.finish_gpu_uploads(vec![GpuUploadResult::ok(
+        material.id(),
+        GpuResourceHandle(8),
+    )]);
     finish_all_uploads(&mut server);
 
     assert!(server.is_ready_with_dependencies(&material));

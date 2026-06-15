@@ -2322,7 +2322,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
 ```
 
-Result: `examples/asset_smoke` now exercises the same material texture-transform and boost metadata end to end. The editor smoke path loads a material with `texture.albedo.boost=1.25` and `texture.albedo.transform.offset/scale/turbulence`, then asserts those values survive to the runtime-loaded `Material` while the existing mesh/audio/physics/scene/prefab smoke checks continue to pass, and the shared GPU upload bridge now also pins `GpuUploadMetadata::None` for texture and shader uploads.
+Result: `examples/asset_smoke` now exercises the same material texture-transform and boost metadata end to end. The editor smoke path loads a material with `texture.albedo.boost=1.25` and `texture.albedo.transform.offset/scale/turbulence`, then asserts those values survive to the runtime-loaded `Material` while the existing mesh/audio/physics/scene/prefab smoke checks continue to pass, and the shared GPU upload bridge now also pins `GpuUploadMetadata::None` for texture, shader, and material uploads.
 
 Passed:
 
