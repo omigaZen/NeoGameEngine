@@ -2068,3 +2068,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload hot_relo
 ```
 
 Result: async hot reload notifications that were already queued are explicitly dropped when the watch is removed before polling, and the drop is surfaced in the poll report.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime scene_component_asset_fields_deduplicate_repeated_dependency_targets
+```
+
+Result: scene runtime dependency registration deduplicates repeated asset references in the same component payload, so a duplicated mesh/material reference only contributes one dependency edge per unique target.

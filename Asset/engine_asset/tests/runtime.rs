@@ -2523,6 +2523,47 @@ fn scene_component_asset_fields_register_runtime_dependencies() {
 }
 
 #[test]
+fn scene_component_asset_fields_deduplicate_repeated_dependency_targets() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/tri.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert(
+        "scenes/dedup.scene",
+        b"NGA_SCENE_V1\nname=level\nentity=Hero\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material;mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let scene: Handle<SceneAsset> = server.load("scenes/dedup.scene");
+    server.update_loading();
+
+    assert_eq!(server.state(&scene), AssetLoadState::WaitingForDependencies);
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/tri.mesh"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(scene.id()),
+        &[mesh_id, material_id]
+    );
+
+    finish_all_uploads(&mut server);
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready_with_dependencies(&scene));
+    let loaded = server.get(&scene).unwrap();
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![mesh_id, material_id]);
+}
+
+#[test]
 fn prefab_load_waits_for_dependency_paths_and_exposes_handles() {
     let mut io = MemoryAssetIo::new();
     io.insert("meshes/tri.mesh", mesh_bytes());
@@ -2580,6 +2621,50 @@ fn prefab_load_waits_for_dependency_paths_and_exposes_handles() {
             && dependency.asset_type() == Material::TYPE_ID
             && dependency.strength() == HandleStrength::Weak
     }));
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![mesh_id, material_id]);
+}
+
+#[test]
+fn prefab_component_asset_fields_deduplicate_repeated_dependency_targets() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/tri.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert(
+        "prefabs/dedup.prefab",
+        b"NGA_PREFAB_V1\nroot=Hero\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material;mesh=meshes/tri.mesh;material=materials/hero.material\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let prefab: Handle<Prefab> = server.load("prefabs/dedup.prefab");
+    server.update_loading();
+
+    assert_eq!(
+        server.state(&prefab),
+        AssetLoadState::WaitingForDependencies
+    );
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/tri.mesh"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(prefab.id()),
+        &[mesh_id, material_id]
+    );
+
+    finish_all_uploads(&mut server);
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready_with_dependencies(&prefab));
+    let loaded = server.get(&prefab).unwrap();
     let mut visited = Vec::new();
     loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
     assert_eq!(visited, vec![mesh_id, material_id]);
