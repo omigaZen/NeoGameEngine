@@ -1080,6 +1080,14 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         AssetPackageRegistry::from_text(&malformed_dependency_text),
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package dependency field")
     ));
+    let invalid_bundle_id_text =
+        dependency_registry
+            .to_text()
+            .replacen("package|1|", "package|abc|", 1);
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_bundle_id_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package bundle id")
+    ));
     let missing_package_line_text = dependency_registry
         .to_text()
         .replace("packages=1", "packages=2");
