@@ -2076,3 +2076,16 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime scene_compo
 ```
 
 Result: scene runtime dependency registration deduplicates repeated asset references in the same component payload, so a duplicated mesh/material reference only contributes one dependency edge per unique target.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_reflection_sphere_projection
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_texture_projection
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 217 tests, the default engine_asset suite passes 451 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
