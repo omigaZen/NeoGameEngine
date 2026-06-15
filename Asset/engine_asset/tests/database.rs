@@ -21715,6 +21715,11 @@ fn database_builtin_audio_import_cook_and_runtime_load_preserves_payload() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -21765,6 +21770,11 @@ fn database_builtin_wav_audio_import_cook_and_runtime_load_preserves_payload() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
