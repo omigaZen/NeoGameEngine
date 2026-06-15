@@ -1812,3 +1812,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: the streaming region API now has an explicit missing-region regression for `add_asset_to_streaming_region()`. Calling it with an unknown `StreamingRegionId` returns the expected `AddressNotFound` error instead of silently creating state or mutating a different region.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_remove_asset_reports_missing_region
+```
+
+Result: `remove_streaming_region_asset()` now has the same missing-region regression coverage. An unknown `StreamingRegionId` returns the expected `AddressNotFound` error before any asset-removal bookkeeping runs.
