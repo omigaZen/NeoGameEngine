@@ -1608,6 +1608,103 @@ fn database_material_importer_canonicalizes_source_and_runtime_loads_it() {
 }
 
 #[test]
+fn database_material_importer_preserves_texture_metadata_round_trip() {
+    let config = database_config("material_importer_texture_metadata_round_trip");
+    let shader_path = AssetPath::parse("shaders/pbr.wgsl");
+    let albedo_path = AssetPath::parse("textures/albedo.texture");
+    let normal_path = AssetPath::parse("textures/normal.texture");
+    let material_path = AssetPath::parse("materials/textured.material");
+    let source = b"# authoring comment\n name = hero \n\n shader = shaders/pbr.wgsl \n texture.albedo = textures/albedo.texture \n texture.albedo.source_channel = alpha \n texture.albedo.boost = 1.5 \n texture.albedo.color_correction = true \n texture.albedo.color_space = linear \n texture.normal = textures/normal.texture \n texture.normal.source_channel = red \n texture.normal.bump_scale = 0.3 \n texture.normal.color_space = non_color \n base_color = 1, 0.5, 0.25, 1 \n roughness = 0.7 \n"
+        .to_vec();
+    let canonical = b"name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\ntexture.albedo.source_channel=alpha\ntexture.albedo.boost=1.5\ntexture.albedo.color_correction=true\ntexture.albedo.color_space=linear\ntexture.normal=textures/normal.texture\ntexture.normal.source_channel=red\ntexture.normal.bump_scale=0.3\ntexture.normal.color_space=non_color\nbase_color=1, 0.5, 0.25, 1\nroughness=0.7\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(shader_path.path(), shader_bytes());
+    io.insert(albedo_path.path(), texture_bytes(1, 1, 61));
+    io.insert(normal_path.path(), texture_bytes(1, 1, 62));
+    io.insert(material_path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let shader_id = database.import_asset_path(&shader_path).unwrap();
+    let albedo_id = database.import_asset_path(&albedo_path).unwrap();
+    let normal_id = database.import_asset_path(&normal_path).unwrap();
+    let material_id = database.import_asset_path(&material_path).unwrap();
+    let metadata = database.registry().get(material_id).unwrap();
+    assert_eq!(metadata.importer.as_deref(), Some("MaterialImporter"));
+    assert_eq!(metadata.importer_version, 5);
+    assert_eq!(metadata.dependencies, vec![shader_id, albedo_id, normal_id]);
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        canonical
+    );
+
+    let output = database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(shader_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(albedo_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(normal_id, TargetPlatform::Windows)
+        .unwrap();
+    assert_eq!(output.bytes, canonical);
+    assert_eq!(
+        fs::read(config.cooked_root.join(material_path.path())).unwrap(),
+        canonical
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let shader: Handle<Shader> = server.load(shader_path);
+    let albedo: Handle<Texture> = server.load(albedo_path);
+    let normal: Handle<Texture> = server.load(normal_path);
+    let material: Handle<Material> = server.load(material_path);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.is_ready(&material) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready(&shader));
+    assert!(server.is_ready(&albedo));
+    assert!(server.is_ready(&normal));
+    assert!(server.is_ready_with_dependencies(&material));
+    let loaded = server.get(&material).unwrap();
+    assert_eq!(loaded.name.as_deref(), Some("hero"));
+    assert_eq!(
+        loaded.textures[0].options.source_channel,
+        Some(MaterialTextureChannel::Alpha)
+    );
+    assert_eq!(loaded.textures[0].options.boost, Some(1.5));
+    assert_eq!(loaded.textures[0].options.color_correction, Some(true));
+    assert_eq!(
+        loaded.textures[0].options.color_space,
+        Some(MaterialTextureColorSpace::Linear)
+    );
+    assert_eq!(
+        loaded.textures[1].options.source_channel,
+        Some(MaterialTextureChannel::Red)
+    );
+    assert_eq!(loaded.textures[1].options.bump_scale, Some(0.3));
+    assert_eq!(
+        loaded.textures[1].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
+    );
+    assert_eq!(loaded.properties.base_color, [1.0, 0.5, 0.25, 1.0]);
+    assert_eq!(loaded.properties.roughness, 0.7);
+}
+
+#[test]
 fn database_material_cooker_canonicalizes_runtime_source_bytes() {
     let material_path = AssetPath::parse("materials/cooked.material");
     let source = b"# comment\n name = hero \n shader = shaders/pbr.wgsl \n texture.albedo = textures/albedo.texture \n base_color = 1, 0.5, 0.25, 1 \n roughness = 0.7 \n".to_vec();
