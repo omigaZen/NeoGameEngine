@@ -9797,7 +9797,7 @@ f 1 2 3\n"
         .into_bytes();
         let material_source = if directive == "map_transmittance_color" {
             format!(
-                "newmtl Extensions\n{directive} -imfchan green -colorspace Non-Color textures/{stem}.texture\n"
+                "newmtl Extensions\n{directive} -imfchan alpha -colorspace Non-Color textures/{stem}.texture\n"
             )
             .into_bytes()
         } else {
@@ -9806,14 +9806,26 @@ f 1 2 3\n"
             )
             .into_bytes()
         };
-        let expected_material = format!(
-            "# mtllib {material_library}\n\
+        let expected_material = if directive == "map_transmittance_color" {
+            format!(
+                "# mtllib {material_library}\n\
+name=Extensions\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=alpha\n\
+texture.{channel}.color_space=non_color\n\
+"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "# mtllib {material_library}\n\
 name=Extensions\n\
 texture.{channel}=models/textures/{stem}.texture\n\
 texture.{channel}.color_space=non_color\n\
 "
-        )
-        .into_bytes();
+            )
+            .into_bytes()
+        };
         let texture_source = texture_bytes(1, 1, texel);
         let mut io = MemoryAssetIo::new();
         io.insert(model_path.path(), model_source);
@@ -10030,6 +10042,12 @@ texture.{channel}.color_space=non_color\n"
             material.textures[0].options.color_space,
             Some(MaterialTextureColorSpace::NonColor)
         );
+        if directive == "map_transmittance_color" {
+            assert_eq!(
+                material.textures[0].options.source_channel,
+                Some(MaterialTextureChannel::Alpha)
+            );
+        }
     }
 }
 
