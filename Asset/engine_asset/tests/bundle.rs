@@ -1033,6 +1033,12 @@ fn asset_package_registry_persists_order_enabled_state_and_reports_conflicts() {
     assert_eq!(bytes, mod_albedo);
     assert_eq!(resolution.layer.name, "mod_hires");
     assert_eq!(resolution.layer.kind, AssetIoLayerKind::Mod);
+    let (metadata, resolution) = composite
+        .metadata_with_diagnostics("textures/albedo.texture")
+        .unwrap();
+    assert_eq!(metadata.size, mod_albedo.len() as u64);
+    assert_eq!(resolution.layer.name, "mod_hires");
+    assert_eq!(resolution.layer.kind, AssetIoLayerKind::Mod);
     assert_eq!(
         composite
             .read_with_diagnostics("textures/mod_only.texture")
