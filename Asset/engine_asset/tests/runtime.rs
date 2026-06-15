@@ -1079,6 +1079,7 @@ fn invalid_shader_stage_label_fails_with_decode_error() {
 #[test]
 fn mesh_load_reaches_ready_after_renderer_upload_handoff() {
     let io = MemoryAssetIo::new().with_file("meshes/tri.mesh", mesh_bytes());
+    let mesh_source_hash = io_source_hash(&io, "meshes/tri.mesh");
     let mut server = server_with_io(io);
 
     let mesh: Handle<Mesh> = server.load("meshes/tri.mesh");
@@ -1131,6 +1132,10 @@ fn mesh_load_reaches_ready_after_renderer_upload_handoff() {
     assert_eq!(loaded.vertex_buffer.layout.stride, 12);
     assert_eq!(loaded.vertex_buffer.bytes.len(), 36);
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(12)));
+    assert_eq!(
+        server.metadata(mesh.id()).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -1158,6 +1163,7 @@ i 0 1 2
 "
     .to_vec();
     let io = MemoryAssetIo::new().with_file("meshes/skinned.mesh", source);
+    let mesh_source_hash = io_source_hash(&io, "meshes/skinned.mesh");
     let mut server = server_with_io(io);
 
     let mesh: Handle<Mesh> = server.load("meshes/skinned.mesh");
@@ -1230,11 +1236,16 @@ i 0 1 2
         loaded.vertex_buffer.bytes.len(),
         metadata.vertex_buffer_bytes as usize
     );
+    assert_eq!(
+        server.metadata(mesh.id()).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
 }
 
 #[test]
 fn binary_mesh_load_reaches_ready_with_layout_metadata() {
     let io = MemoryAssetIo::new().with_file("meshes/binary.mesh", binary_mesh_bytes());
+    let mesh_source_hash = io_source_hash(&io, "meshes/binary.mesh");
     let mut server = server_with_io(io);
 
     let mesh: Handle<Mesh> = server.load("meshes/binary.mesh");
@@ -1308,11 +1319,16 @@ fn binary_mesh_load_reaches_ready_with_layout_metadata() {
     assert_eq!(loaded.indices, vec![0, 1, 2]);
     assert_eq!(loaded.vertex_buffer.layout, metadata.layout);
     assert_eq!(loaded.gpu, Some(GpuResourceHandle(14)));
+    assert_eq!(
+        server.metadata(mesh.id()).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
 }
 
 #[test]
 fn binary_u16_mesh_load_uploads_uint16_indices() {
     let io = MemoryAssetIo::new().with_file("meshes/binary_u16.mesh", binary_u16_mesh_bytes());
+    let mesh_source_hash = io_source_hash(&io, "meshes/binary_u16.mesh");
     let mut server = server_with_io(io);
 
     let mesh: Handle<Mesh> = server.load("meshes/binary_u16.mesh");
@@ -1338,6 +1354,10 @@ fn binary_u16_mesh_load_uploads_uint16_indices() {
     assert_eq!(loaded.indices, vec![0, 1, 2]);
     assert_eq!(loaded.index_format, MeshIndexFormat::Uint16);
     assert_eq!(loaded.gpu_bytes(), 42);
+    assert_eq!(
+        server.metadata(mesh.id()).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
 }
 
 #[test]
@@ -2128,6 +2148,7 @@ fn invalid_ogg_audio_codec_fails_with_decode_error() {
 #[test]
 fn skeleton_load_reaches_ready_without_renderer_upload() {
     let io = MemoryAssetIo::new().with_file("skeletons/hero.skeleton", skeleton_bytes());
+    let skeleton_source_hash = io_source_hash(&io, "skeletons/hero.skeleton");
     let mut server = server_with_io(io);
 
     let skeleton: Handle<Skeleton> = server.load("skeletons/hero.skeleton");
@@ -2143,6 +2164,10 @@ fn skeleton_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.bones[1].parent, Some(0));
     assert_eq!(loaded.inverse_bind_poses.len(), 2);
     assert_eq!(loaded.inverse_bind_poses[0][0][0], 1.0);
+    assert_eq!(
+        server.metadata(skeleton.id()).unwrap().source_hash,
+        Some(skeleton_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -2153,6 +2178,7 @@ fn skeleton_load_reaches_ready_without_renderer_upload() {
 fn skeleton_load_preserves_explicit_bind_pose_matrices() {
     let source = b"NGA_SKELETON_V1\nbone=Root;bind=1,0,0,2,0,1,0,3,0,0,1,4,0,0,0,1;inverse_bind=1,0,0,-2,0,1,0,-3,0,0,1,-4,0,0,0,1\n".to_vec();
     let io = MemoryAssetIo::new().with_file("skeletons/bind_pose.skeleton", source);
+    let skeleton_source_hash = io_source_hash(&io, "skeletons/bind_pose.skeleton");
     let mut server = server_with_io(io);
 
     let skeleton: Handle<Skeleton> = server.load("skeletons/bind_pose.skeleton");
@@ -2166,6 +2192,10 @@ fn skeleton_load_preserves_explicit_bind_pose_matrices() {
     assert_eq!(loaded.inverse_bind_poses[0][0][3], -2.0);
     assert_eq!(loaded.inverse_bind_poses[0][1][3], -3.0);
     assert_eq!(loaded.inverse_bind_poses[0][2][3], -4.0);
+    assert_eq!(
+        server.metadata(skeleton.id()).unwrap().source_hash,
+        Some(skeleton_source_hash)
+    );
 }
 
 #[test]
@@ -2195,6 +2225,7 @@ fn invalid_skeleton_payload_fails_with_decode_error_and_event() {
 #[test]
 fn animation_load_reaches_ready_without_renderer_upload() {
     let io = MemoryAssetIo::new().with_file("animations/idle.animation", animation_bytes());
+    let animation_source_hash = io_source_hash(&io, "animations/idle.animation");
     let mut server = server_with_io(io);
 
     let animation: Handle<AnimationClip> = server.load("animations/idle.animation");
@@ -2213,6 +2244,10 @@ fn animation_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.tracks[0].translations[0].value, [0.0, 0.0, 0.0]);
     assert_eq!(loaded.tracks[0].rotations[0].value, [0.0, 0.0, 0.0, 1.0]);
     assert_eq!(loaded.tracks[0].scales[0].value, [1.0, 1.0, 1.0]);
+    assert_eq!(
+        server.metadata(animation.id()).unwrap().source_hash,
+        Some(animation_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -2258,6 +2293,7 @@ fn invalid_animation_track_shape_fails_with_decode_error_and_event() {
 #[test]
 fn font_load_reaches_ready_without_renderer_upload() {
     let io = MemoryAssetIo::new().with_file("fonts/debug.font", font_bytes());
+    let font_source_hash = io_source_hash(&io, "fonts/debug.font");
     let mut server = server_with_io(io);
 
     let font: Handle<Font> = server.load("fonts/debug.font");
@@ -2274,6 +2310,10 @@ fn font_load_reaches_ready_without_renderer_upload() {
     assert_eq!(bitmap.glyphs[0].codepoint, 'A');
     assert_eq!((bitmap.glyphs[0].width, bitmap.glyphs[0].height), (2, 1));
     assert_eq!(bitmap.glyphs[0].bitmap, vec![0, 255]);
+    assert_eq!(
+        server.metadata(font.id()).unwrap().source_hash,
+        Some(font_source_hash)
+    );
     assert!(server
         .events()
         .iter()
@@ -2294,6 +2334,7 @@ fn binary_font_formats_load_reaches_ready_without_renderer_upload() {
 
     for (path, bytes, family_name, kind) in cases {
         let io = MemoryAssetIo::new().with_file(path, bytes.clone());
+        let font_source_hash = io_source_hash(&io, path);
         let mut server = server_with_io(io);
 
         let font: Handle<Font> = server.load(path);
@@ -2308,6 +2349,10 @@ fn binary_font_formats_load_reaches_ready_without_renderer_upload() {
             (FontData::OpenType(loaded_bytes), "opentype") => assert_eq!(loaded_bytes, &bytes),
             _ => panic!("{path} loaded wrong font data variant"),
         }
+        assert_eq!(
+            server.metadata(font.id()).unwrap().source_hash,
+            Some(font_source_hash)
+        );
         assert!(server
             .events()
             .iter()
@@ -2346,6 +2391,7 @@ fn invalid_binary_font_payload_fails_with_decode_error_and_event() {
 #[test]
 fn physics_mesh_load_reaches_ready_without_renderer_upload() {
     let io = MemoryAssetIo::new().with_file("physics/hero.physics", physics_mesh_bytes());
+    let physics_source_hash = io_source_hash(&io, "physics/hero.physics");
     let mut server = server_with_io(io);
 
     let mesh: Handle<PhysicsMesh> = server.load("physics/hero.physics");
@@ -2357,6 +2403,10 @@ fn physics_mesh_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.kind, PhysicsMeshKind::TriMesh);
     assert_eq!(loaded.vertices.len(), 3);
     assert_eq!(loaded.indices, vec![[0, 1, 2]]);
+    assert_eq!(
+        server.metadata(mesh.id()).unwrap().source_hash,
+        Some(physics_source_hash)
+    );
     assert!(server
         .events()
         .iter()

@@ -2420,7 +2420,7 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime scene_load_
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test runtime prefab_load_waits_for_dependency_paths_and_exposes_handles
 ```
 
-Result: direct runtime loads now also pin source-hash metadata on representative texture, shader, audio, material, scene, and prefab paths. The new runtime loader coverage proves that `AssetServer::load` stores the IO metadata hash on ready assets as they move through dependency resolution and GPU handoff, instead of only in hot-reload recovery.
+Result: direct runtime loads now also pin source-hash metadata on representative texture, mesh, skeleton, animation, font, physics, shader, audio, material, scene, and prefab paths. The new runtime loader coverage proves that `AssetServer::load` stores the IO metadata hash on ready assets as they move through dependency resolution and GPU handoff, instead of only in hot-reload recovery.
 
 Passed:
 
