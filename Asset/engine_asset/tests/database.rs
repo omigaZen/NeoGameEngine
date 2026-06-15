@@ -12760,6 +12760,12 @@ fn database_model_importer_maps_obj_specular_and_ambient_color_texture_aliases()
             "occlusion",
             109,
         ),
+        (
+            "map_transmission_color",
+            "transmission_color_direct_alias",
+            "transmission_filter",
+            110,
+        ),
     ] {
         let config = database_config(&format!("builtin_model_obj_{stem}"));
         let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
@@ -12782,9 +12788,14 @@ f 1 2 3\n"
                 "newmtl Alias\n{directive} -imfchan blue -colorspace Non-Color textures/{stem}.texture\n"
             )
             .into_bytes()
-        } else {
+        } else if directive == "map_ambient_color" {
             format!(
                 "newmtl Alias\n{directive} -imfchan red -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "newmtl Alias\n{directive} -imfchan alpha -colorspace Non-Color textures/{stem}.texture\n"
             )
             .into_bytes()
         };
@@ -12797,12 +12808,21 @@ texture.{channel}.source_channel=blue\n\
 texture.{channel}.color_space=non_color\n"
             )
             .into_bytes()
-        } else {
+        } else if directive == "map_ambient_color" {
             format!(
                 "# mtllib {material_library}\n\
 name=Alias\n\
 texture.{channel}=models/textures/{stem}.texture\n\
 texture.{channel}.source_channel=red\n\
+texture.{channel}.color_space=non_color\n"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "# mtllib {material_library}\n\
+name=Alias\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=alpha\n\
 texture.{channel}.color_space=non_color\n"
             )
             .into_bytes()
@@ -12891,8 +12911,10 @@ texture.{channel}.color_space=non_color\n"
             material.textures[0].options.source_channel,
             Some(if directive == "map_specular_color" {
                 MaterialTextureChannel::Blue
-            } else {
+            } else if directive == "map_ambient_color" {
                 MaterialTextureChannel::Red
+            } else {
+                MaterialTextureChannel::Alpha
             })
         );
     }
