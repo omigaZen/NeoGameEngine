@@ -9785,10 +9785,17 @@ usemtl Extensions\n\
 f 1 2 3\n"
         )
         .into_bytes();
-        let material_source = format!(
-            "newmtl Extensions\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
-        )
-        .into_bytes();
+        let material_source = if directive == "map_transmittance_color" {
+            format!(
+                "newmtl Extensions\n{directive} -imfchan green -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "newmtl Extensions\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        };
         let expected_material = format!(
             "# mtllib {material_library}\n\
 name=Extensions\n\
@@ -9877,6 +9884,12 @@ texture.{channel}.color_space=non_color\n\
             material.textures[0].options.color_space,
             Some(MaterialTextureColorSpace::NonColor)
         );
+        if directive == "map_transmittance_color" {
+            assert_eq!(
+                material.textures[0].options.source_channel,
+                Some(MaterialTextureChannel::Green)
+            );
+        }
     }
 }
 
