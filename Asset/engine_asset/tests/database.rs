@@ -21698,20 +21698,39 @@ fn database_mesh_cooker_uses_u16_indices_for_mobile_and_web_targets() {
     database.register_builtin_cookers();
 
     let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap().clone();
     let windows_output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     let android_output = database.cook_asset(id, TargetPlatform::Android).unwrap();
     let ios_output = database.cook_asset(id, TargetPlatform::Ios).unwrap();
     let web_output = database.cook_asset(id, TargetPlatform::Web).unwrap();
     let expected_web = simple_u16_index_binary_mesh_bytes();
+    let assert_metadata = |actual: &AssetMetadata| {
+        assert_eq!(actual.id, metadata.id);
+        assert_eq!(actual.path, metadata.path);
+        assert_eq!(actual.asset_type, metadata.asset_type);
+        assert_eq!(actual.source_path, metadata.source_path);
+        assert_eq!(actual.cooked_path, metadata.cooked_path);
+        assert_eq!(actual.importer, metadata.importer);
+        assert_eq!(actual.importer_version, metadata.importer_version);
+        assert_eq!(actual.source_hash, metadata.source_hash);
+        assert_eq!(actual.settings_hash, metadata.settings_hash);
+        assert_eq!(actual.labels, metadata.labels);
+        assert_eq!(actual.dependencies, metadata.dependencies);
+        assert_eq!(actual.importer_settings, metadata.importer_settings);
+    };
 
     assert_eq!(windows_output.bytes, simple_binary_mesh_bytes());
     assert_eq!(windows_output.version_hash, VersionHash(4));
+    assert_metadata(&windows_output.metadata);
     assert_eq!(android_output.bytes, expected_web);
     assert_eq!(android_output.version_hash, VersionHash(4));
+    assert_metadata(&android_output.metadata);
     assert_eq!(ios_output.bytes, expected_web);
     assert_eq!(ios_output.version_hash, VersionHash(4));
+    assert_metadata(&ios_output.metadata);
     assert_eq!(web_output.bytes, expected_web);
     assert_eq!(web_output.version_hash, VersionHash(4));
+    assert_metadata(&web_output.metadata);
     assert_eq!(
         web_output.bytes.len(),
         windows_output.bytes.len() - 3 * std::mem::size_of::<u16>()
