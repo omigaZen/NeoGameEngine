@@ -63,6 +63,34 @@ fn texture_bundle_io(name: &str, files: Vec<(&str, Vec<u8>)>) -> BundleAssetIo {
     BundleAssetIo::from_bytes(&bundle).unwrap()
 }
 
+fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"OggS");
+    bytes.push(0x00);
+    bytes.push(0x00);
+    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.push(1u8);
+    bytes.push(u8::try_from(packet.len()).expect("ogg test packet must be single-segment"));
+    bytes.extend_from_slice(&packet);
+    bytes
+}
+
+fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    let mut packet = Vec::new();
+    packet.push(0x01);
+    packet.extend_from_slice(b"vorbis");
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.push(u8::try_from(channels).unwrap_or(u8::MAX));
+    packet.extend_from_slice(&sample_rate.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    make_ogg_page(packet)
+}
+
 fn texture_package(
     name: &str,
     kind: AssetIoLayerKind,
@@ -1751,6 +1779,77 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
         patch_bundle
     );
     assert_eq!(registry.packages().len(), 2);
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+#[cfg(feature = "zstd")]
+fn asset_package_artifact_store_installs_and_builds_zstd_audio_package_files() {
+    let root = temp_dir("package_artifacts_audio_zstd");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+
+    let audio_bytes = ogg_vorbis_audio_bytes(44_100, 2);
+    let audio_bundle = BundleWriter::build_bytes_with_options(
+        "artifact_audio_zstd",
+        BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
+            BundleChunkPartitionPolicy::MaxUncompressedBytes(1),
+        ),
+        vec![BundleAsset {
+            id: AssetId::new(),
+            asset_type: AssetTypeId::of::<AudioClip>(),
+            path: AssetPath::parse("audio/voice.ogg"),
+            bytes: audio_bytes.clone(),
+            dependencies: Vec::new(),
+        }],
+    )
+    .unwrap();
+
+    let install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(14),
+                "artifact_audio_zstd",
+                AssetIoLayerKind::Patch,
+                0,
+                "patches/artifact_audio_zstd.bundle",
+            ),
+            &audio_bundle,
+        )
+        .unwrap();
+    assert!(install.artifact_path.exists());
+    assert_eq!(install.payload_size, audio_bundle.len() as u64);
+    assert_eq!(install.payload_hash, content_hash(&audio_bundle));
+
+    let composite = store.build_composite_io(&registry).unwrap();
+    let (read_bytes, read_report) = composite
+        .read_with_diagnostics("audio/voice.ogg")
+        .unwrap();
+    assert_eq!(read_bytes, audio_bytes);
+    assert_eq!(read_report.layer.name, "artifact_audio_zstd");
+    assert_eq!(read_report.layer.kind, AssetIoLayerKind::Patch);
+    assert_eq!(
+        composite.metadata("audio/voice.ogg").unwrap().hash,
+        Some(content_hash(&audio_bytes))
+    );
+
+    let registry_path = root.join("audio_packages.txt");
+    registry.save_to_file(&registry_path).unwrap();
+    let loaded_registry = AssetPackageRegistry::load_from_file(&registry_path).unwrap();
+    assert_eq!(loaded_registry, registry);
+    assert_eq!(
+        store.build_composite_io(&loaded_registry).unwrap().read("audio/voice.ogg").unwrap(),
+        audio_bytes
+    );
+
+    let removed = store.remove_package(&mut registry, "artifact_audio_zstd", true).unwrap();
+    assert_eq!(removed.removed.name, "artifact_audio_zstd");
+    assert!(removed.artifact_removed);
+    assert!(!removed.artifact_path.exists());
+    assert!(store.verify_registry(&registry).unwrap().all_available());
 
     let _ = std::fs::remove_dir_all(&root);
 }
