@@ -264,16 +264,22 @@ fn zstd_feature_status_matches_bundle_codec_report() {
 #[test]
 fn filesystem_feature_gate_matches_filesystem_io_behavior() {
     let io = FileSystemAssetIo::new(std::env::temp_dir());
-    assert_eq!(
-        asset_feature_status(AssetFeature::Filesystem).enabled,
-        asset_feature_enabled(AssetFeature::Filesystem)
-    );
+    let status = asset_feature_status(AssetFeature::Filesystem);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Filesystem));
+    assert_eq!(status.name, "filesystem");
 
     if asset_feature_enabled(AssetFeature::Filesystem) {
+        assert_eq!(require_asset_feature(AssetFeature::Filesystem), Ok(()));
         let error = io.read("engine_asset_missing_file.texture").unwrap_err();
         assert!(matches!(error, AssetIoError::NotFound { .. }));
         assert_eq!(error.action(), AssetIoAction::Read);
     } else {
+        assert_eq!(
+            require_asset_feature(AssetFeature::Filesystem),
+            Err(AssetError::Unsupported(
+                "asset filesystem feature is disabled"
+            ))
+        );
         assert!(!io.exists("engine_asset_missing_file.texture"));
         let error = io.read("engine_asset_missing_file.texture").unwrap_err();
         assert!(matches!(error, AssetIoError::ReadFailed { .. }));
