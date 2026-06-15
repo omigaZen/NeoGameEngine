@@ -16517,9 +16517,19 @@ fn database_model_importer_reports_invalid_obj_free_form_attributes() {
             "OBJ hole on line 1 requires complete `<u0> <u1> <curv2>` groups",
         ),
         (
+            "builtin_model_obj_missing_hole_curve_reference",
+            "hole\n",
+            "OBJ hole on line 1 must contain at least 1 curve reference",
+        ),
+        (
             "builtin_model_obj_incomplete_scrv_group",
             "scrv 0 1 1 extra\n",
             "OBJ scrv on line 1 requires complete `<u0> <u1> <curv2>` groups",
+        ),
+        (
+            "builtin_model_obj_missing_scrv_curve_reference",
+            "scrv\n",
+            "OBJ scrv on line 1 must contain at least 1 curve reference",
         ),
         (
             "builtin_model_obj_short_surface",
