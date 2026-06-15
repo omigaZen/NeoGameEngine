@@ -3547,6 +3547,17 @@ fn mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount() {
     assert_eq!(restored, snapshot.bundles());
     assert!(restored_server.mounted_bundle(mounted.id).is_some());
 
+    let missing_path = temp_file("missing_mounted_bundle_registry", "txt");
+    let missing_error = restored_server
+        .load_mounted_bundle_registry(&missing_path)
+        .unwrap_err();
+    assert!(matches!(
+        missing_error,
+        AssetError::Io { message }
+            if message.contains("failed to read") && message.contains(&missing_path.display().to_string())
+    ));
+    assert!(restored_server.mounted_bundle(mounted.id).is_some());
+
     let remounted = restored_server.mounted_bundle(mounted.id).unwrap().clone();
     let group = restored_server.preload_bundle(&remounted);
     let metadata = restored_server.metadata(texture_id).unwrap();

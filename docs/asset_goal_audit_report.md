@@ -2159,6 +2159,14 @@ Result: `AssetServer::save_asset_package_registry()` and `AssetServer::load_asse
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount
+```
+
+Result: `AssetServer::save_mounted_bundle_registry()` and `AssetServer::load_mounted_bundle_registry()` now have a direct wrapper round-trip test. Saving a mounted bundle registry to text and loading it into a fresh server preserves the mounted bundle metadata, and loading a missing registry file returns a visible IO failure without mutating the mounted bundle state.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_bundle_subset_deduplicates_repeated_ids
 ```
 
