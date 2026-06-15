@@ -1820,3 +1820,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: `remove_streaming_region_asset()` now has the same missing-region regression coverage. An unknown `StreamingRegionId` returns the expected `AddressNotFound` error before any asset-removal bookkeeping runs.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_priority_reports_missing_region
+```
+
+Result: `set_streaming_region_priority()` now has explicit missing-region coverage as well. An unknown `StreamingRegionId` returns `AddressNotFound` instead of mutating scheduler state or returning a bogus previous priority.
