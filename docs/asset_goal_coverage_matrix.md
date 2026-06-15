@@ -14,6 +14,8 @@ Status meanings follow `docs/asset_goal.md`: `Implemented` requires reachable pu
 | Missing | 0 | No current coverage-matrix row is classified as missing; remaining repository-implementable gaps are tracked as partial rows. |
 | External Blocked | 0 | No true external blocker identified in this slice. |
 
+Recent evidence: OBJ `shadow_obj` / `trace_obj` now has explicit `off`-state acceptance coverage in the database importer tests, so the render-object branch is no longer only exercised through path-based ignored-payload cases.
+
 ## Runtime Core
 
 | Capability | Status | Evidence | Remaining Work |
