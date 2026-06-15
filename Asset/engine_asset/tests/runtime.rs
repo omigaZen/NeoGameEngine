@@ -820,6 +820,7 @@ fn shader_load_reaches_ready_after_renderer_upload_handoff_and_selects_compute_s
         uploads[0].label.as_deref(),
         Some("shaders/compute.wgsl#compute")
     );
+    assert_eq!(uploads[0].metadata, GpuUploadMetadata::None);
 
     server.finish_gpu_uploads(vec![GpuUploadResult::ok(
         shader.id(),

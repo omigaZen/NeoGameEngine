@@ -214,7 +214,7 @@ C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features --f
 git diff --check
 ```
 
-Result: formatting passed; focused ShaderImporter database coverage passed, including WGSL/GLSL/SPIR-V source-document conversion, ShaderImporter version 3 metadata, visible invalid `stage`/`entry` diagnostics, and WGSL parse-failure assertions with `line X, column Y`; full database passed 154 tests; full engine_asset passed 320 integration tests; shader_importer-only no-default feature check passed; runtime shader upload tests now also explicitly assert `GpuUploadMetadata::None`; whitespace check passed.
+Result: formatting passed; focused ShaderImporter database coverage passed, including WGSL/GLSL/SPIR-V source-document conversion, ShaderImporter version 3 metadata, visible invalid `stage`/`entry` diagnostics, and WGSL parse-failure assertions with `line X, column Y`; full database passed 154 tests; full engine_asset passed 320 integration tests; shader_importer-only no-default feature check passed; runtime shader upload tests now also explicitly assert `GpuUploadMetadata::None` across compute WGSL, compute GLSL, and compute SPIR-V handoff paths; whitespace check passed.
 
 Passed:
 
