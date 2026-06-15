@@ -66,10 +66,7 @@ fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
 
     server.config_mut().enable_async_loading = true;
     let report = server.loading_policy_report();
-    assert_eq!(
-        report.async_loading_feature,
-        status
-    );
+    assert_eq!(report.async_loading_feature, status);
     assert_eq!(
         report.parallel_feature,
         asset_feature_status(AssetFeature::Parallel)
@@ -102,14 +99,14 @@ fn enabled_async_loading_config_reports_worker_execution_mode() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_async_loading_enabled(true).unwrap();
     let status = asset_feature_status(AssetFeature::AsyncLoading);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::AsyncLoading));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::AsyncLoading)
+    );
     assert_eq!(status.name, "async_loading");
 
     let report = server.loading_policy_report();
-    assert_eq!(
-        report.async_loading_feature,
-        status
-    );
+    assert_eq!(report.async_loading_feature, status);
     assert_eq!(
         report.parallel_feature,
         asset_feature_status(AssetFeature::Parallel)
@@ -130,8 +127,14 @@ fn editor_feature_status_matches_composed_feature_gate() {
     assert_eq!(status.name, "editor");
     if status.enabled {
         assert_eq!(require_asset_feature(AssetFeature::Editor), Ok(()));
-        assert_eq!(asset_feature_status(AssetFeature::Importers).enabled, status.enabled);
-        assert_eq!(asset_feature_status(AssetFeature::Cookers).enabled, status.enabled);
+        assert_eq!(
+            asset_feature_status(AssetFeature::Importers).enabled,
+            status.enabled
+        );
+        assert_eq!(
+            asset_feature_status(AssetFeature::Cookers).enabled,
+            status.enabled
+        );
     } else {
         assert_eq!(
             require_asset_feature(AssetFeature::Editor),
@@ -172,10 +175,7 @@ fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
         report.async_loading_feature,
         asset_feature_status(AssetFeature::AsyncLoading)
     );
-    assert_eq!(
-        report.parallel_feature,
-        status
-    );
+    assert_eq!(report.parallel_feature, status);
     assert_eq!(report.requested_worker_threads, 2);
     assert_eq!(report.effective_worker_threads, 0);
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -205,7 +205,10 @@ fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_parallel_worker_threads(4).unwrap();
     let status = asset_feature_status(AssetFeature::Parallel);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Parallel));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::Parallel)
+    );
     assert_eq!(status.name, "parallel");
 
     let report = server.loading_policy_report();
@@ -233,7 +236,10 @@ fn enabled_async_parallel_config_reports_effective_worker_count() {
     server.set_async_loading_enabled(true).unwrap();
     server.set_parallel_worker_threads(4).unwrap();
     let status = asset_feature_status(AssetFeature::Parallel);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Parallel));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::Parallel)
+    );
     assert_eq!(status.name, "parallel");
 
     let report = server.loading_policy_report();
@@ -263,8 +269,8 @@ fn zstd_feature_status_matches_bundle_codec_report() {
     if status.enabled {
         assert!(report.reason.is_none());
         assert_eq!(require_asset_feature(AssetFeature::Zstd), Ok(()));
-        let bytes = BundleWriter::build_bytes("zstd_empty", CompressionKind::Zstd, Vec::new())
-            .unwrap();
+        let bytes =
+            BundleWriter::build_bytes("zstd_empty", CompressionKind::Zstd, Vec::new()).unwrap();
         let reader = BundleReader::from_bytes(&bytes).unwrap();
         assert_eq!(reader.manifest().name, "zstd_empty");
         assert!(reader.manifest().entries.is_empty());
@@ -281,7 +287,10 @@ fn zstd_feature_status_matches_bundle_codec_report() {
 fn filesystem_feature_gate_matches_filesystem_io_behavior() {
     let io = FileSystemAssetIo::new(std::env::temp_dir());
     let status = asset_feature_status(AssetFeature::Filesystem);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Filesystem));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::Filesystem)
+    );
     assert_eq!(status.name, "filesystem");
 
     if asset_feature_enabled(AssetFeature::Filesystem) {
@@ -369,8 +378,7 @@ fn importer_feature_gates_match_registration_paths() {
             Some(&AssetPath::parse("textures/albedo.texture"))
         );
         assert_eq!(
-            fs::read(config.imported_root.join("textures/albedo.texture"))
-            .unwrap(),
+            fs::read(config.imported_root.join("textures/albedo.texture")).unwrap(),
             texture_bytes(1, 1, 7)
         );
         let shader_id = database
@@ -506,9 +514,15 @@ fn cooker_feature_gates_match_registration_paths() {
     if asset_feature_enabled(AssetFeature::TextureCooker) {
         let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
         assert_eq!(output.id, id);
-        assert_eq!(output.metadata.path.as_ref(), Some(&AssetPath::parse("textures/albedo.texture")));
+        assert_eq!(
+            output.metadata.path.as_ref(),
+            Some(&AssetPath::parse("textures/albedo.texture"))
+        );
         assert_eq!(output.metadata.asset_type, Texture::TYPE_ID);
-        assert_eq!(output.metadata.cooked_path.as_ref(), Some(&AssetPath::parse("textures/albedo.texture")));
+        assert_eq!(
+            output.metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("textures/albedo.texture"))
+        );
         assert_eq!(output.metadata.cooked_hash, Some(output.content_hash));
         assert_eq!(output.metadata.version_hash, Some(VersionHash(2)));
         assert_eq!(output.bytes, texture_bytes(1, 1, 7));
@@ -541,7 +555,10 @@ fn cooker_feature_gates_match_registration_paths() {
             scene_output.metadata.cooked_path.as_ref(),
             Some(&AssetPath::parse("scenes/hero.scene"))
         );
-        assert_eq!(scene_output.metadata.cooked_hash, Some(scene_output.content_hash));
+        assert_eq!(
+            scene_output.metadata.cooked_hash,
+            Some(scene_output.content_hash)
+        );
         assert_eq!(scene_output.metadata.version_hash, Some(VersionHash(1)));
         assert_eq!(
             prefab_output.metadata.path.as_ref(),
@@ -552,7 +569,10 @@ fn cooker_feature_gates_match_registration_paths() {
             prefab_output.metadata.cooked_path.as_ref(),
             Some(&AssetPath::parse("prefabs/hero.prefab"))
         );
-        assert_eq!(prefab_output.metadata.cooked_hash, Some(prefab_output.content_hash));
+        assert_eq!(
+            prefab_output.metadata.cooked_hash,
+            Some(prefab_output.content_hash)
+        );
         assert_eq!(prefab_output.metadata.version_hash, Some(VersionHash(1)));
         assert_eq!(
             animation_output.metadata.path.as_ref(),
@@ -624,10 +644,48 @@ fn bundle_feature_entry_points_match_gate() {
         ));
         let bundle_output = database.build_bundle(&bundle_build).unwrap();
         assert_eq!(bundle_output.asset_count, 0);
-        assert_eq!(bundle_output.bytes, database.build_bundle_bytes(&bundle_build).unwrap());
+        assert_eq!(
+            bundle_output.bytes,
+            database.build_bundle_bytes(&bundle_build).unwrap()
+        );
         let reader = BundleReader::from_bytes(&bundle_output.bytes).unwrap();
         assert_eq!(reader.manifest().name, "empty");
         assert!(reader.manifest().entries.is_empty());
+
+        #[cfg(feature = "bundle")]
+        {
+            let mounted = server.mount_bundle_bytes(&bundle_output.bytes).unwrap();
+            let mounted_path = database_config("enabled_bundle_mounted_registry").registry_path;
+            fs::create_dir_all(mounted_path.parent().unwrap()).unwrap();
+            server.save_mounted_bundle_registry(&mounted_path).unwrap();
+            let mut mounted_server = AssetServer::new(AssetServerConfig::default());
+            let restored_mounted = mounted_server
+                .load_mounted_bundle_registry(&mounted_path)
+                .unwrap();
+            assert_eq!(restored_mounted.len(), 1);
+            assert_eq!(restored_mounted[0].id, mounted.id);
+            assert_eq!(restored_mounted[0].name, "empty");
+            assert_eq!(
+                mounted_server.mounted_bundle(mounted.id).unwrap().name,
+                "empty"
+            );
+
+            let package_registry_path =
+                database_config("enabled_bundle_package_registry").registry_path;
+            fs::create_dir_all(package_registry_path.parent().unwrap()).unwrap();
+            server
+                .save_asset_package_registry(&package_registry_path)
+                .unwrap();
+            let mut package_server = AssetServer::new(AssetServerConfig::default());
+            let restored_packages = package_server
+                .load_asset_package_registry(&package_registry_path)
+                .unwrap();
+            assert!(restored_packages.is_empty());
+            assert!(package_server
+                .asset_package_registry()
+                .packages()
+                .is_empty());
+        }
     } else {
         assert_eq!(
             require_asset_feature(AssetFeature::Bundle),
@@ -709,7 +767,10 @@ fn hot_reload_feature_entry_points_match_gate() {
     server.set_io(io);
     server.register_builtin_loaders();
     let status = asset_feature_status(AssetFeature::HotReload);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::HotReload));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::HotReload)
+    );
     assert_eq!(status.name, "hot_reload");
 
     if asset_feature_enabled(AssetFeature::HotReload) {
@@ -842,7 +903,10 @@ fn streaming_feature_entry_points_match_gate() {
     let mut server = AssetServer::new(AssetServerConfig::default());
     let _missing_region = StreamingRegionId(42);
     let status = asset_feature_status(AssetFeature::Streaming);
-    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Streaming));
+    assert_eq!(
+        status.enabled,
+        asset_feature_enabled(AssetFeature::Streaming)
+    );
     assert_eq!(status.name, "streaming");
 
     #[cfg(feature = "streaming")]
@@ -857,7 +921,10 @@ fn streaming_feature_entry_points_match_gate() {
         assert_eq!(registered.priority, LoadPriority::Low);
         assert!(registered.assets.is_empty());
         assert!(!registered.resident);
-        assert_eq!(server.streaming_region_state(region), Ok(AssetLoadState::Ready));
+        assert_eq!(
+            server.streaming_region_state(region),
+            Ok(AssetLoadState::Ready)
+        );
         assert_eq!(
             server.streaming_region_progress(region),
             Ok(LoadProgress::default())
