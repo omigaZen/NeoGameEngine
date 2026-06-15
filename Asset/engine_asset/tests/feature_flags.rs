@@ -535,8 +535,40 @@ fn bundle_feature_entry_points_match_gate() {
 
 #[test]
 fn hot_reload_feature_entry_points_match_gate() {
+    let path = AssetPath::parse("textures/albedo.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
     let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(io);
+    server.register_builtin_loaders();
+
     if asset_feature_enabled(AssetFeature::HotReload) {
+        server.watch_hot_reload_path(path.clone()).unwrap();
+        let watch = server.hot_reload_watch(&path).unwrap();
+        assert_eq!(watch.backend, HotReloadWatchBackend::PollingMetadata);
+        assert_eq!(watch.path, path);
+        assert_eq!(watch.last_metadata.size, 12);
+        assert_eq!(server.hot_reload_watches().count(), 1);
+
+        let report = server.hot_reload_policy_report();
+        assert_eq!(report.watched_paths(), 1);
+        assert_eq!(report.queued_changes(), 0);
+        assert_eq!(report.watch_backend, HotReloadWatchBackend::PollingMetadata);
+        assert_eq!(report.watches.len(), 1);
+        assert_eq!(report.watches[0].path, path);
+        assert_eq!(report.watch_statuses.len(), 1);
+        assert_eq!(report.watch_statuses[0].path, path);
+        assert_eq!(
+            report.watch_statuses[0].backend,
+            HotReloadWatchBackend::PollingMetadata
+        );
+        assert!(!report.watch_statuses[0].queued);
+        assert!(report.watch_statuses[0].last_error.is_none());
+        assert_eq!(report.last_poll, HotReloadPollReport::default());
+        assert_eq!(
+            server.hot_reload_async_watch_report(),
+            HotReloadAsyncWatchReport::default()
+        );
+
         assert!(matches!(
             server.queue_hot_reload_id(AssetId::new()),
             Err(AssetError::AssetNotFound { .. })
