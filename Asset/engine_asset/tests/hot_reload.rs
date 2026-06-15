@@ -534,6 +534,7 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
     let texture: Handle<Texture> = server.load(path.clone());
     server.update_loading();
     finish_uploads(&mut server, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
 
     server.set_io(MemoryAssetIo::new().with_file(path.path(), vec![1, 2, 3]));
     server.reload_by_path(&path).unwrap();
@@ -543,6 +544,10 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
     assert_eq!(
         server.metadata(texture.id()).unwrap().path,
         Some(path.clone())
+    );
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
     );
     assert!(matches!(
         server.error_by_id(texture.id()),
@@ -557,6 +562,11 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 3);
     assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
+    assert!(server.metadata(texture.id()).unwrap().source_hash.is_some());
+    assert_ne!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
     assert!(server.error_by_id(texture.id()).is_none());
 }
 

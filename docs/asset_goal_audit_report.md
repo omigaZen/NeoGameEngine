@@ -2404,6 +2404,14 @@ Result: the core OBJ model-importer path and representative material-property/co
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload reload_by_path_clears_failure_diagnostic_by_later_successful_reload
+```
+
+Result: hot-reload recovery now also pins source-hash metadata. A reload-by-path failure leaves the prior ready asset metadata stable, and the later successful reload updates the ready asset while keeping its metadata path intact and switching to the new source hash rather than only preserving the prior width/state.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches
 ```
 

@@ -37,8 +37,8 @@ use crate::{
         HotReloadRollbackAssetReport, HotReloadRollbackPolicyReport, HotReloadRollbackRetention,
         HotReloadWatch, HotReloadWatchBackend,
     },
-    id::{AssetId, AssetTypeId},
-    io::{AssetIo, FileSystemAssetIo},
+    id::{AssetId, AssetTypeId, ContentHash},
+    io::{stable_hash, AssetIo, FileSystemAssetIo},
     loader::{
         AssetLoadGroup, AssetLoadGroupId, AssetLoader, AssetLoaderRegistry, LoadPriority,
         LoadProgress, LoadRequest, LoadScheduler, LoadedAsset, LoaderSettings,
@@ -96,6 +96,7 @@ enum AsyncLoadOutcome {
         loaded: LoadedAsset,
         dependencies: Vec<crate::loader::LoadDependency>,
         subresources: Vec<(AssetPath, AssetTypeId, AssetId)>,
+        source_hash: ContentHash,
     },
     Failed {
         state: AssetLoadState,
@@ -2743,6 +2744,12 @@ impl AssetServer {
                 return;
             }
         };
+        let source_hash = self
+            .io
+            .metadata(path.path())
+            .ok()
+            .and_then(|metadata| metadata.hash)
+            .unwrap_or_else(|| ContentHash(stable_hash(&bytes)));
         self.set_state_for_type(request.id, request.asset_type, AssetLoadState::DecodingCpu);
         let loader = match self
             .loaders
@@ -2764,7 +2771,7 @@ impl AssetServer {
             }
         };
         let (dependencies, _subresources) = context.finish();
-        self.store_loaded_asset(request, path, loaded, dependencies);
+        self.store_loaded_asset(request, path, loaded, dependencies, source_hash);
     }
 
     #[cfg(feature = "async_loading")]
@@ -2839,6 +2846,7 @@ impl AssetServer {
                     loaded,
                     dependencies,
                     subresources,
+                    source_hash,
                 } => {
                     self.merge_async_registry_entries(&dependencies, &subresources);
                     self.set_state_for_type(
@@ -2846,7 +2854,7 @@ impl AssetServer {
                         request.asset_type,
                         AssetLoadState::DecodingCpu,
                     );
-                    self.store_loaded_asset(request, path, loaded, dependencies);
+                    self.store_loaded_asset(request, path, loaded, dependencies, source_hash);
                 }
                 AsyncLoadOutcome::Failed { state, error } => {
                     self.set_state_for_type(request.id, request.asset_type, state);
@@ -2948,6 +2956,7 @@ impl AssetServer {
         path: AssetPath,
         loaded: LoadedAsset,
         dependencies: Vec<crate::loader::LoadDependency>,
+        source_hash: ContentHash,
     ) {
         let LoadedAsset {
             asset_type,
@@ -3014,6 +3023,7 @@ impl AssetServer {
         if let Some(metadata) = self.registry.get_mut(request.id) {
             metadata.asset_type = asset_type;
             metadata.path = Some(path);
+            metadata.source_hash = Some(source_hash);
             metadata.dependencies = dependency_ids.clone();
         }
         if let Some(metadata) = self.registry.get(request.id).cloned() {
@@ -3648,6 +3658,11 @@ fn run_async_load_request(
             }
         }
     };
+    let source_hash = io
+        .metadata(path.path())
+        .ok()
+        .and_then(|metadata| metadata.hash)
+        .unwrap_or_else(|| ContentHash(stable_hash(&bytes)));
 
     let loader = match loaders.loader_for_path_and_type(Some(&path), request.asset_type) {
         Ok(loader) => loader,
@@ -3683,6 +3698,7 @@ fn run_async_load_request(
             loaded,
             dependencies,
             subresources,
+            source_hash,
         },
     }
 }
