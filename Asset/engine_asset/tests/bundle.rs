@@ -829,6 +829,14 @@ fn composite_asset_io_reports_named_source_mod_patch_bundle_precedence() {
         resolution.layer,
         AssetIoLayerInfo::new("source", AssetIoLayerKind::Source, 0)
     );
+    let (metadata, resolution) = composite
+        .metadata_with_diagnostics("textures/albedo.texture")
+        .unwrap();
+    assert_eq!(metadata.size, source_bytes.len() as u64);
+    assert_eq!(
+        resolution.layer,
+        AssetIoLayerInfo::new("source", AssetIoLayerKind::Source, 0)
+    );
 
     let (bytes, resolution) = composite
         .read_with_diagnostics("textures/mod_only.texture")
