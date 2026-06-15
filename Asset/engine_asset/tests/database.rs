@@ -9537,7 +9537,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl AliasMaps
 map_ambient -imfchan red textures/alias_ambient.texture
-map_transmission_filter -imfchan green textures/alias_transmission.texture
+map_transmission_filter -imfchan alpha textures/alias_transmission.texture
 "
     .to_vec();
     let expected_material = b"# mtllib pbr_texture_additional_aliases.mtl
@@ -9545,7 +9545,7 @@ name=AliasMaps
 texture.occlusion=models/textures/alias_ambient.texture
 texture.occlusion.source_channel=red
 texture.transmission_filter=models/textures/alias_transmission.texture
-texture.transmission_filter.source_channel=green
+texture.transmission_filter.source_channel=alpha
 "
     .to_vec();
     let occlusion_source = texture_bytes(1, 1, 149);
@@ -9639,7 +9639,7 @@ texture.transmission_filter.source_channel=green
     assert_eq!(material.textures[1].texture.id(), transmission_id);
     assert_eq!(
         material.textures[1].options.source_channel,
-        Some(MaterialTextureChannel::Green)
+        Some(MaterialTextureChannel::Alpha)
     );
 }
 
