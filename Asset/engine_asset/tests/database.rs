@@ -1720,6 +1720,45 @@ fn database_shader_cooker_canonicalizes_source_documents() {
 }
 
 #[test]
+fn database_shader_cooker_canonicalizes_runtime_and_source_bytes() {
+    let runtime_path = AssetPath::parse("shaders/cooked_runtime.wgsl");
+    let runtime_bytes = b"@fragment fn main() {}\n".to_vec();
+    let runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(runtime_path.clone()),
+        source_bytes: runtime_bytes.clone(),
+    };
+    let runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        runtime_path,
+        AssetTypeId::of::<Shader>(),
+    );
+    let source_path = AssetPath::parse("shaders/from_source.wgsl");
+    let source_bytes =
+        b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nstage=fragment\n---\n  @fragment fn main() {}\n"
+            .to_vec();
+    let source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(source_path.clone()),
+        source_bytes: source_bytes.clone(),
+    };
+    let source_metadata =
+        AssetMetadata::runtime(AssetId::new(), source_path, AssetTypeId::of::<Shader>());
+    let cooker = ShaderCooker::new();
+    let expected = b"@fragment fn main() {}\n".to_vec();
+
+    let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
+    let source_output = cooker.cook(&source_ctx, &source_metadata).unwrap();
+
+    assert_eq!(runtime_output.bytes, expected);
+    assert_eq!(runtime_output.version_hash, VersionHash(2));
+    assert_eq!(runtime_output.metadata, runtime_metadata);
+    assert_eq!(source_output.bytes, expected);
+    assert_eq!(source_output.version_hash, VersionHash(2));
+    assert_eq!(source_output.metadata, source_metadata);
+}
+
+#[test]
 fn database_builtin_material_importer_reports_missing_dependency_path() {
     let config = database_config("builtin_material_missing_dependency");
     let material_path = AssetPath::parse("materials/missing_shader.material");

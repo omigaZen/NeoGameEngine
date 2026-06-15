@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_shader_cooker_canonicalizes_runtime_and_source_bytes
+```
+
+Result: `ShaderCooker` now has direct runtime/source round-trip evidence: runtime shader bytes stay unchanged, `NGA_SHADER_SOURCE_V1` source documents canonicalize to the same runtime bytes, and both paths report `VersionHash(2)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_audio_cooker_canonicalizes_runtime_and_wav_bytes
 ```
 
