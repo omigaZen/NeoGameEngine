@@ -18878,6 +18878,71 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
 }
 
 #[test]
+fn database_texture_and_shader_importers_preserve_runtime_documents_and_metadata() {
+    let texture_path = AssetPath::parse("textures/imported.texture");
+    let shader_path = AssetPath::parse("shaders/imported.wgsl");
+    let texture_bytes = texture_bytes(1, 1, 17);
+    let shader_runtime_bytes = b"@fragment fn main() {}\n".to_vec();
+    let texture_source = SourceAsset {
+        path: texture_path.clone(),
+        bytes: b"NGA_TEXTURE_SOURCE_V1\nsize=1x1\nrgba=17,17,17,17\n".to_vec(),
+        hash: ContentHash(101),
+    };
+    let shader_source = SourceAsset {
+        path: shader_path.clone(),
+        bytes: b"NGA_SHADER_SOURCE_V1\nlanguage=wgsl\nstage=fragment\nentry=main\n---\n@fragment fn main() {}\n"
+            .to_vec(),
+        hash: ContentHash(202),
+    };
+    let texture_importer = TextureImporter::new();
+    let shader_importer = ShaderImporter::new();
+    let settings = ImporterSettings::default();
+    let mut texture_ctx = ImportContext::default();
+    let mut shader_ctx = ImportContext::default();
+
+    let texture_output = texture_importer
+        .import(&mut texture_ctx, &texture_source, &settings)
+        .unwrap();
+    let shader_output = shader_importer
+        .import(&mut shader_ctx, &shader_source, &settings)
+        .unwrap();
+
+    assert_eq!(texture_output.metadata.path.as_ref(), Some(&texture_path));
+    assert_eq!(
+        texture_output.metadata.importer.as_deref(),
+        Some("TextureImporter")
+    );
+    assert_eq!(texture_output.metadata.importer_version, 3);
+    assert_eq!(texture_output.metadata.source_path.as_ref(), Some(&texture_path));
+    assert_eq!(texture_output.metadata.cooked_path.as_ref(), Some(&texture_path));
+    assert_eq!(texture_output.metadata.source_hash, Some(ContentHash(101)));
+    assert_eq!(texture_output.metadata.version_hash, Some(VersionHash(3)));
+    assert_eq!(texture_output.version_hash, VersionHash(3));
+    assert_eq!(texture_output.generated.len(), 1);
+    assert_eq!(texture_output.generated[0].path, texture_path);
+    assert_eq!(texture_output.generated[0].bytes, texture_bytes);
+    assert_eq!(texture_output.generated[0].asset_type, Texture::TYPE_ID);
+    assert!(texture_output.dependencies.is_empty());
+
+    assert_eq!(shader_output.metadata.path.as_ref(), Some(&shader_path));
+    assert_eq!(
+        shader_output.metadata.importer.as_deref(),
+        Some("ShaderImporter")
+    );
+    assert_eq!(shader_output.metadata.importer_version, 3);
+    assert_eq!(shader_output.metadata.source_path.as_ref(), Some(&shader_path));
+    assert_eq!(shader_output.metadata.cooked_path.as_ref(), Some(&shader_path));
+    assert_eq!(shader_output.metadata.source_hash, Some(ContentHash(202)));
+    assert_eq!(shader_output.metadata.version_hash, Some(VersionHash(3)));
+    assert_eq!(shader_output.version_hash, VersionHash(3));
+    assert_eq!(shader_output.generated.len(), 1);
+    assert_eq!(shader_output.generated[0].path, shader_path);
+    assert_eq!(shader_output.generated[0].bytes, shader_runtime_bytes);
+    assert_eq!(shader_output.generated[0].asset_type, Shader::TYPE_ID);
+    assert!(shader_output.dependencies.is_empty());
+}
+
+#[test]
 fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtime_docs() {
     let config = database_config("builtin_animation_skeleton_import_cook_load");
     let animation_path = AssetPath::parse("animations/hero.animation");
