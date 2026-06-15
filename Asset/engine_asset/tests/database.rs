@@ -9974,8 +9974,17 @@ f 1 2 3\n"
         )
         .into_bytes();
         let material_source =
-            format!("newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n")
-                .into_bytes();
+            if directive == "map_emissive" || directive == "map_emission" {
+                format!(
+                    "newmtl Surface\n{directive} -imfchan red -colorspace Non-Color textures/{stem}.texture\n"
+                )
+                .into_bytes()
+            } else {
+                format!(
+                    "newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
+                )
+                .into_bytes()
+            };
         let expected_material = format!(
             "# mtllib {material_library}\n\
 name=Surface\n\
@@ -9983,6 +9992,18 @@ texture.{channel}=models/textures/{stem}.texture\n\
 texture.{channel}.color_space=non_color\n"
         )
         .into_bytes();
+        let expected_material = if directive == "map_emissive" || directive == "map_emission" {
+            format!(
+                "# mtllib {material_library}\n\
+name=Surface\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=red\n\
+texture.{channel}.color_space=non_color\n"
+            )
+            .into_bytes()
+        } else {
+            expected_material
+        };
         let texture_source = texture_bytes(1, 1, texel);
         let mut io = MemoryAssetIo::new();
         io.insert(model_path.path(), model_source);
@@ -12938,6 +12959,14 @@ texture.{channel}.color_space=non_color\n"
         }
 
         assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+        if directive == "map_emissive" || directive == "map_emission" {
+            assert_eq!(
+                server.get_by_id::<Material>(material_id).unwrap().textures[0]
+                    .options
+                    .source_channel,
+                Some(MaterialTextureChannel::Red)
+            );
+        }
         let material = server.get_by_id::<Material>(material_id).unwrap();
         assert_eq!(material.textures.len(), 1);
         assert_eq!(material.textures[0].name, channel);
