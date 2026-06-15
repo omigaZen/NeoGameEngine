@@ -503,6 +503,35 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
 }
 
 #[test]
+fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
+    let path = AssetPath::parse("textures/by_path.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+    let texture: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_uploads(&mut server, 1);
+
+    server.set_io(MemoryAssetIo::new().with_file(path.path(), vec![1, 2, 3]));
+    server.reload_by_path(&path).unwrap();
+    server.update_loading();
+    assert_eq!(server.state(&texture), AssetLoadState::Ready);
+    assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert!(matches!(
+        server.error_by_id(texture.id()),
+        Some(AssetError::Decode { .. })
+    ));
+
+    server.set_io(MemoryAssetIo::new().with_file(path.path(), texture_bytes(3, 1, 30)));
+    server.reload_by_path(&path).unwrap();
+    server.update_loading();
+    finish_uploads(&mut server, 30);
+
+    assert_eq!(server.state(&texture), AssetLoadState::Ready);
+    assert_eq!(server.get(&texture).unwrap().width, 3);
+    assert!(server.error_by_id(texture.id()).is_none());
+}
+
+#[test]
 fn hot_reload_gpu_failure_rolls_back_without_replacing_old_asset() {
     let path = AssetPath::parse("textures/hero.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
