@@ -2129,3 +2129,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture color-space preservation now has a stable positive regression for `map_Kd -colorspace raw`. A valid import keeps `texture.albedo.color_space=raw`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the raw colorspace setting.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_srgb_colorspace
+```
+
+Result: OBJ material texture color-space preservation now also has a stable positive regression for `map_Kd -colorspace srgb`. A valid import keeps `texture.albedo.color_space=srgb`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the sRGB colorspace setting.
