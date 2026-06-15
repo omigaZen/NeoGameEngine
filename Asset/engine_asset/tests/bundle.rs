@@ -1073,6 +1073,20 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         AssetPackageRegistry::from_text(&malformed_dependency_text),
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package dependency field")
     ));
+    let missing_package_line_text = dependency_registry
+        .to_text()
+        .replace("packages=1", "packages=2");
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&missing_package_line_text),
+        Err(AssetError::Bundle { message }) if message.contains("missing asset package line 1")
+    ));
+    let invalid_package_line_text = dependency_registry
+        .to_text()
+        .replacen("package|", "packagx|", 1);
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_package_line_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package line 0")
+    ));
     let (mut duplicate_name, _duplicate_bundle, _) = texture_package(
         "valid",
         AssetIoLayerKind::Mod,

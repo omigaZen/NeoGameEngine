@@ -1916,3 +1916,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: registry text parsing now also rejects malformed package counts explicitly. A registry header with `packages=abc` returns the expected `invalid asset package count` bundle diagnostic before any package lines are read.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: registry text parsing now also rejects missing and malformed package lines explicitly. A registry that claims more packages than it contains reports `missing asset package line 1`, and a package line whose prefix is not `package` reports `invalid asset package line 0`.
