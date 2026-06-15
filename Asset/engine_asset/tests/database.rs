@@ -15228,6 +15228,111 @@ base_color=0.25,0.5,0.75,1
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_parses_quoted_obj_material_texture_line_continuations() {
+    let config = database_config("builtin_model_obj_quoted_material_texture_line_continuations");
+    let model_path = AssetPath::parse("models/quoted_texture_continuation.obj");
+    let mesh_path = AssetPath::parse("models/quoted_texture_continuation.Quoted.mesh");
+    let material_path =
+        AssetPath::parse("models/quoted_texture_continuation.Material_Quoted.material");
+    let texture_path = AssetPath::parse("models/textures/detail albedo.texture");
+    let model_source = b"mtllib quoted_texture_continuation.mtl\nusemtl Quoted\no Quoted\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".to_vec();
+    let material_source = br#"newmtl Quoted
+map_Kd "textures/detail\
+ albedo.texture"
+"#
+    .to_vec();
+    let expected_material = b"# mtllib quoted_texture_continuation.mtl
+name=Quoted
+texture.albedo=models/textures/detail albedo.texture
+"
+    .to_vec();
+    let texture_source = texture_bytes(1, 1, 19);
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/quoted_texture_continuation.mtl", material_source);
+    io.insert(texture_path.path(), texture_source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let texture_id = database.import_asset_path(&texture_path).unwrap();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let texture_metadata = database.registry().metadata_by_path(&texture_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+    let material_id = material_metadata.id;
+    assert_eq!(texture_metadata.id, texture_id);
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+    assert_eq!(texture_metadata.asset_type, AssetTypeId::of::<Texture>());
+    assert_eq!(mesh_metadata.labels, vec!["Quoted"]);
+    assert_eq!(material_metadata.labels, vec!["Material/Quoted"]);
+    assert_eq!(material_metadata.dependencies, vec![texture_id]);
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies.len(), 3);
+    assert!(model_dependencies.contains(&mesh_id));
+    assert!(model_dependencies.contains(&material_id));
+    assert!(model_dependencies.contains(&texture_id));
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(texture_path.path())).unwrap(),
+        texture_source
+    );
+
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(texture_id, TargetPlatform::Windows)
+        .unwrap();
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "quoted_material_texture_line_continuations",
+            vec![mesh_id, material_id, texture_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(material.textures.len(), 1);
+    assert_eq!(material.textures[0].name, "albedo");
+    assert_eq!(material.textures[0].texture.id(), texture_id);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_accepts_obj_parameter_vertices() {
     let config = database_config("builtin_model_obj_parameter_vertices");
     let model_path = AssetPath::parse("models/parameter_vertices.obj");
