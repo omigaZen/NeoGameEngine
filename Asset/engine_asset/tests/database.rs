@@ -16594,11 +16594,17 @@ fn database_mesh_cooker_uses_u16_indices_for_mobile_and_web_targets() {
 
     let id = database.import_asset_path(&path).unwrap();
     let windows_output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    let android_output = database.cook_asset(id, TargetPlatform::Android).unwrap();
+    let ios_output = database.cook_asset(id, TargetPlatform::Ios).unwrap();
     let web_output = database.cook_asset(id, TargetPlatform::Web).unwrap();
     let expected_web = simple_u16_index_binary_mesh_bytes();
 
     assert_eq!(windows_output.bytes, simple_binary_mesh_bytes());
     assert_eq!(windows_output.version_hash, VersionHash(4));
+    assert_eq!(android_output.bytes, expected_web);
+    assert_eq!(android_output.version_hash, VersionHash(4));
+    assert_eq!(ios_output.bytes, expected_web);
+    assert_eq!(ios_output.version_hash, VersionHash(4));
     assert_eq!(web_output.bytes, expected_web);
     assert_eq!(web_output.version_hash, VersionHash(4));
     assert_eq!(

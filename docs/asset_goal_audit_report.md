@@ -1714,6 +1714,14 @@ Result: formatting passed; `OBJ mtllib` now has an explicit relative-path regres
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_mesh_cooker_uses_u16_indices_for_mobile_and_web_targets
+```
+
+Result: formatting passed; `MeshCooker` now has explicit Android/iOS/Web coverage for `u16` index cooking, not just Web. The regression proves the same compacted mesh payload and `Uint16`-capable cooked bytes are produced for the three mobile/web targets when the indices fit in `u16`, while Windows remains on `u32` indices. Full database and default-suite counts remain unchanged at 215 and 415.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
 C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
