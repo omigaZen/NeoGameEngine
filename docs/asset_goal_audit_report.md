@@ -1956,3 +1956,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: registry text parsing now also rejects malformed package versions explicitly. Replacing the serialized package version with `abc` returns the expected `invalid asset package version` bundle diagnostic before registry construction.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: registry text parsing now also rejects malformed minimum runtime versions explicitly. Replacing the serialized package minimum runtime version with `abc` returns the expected `invalid asset package minimum runtime version` bundle diagnostic before registry construction.
