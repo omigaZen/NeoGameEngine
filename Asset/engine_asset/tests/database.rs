@@ -13487,6 +13487,54 @@ texture.albedo=models/parts/sub/textures/detail_albedo.texture
 }
 
 #[test]
+fn database_model_importer_reports_invalid_nested_obj_material_texture_path() {
+    let config = database_config("builtin_model_obj_nested_material_texture_escape");
+    let model_path = AssetPath::parse("models/assembled.obj");
+    let include_path = AssetPath::parse("models/parts/assembly.obj");
+    let nested_include_path = AssetPath::parse("models/parts/sub/detail.obj");
+    let nested_material_library_path = AssetPath::parse("models/parts/sub/detail.mtl");
+    let model_source = b"call parts/assembly.obj
+"
+    .to_vec();
+    let include_source = b"call sub/detail.obj
+"
+    .to_vec();
+    let nested_include_source = b"mtllib detail.mtl
+usemtl Detail
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let nested_material_source = b"newmtl Detail
+map_Kd ../escape.texture
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(include_path.path(), include_source);
+    io.insert(nested_include_path.path(), nested_include_source);
+    io.insert(nested_material_library_path.path(), nested_material_source);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/assembled.obj")
+                && message.contains(
+                    "OBJ material library `detail.mtl` at `models/parts/sub/detail.mtl` map_Kd texture path `../escape.texture` on line 2 must be a relative source path without labels or `..` segments"
+                )
+    ));
+}
+
+#[test]
 #[cfg(feature = "bundle")]
 fn database_model_importer_accepts_nested_obj_display_attributes() {
     let config = database_config("builtin_model_obj_nested_display_attributes");
