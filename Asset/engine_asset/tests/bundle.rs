@@ -1094,16 +1094,34 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         AssetPackageRegistry::new(vec![empty_path]),
         Err(AssetError::Bundle { message }) if message.contains("bundle path cannot be empty")
     ));
+    let mut zero_version = valid.clone();
+    zero_version.name = "zero_version".to_owned();
+    zero_version.bundle_id = BundleId(24);
+    zero_version.priority = 24;
+    zero_version.package_version = 0;
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![zero_version]),
+        Err(AssetError::Bundle { message }) if message.contains("version must be greater than zero")
+    ));
+    let mut zero_runtime = valid.clone();
+    zero_runtime.name = "zero_runtime".to_owned();
+    zero_runtime.bundle_id = BundleId(25);
+    zero_runtime.priority = 25;
+    zero_runtime.minimum_runtime_version = 0;
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![zero_runtime]),
+        Err(AssetError::Bundle { message }) if message.contains("minimum runtime version must be greater than zero")
+    ));
     let mut duplicate_manifest = valid.manifest.clone();
     duplicate_manifest
         .entries
         .push(duplicate_manifest.entries[0].clone());
     assert!(matches!(
         AssetPackageRegistry::new(vec![AssetPackageRecord::new(
-            BundleId(24),
+            BundleId(26),
             "duplicate_manifest",
             AssetIoLayerKind::Patch,
-            24,
+            26,
             true,
             "packages/duplicate_manifest.nga_bundle",
             duplicate_manifest,

@@ -1749,6 +1749,14 @@ Result: the runtime-version gate regression now exercises both sides of the poli
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: bundle-registry validation now has explicit regression coverage for zero `package_version` and zero `minimum_runtime_version` inputs, in addition to the existing duplicate name/id/priority, empty path, duplicate manifest-path, malformed header, and payload-manifest mismatch cases.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
 C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
