@@ -2376,3 +2376,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_write
 ```
 
 Result: the Zstd bundle path now also has a file-backed write/read regression. Writing a multi-chunk Zstd bundle to disk now preserves the manifest name/compression/entry count, and reading the file back through `BundleReader` and `BundleAssetIo` keeps the compressed metadata, chunk cache policy, path reads, and dependent entry metadata stable.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_writer_writes_zstd_file_and_returns_manifest
+```
+
+Result: the same Zstd file-backed regression now also pins manifest dependency preservation. The written bundle keeps the root entry dependency graph intact on disk and when reloaded through `BundleReader`/`BundleAssetIo`, including the dependent entry's path hash and the dependent read path itself.

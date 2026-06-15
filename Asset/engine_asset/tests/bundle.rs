@@ -880,6 +880,14 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
     assert_eq!(manifest.name, "persisted_zstd_textures");
     assert_eq!(manifest.compression, CompressionKind::Zstd);
     assert_eq!(manifest.entries.len(), 2);
+    assert_eq!(manifest.dependencies(texture_id), Some([].as_slice()));
+    let second_id = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.id != texture_id)
+        .map(|entry| entry.id)
+        .unwrap();
+    assert_eq!(manifest.dependencies(second_id), Some([texture_id].as_slice()));
     assert_eq!(manifest.chunk(0).unwrap().compression, CompressionKind::Zstd);
 
     let file_bytes = std::fs::read(&path).unwrap();
@@ -938,6 +946,10 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
             .unwrap()
             .hash,
         Some(content_hash(&second))
+    );
+    assert_eq!(
+        bundle_io.read("textures/persisted_zstd_extra.texture").unwrap(),
+        second
     );
 
     let _ = std::fs::remove_file(&path);
