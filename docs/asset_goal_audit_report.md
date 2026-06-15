@@ -2177,3 +2177,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture boost preservation now has a stable positive regression for `map_Kd -boost 1.5`. A valid import keeps `texture.albedo.boost=1.5`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the boost value.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_material_texture_transform
+```
+
+Result: OBJ material texture transform preservation now has a stable positive regression for `map_Kd -o 0.25 0.5 0 -s 2 3 1 -t 0.01 0.02 0.03`. A valid import keeps the offset, scale, and turbulence payloads intact, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the full transform state.

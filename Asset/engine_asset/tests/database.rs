@@ -15574,6 +15574,137 @@ texture.albedo.boost=1.5
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_preserves_obj_material_texture_transform() {
+    let config = database_config("builtin_model_obj_material_texture_transform");
+    let model_path = AssetPath::parse("models/transform.obj");
+    let mesh_path = AssetPath::parse("models/transform.Panel.mesh");
+    let material_path = AssetPath::parse("models/transform.Material_Transform.material");
+    let albedo_path = AssetPath::parse("models/textures/transform_albedo.texture");
+    let model_source = b"mtllib transform.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Transform
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Transform
+map_Kd -o 0.25 0.5 0 -s 2 3 1 -t 0.01 0.02 0.03 textures/transform_albedo.texture
+"
+    .to_vec();
+    let expected_material = b"# mtllib transform.mtl
+name=Transform
+texture.albedo=models/textures/transform_albedo.texture
+texture.albedo.transform.offset=0.25,0.5,0
+texture.albedo.transform.scale=2,3,1
+texture.albedo.transform.turbulence=0.01,0.02,0.03
+"
+    .to_vec();
+    let albedo_source = texture_bytes(1, 1, 32);
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/transform.mtl", material_source);
+    io.insert(albedo_path.path(), albedo_source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let albedo_id = database.import_asset_path(&albedo_path).unwrap();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Transform"]);
+    assert_eq!(material_metadata.dependencies, vec![albedo_id]);
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![albedo_id, mesh_id, material_id]
+    );
+
+    database.save_all_metadata_sidecars().unwrap();
+    let mut loaded_sidecars = AssetDatabase::new(config.clone());
+    loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .dependencies,
+        vec![albedo_id]
+    );
+
+    database
+        .cook_asset(albedo_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "material_texture_transform",
+            vec![mesh_id, material_id, albedo_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([albedo_id].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+    assert_eq!(reader.read_path(&albedo_path).unwrap(), albedo_source);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(material.textures.len(), 1);
+    assert_eq!(material.textures[0].name, "albedo");
+    assert_eq!(material.textures[0].texture.id(), albedo_id);
+    assert_eq!(
+        material.textures[0].options.transform.offset,
+        [0.25, 0.5, 0.0]
+    );
+    assert_eq!(
+        material.textures[0].options.transform.scale,
+        [2.0, 3.0, 1.0]
+    );
+    assert_eq!(
+        material.textures[0].options.transform.turbulence,
+        [0.01, 0.02, 0.03]
+    );
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_material_texture_resolution() {
     let config = database_config("builtin_model_obj_material_texture_resolution");
     let model_path = AssetPath::parse("models/texres.obj");
