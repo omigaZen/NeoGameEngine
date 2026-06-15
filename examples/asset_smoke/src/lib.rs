@@ -94,6 +94,7 @@ pub struct EditorSmokeReport {
     pub bundled_assets: usize,
     pub bundle_group_ready: bool,
     pub material_ready_with_dependencies: bool,
+    pub audio_ready_with_dependencies: bool,
     pub physics_ready_with_dependencies: bool,
     pub physics_world_mesh_ready: bool,
     pub physics_world_collider_ready: bool,
@@ -322,6 +323,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let texture_path = AssetPath::parse("textures/editor.texture");
     let mesh_path = AssetPath::parse("meshes/editor.mesh");
     let material_path = AssetPath::parse("materials/editor.material");
+    let audio_path = AssetPath::parse("audio/editor.audio");
     let physics_path = AssetPath::parse("physics/editor.physics");
     let scene_path = AssetPath::parse("scenes/editor.scene");
     let prefab_path = AssetPath::parse("prefabs/editor.prefab");
@@ -331,6 +333,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     io.insert(texture_path.path(), texture_bytes(1, 1));
     io.insert(mesh_path.path(), mesh_bytes());
     io.insert(material_path.path(), material_source);
+    io.insert(audio_path.path(), audio_bytes());
     io.insert(physics_path.path(), physics_mesh_bytes());
     io.insert(
         scene_path.path(),
@@ -357,6 +360,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let texture_id = database.import_asset_path(&texture_path).unwrap();
     let mesh_id = database.import_asset_path(&mesh_path).unwrap();
     let material_id = database.import_asset_path(&material_path).unwrap();
+    let audio_id = database.import_asset_path(&audio_path).unwrap();
     let physics_id = database.import_asset_path(&physics_path).unwrap();
     let scene_id = database.import_asset_path(&scene_path).unwrap();
     let prefab_id = database.import_asset_path(&prefab_path).unwrap();
@@ -364,6 +368,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         texture_id,
         mesh_id,
         material_id,
+        audio_id,
         physics_id,
         scene_id,
         prefab_id,
@@ -376,6 +381,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
             vec![
                 material_id,
                 mesh_id,
+                audio_id,
                 physics_id,
                 prefab_id,
                 scene_id,
@@ -391,6 +397,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let mounted = assets.mount_bundle_bytes(&bundle.bytes).unwrap();
     let group = assets.preload_bundle(&mounted);
     let material: Handle<Material> = assets.load(material_path);
+    let audio: Handle<AudioClip> = assets.load(audio_path);
     let physics: Handle<PhysicsMesh> = assets.load(physics_path);
     let scene: Handle<SceneAsset> = assets.load(scene_path);
     let prefab: Handle<Prefab> = assets.load(prefab_path);
@@ -424,6 +431,7 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         }
         if assets.group_state(&group) == AssetLoadState::Ready
             && assets.is_ready_with_dependencies(&material)
+            && assets.is_ready_with_dependencies(&audio)
             && assets.is_ready_with_dependencies(&physics)
             && assets.is_ready_with_dependencies(&scene)
             && assets.is_ready_with_dependencies(&prefab)
@@ -448,11 +456,12 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
 
     let report = EditorSmokeReport {
         scanned_sources,
-        imported_assets: 6,
-        cooked_assets: 6,
+        imported_assets: 7,
+        cooked_assets: 7,
         bundled_assets: bundle.asset_count,
         bundle_group_ready: assets.group_state(&group) == AssetLoadState::Ready,
         material_ready_with_dependencies: assets.is_ready_with_dependencies(&material),
+        audio_ready_with_dependencies: assets.is_ready_with_dependencies(&audio),
         physics_ready_with_dependencies: assets.is_ready_with_dependencies(&physics),
         physics_world_mesh_ready: physics_bridge.mesh_ready,
         physics_world_collider_ready: physics_bridge.collider_ready,
@@ -1286,12 +1295,13 @@ mod tests {
     fn editor_smoke_imports_cooks_bundles_and_loads_runtime_output() {
         let report = run_editor_smoke();
 
-        assert_eq!(report.scanned_sources, 6);
-        assert_eq!(report.imported_assets, 6);
-        assert_eq!(report.cooked_assets, 6);
-        assert_eq!(report.bundled_assets, 6);
+        assert_eq!(report.scanned_sources, 7);
+        assert_eq!(report.imported_assets, 7);
+        assert_eq!(report.cooked_assets, 7);
+        assert_eq!(report.bundled_assets, 7);
         assert!(report.bundle_group_ready);
         assert!(report.material_ready_with_dependencies);
+        assert!(report.audio_ready_with_dependencies);
         assert!(report.physics_ready_with_dependencies);
         assert!(report.physics_world_mesh_ready);
         assert!(report.physics_world_collider_ready);
