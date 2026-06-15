@@ -82,6 +82,8 @@ pub struct SmokeReport {
     pub render_handles: usize,
     pub audio_handles: usize,
     pub audio_alt_ready: bool,
+    pub audio_ready_with_dependencies: bool,
+    pub audio_alt_ready_with_dependencies: bool,
     pub audio_alt_handles: usize,
     pub skeleton_handles: usize,
     pub animation_handles: usize,
@@ -367,6 +369,8 @@ pub fn run_smoke() -> SmokeReport {
         render_handles: renderer.asset_handles().len(),
         audio_handles: audio.asset_handles().len(),
         audio_alt_ready: audio_alt.is_ready(&assets),
+        audio_ready_with_dependencies: assets.is_ready_with_dependencies(&audio.clip),
+        audio_alt_ready_with_dependencies: assets.is_ready_with_dependencies(&audio_alt.clip),
         physics_handles: physics.asset_handles().len(),
         events: assets.events().len(),
         ready_events,
@@ -1352,6 +1356,8 @@ mod tests {
         assert_eq!(report.render_handles, 2);
         assert_eq!(report.audio_handles, 1);
         assert_eq!(report.audio_alt_handles, 1);
+        assert!(report.audio_ready_with_dependencies);
+        assert!(report.audio_alt_ready_with_dependencies);
         assert_eq!(report.skeleton_handles, 1);
         assert_eq!(report.animation_handles, 1);
         assert_eq!(report.physics_handles, 1);
