@@ -2067,6 +2067,22 @@ fn mounted_bundle_registry_reports_manifest_line_count_overflow() {
 }
 
 #[test]
+fn mounted_bundle_registry_reports_missing_and_invalid_bundle_count_lines() {
+    assert!(matches!(
+        MountedBundleRegistry::from_text("NGA_MOUNTED_BUNDLE_REGISTRY_V1"),
+        Err(AssetError::Bundle { message }) if message.contains("missing `bundles=` line")
+    ));
+    assert!(matches!(
+        MountedBundleRegistry::from_text("NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundle=1"),
+        Err(AssetError::Bundle { message }) if message.contains("expected `bundles=` line")
+    ));
+    assert!(matches!(
+        MountedBundleRegistry::from_text("NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundles=abc"),
+        Err(AssetError::Bundle { message }) if message.contains("invalid mounted bundle count")
+    ));
+}
+
+#[test]
 fn asset_package_asset_override_report_tracks_semantic_policy_issues() {
     let base_dependency = AssetId::new();
     let base_material = AssetId::new();

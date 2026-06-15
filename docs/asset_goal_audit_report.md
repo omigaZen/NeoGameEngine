@@ -1988,3 +1988,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bund
 ```
 
 Result: mounted bundle registry parsing now also rejects manifest line count overflow explicitly. Replacing the serialized mounted bundle manifest line count with `usize::MAX` returns `mounted bundle manifest line count overflow` before any slice of the manifest payload is attempted.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bundle_registry_reports_missing_and_invalid_bundle_count_lines
+```
+
+Result: mounted bundle registry parsing now also rejects missing and malformed `bundles=` lines explicitly. A registry with no `bundles=` line returns `missing \`bundles=\` line`, a wrong prefix returns `expected \`bundles=\` line`, and a non-numeric bundle count returns `invalid mounted bundle count` before any bundle records are parsed.
