@@ -2392,6 +2392,18 @@ Result: `MeshImporter` now has direct importer evidence for text and binary mesh
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_source_into_mesh_and_material_subresources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_material_custom_properties
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_converts_obj_xyz_material_colors
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_ior_alias_custom_property
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_and_specular_texture_maps
+```
+
+Result: the core OBJ model-importer path and representative material-property/color variants now also pin source-hash metadata: the generated mesh/material subresources keep source-hash fields stable through import and sidecar reload, while the OBJ source test still round-trips the generated mesh/material bytes and dependency graph through cook, bundle, and runtime preload.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches
 ```
 

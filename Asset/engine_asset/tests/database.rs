@@ -6380,24 +6380,48 @@ emissive=0.1,0.2,0.3
         .unwrap()
         .id;
 
-    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
-    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
-    assert_eq!(mesh_metadata.labels, vec!["Prop"]);
-    assert_eq!(mesh_metadata.dependencies, vec![material_id]);
+    let mesh_source_hash = {
+        let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+        assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+        assert_eq!(mesh_metadata.labels, vec!["Prop"]);
+        assert_eq!(mesh_metadata.dependencies, vec![material_id]);
+        assert!(mesh_metadata.source_hash.is_some());
+        mesh_metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
     );
-    let material_metadata = database
-        .registry()
-        .metadata_by_path(&material_path)
-        .unwrap();
-    assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
-    assert_eq!(material_metadata.labels, vec!["Material/Red"]);
-    assert_eq!(material_metadata.dependencies, texture_ids);
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+        assert_eq!(material_metadata.labels, vec!["Material/Red"]);
+        assert_eq!(material_metadata.dependencies, texture_ids);
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
+    );
+    assert_eq!(
+        database
+            .registry()
+            .metadata_by_path(&mesh_path)
+            .unwrap()
+            .source_hash,
+        mesh_source_hash
+    );
+    assert_eq!(
+        database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
     );
     assert_eq!(
         database.registry().get(model_id).unwrap().dependencies,
@@ -8877,15 +8901,27 @@ custom.anisotropy_rotation.float=0.1
         .map(|path| database.import_asset_path(path).unwrap())
         .collect::<Vec<_>>();
     let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_source_hash = {
+        let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+        assert!(mesh_metadata.source_hash.is_some());
+        mesh_metadata.source_hash
+    };
     let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
-    let material_metadata = database
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.labels, vec!["Material/Coat"]);
+        assert_eq!(material_metadata.dependencies, texture_ids);
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
+    let material_id = database
         .registry()
         .metadata_by_path(&material_path)
-        .unwrap();
-    let material_id = material_metadata.id;
-
-    assert_eq!(material_metadata.labels, vec!["Material/Coat"]);
-    assert_eq!(material_metadata.dependencies, texture_ids);
+        .unwrap()
+        .id;
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -8903,10 +8939,26 @@ custom.anisotropy_rotation.float=0.1
     assert_eq!(
         loaded_sidecars
             .registry()
+            .metadata_by_path(&mesh_path)
+            .unwrap()
+            .source_hash,
+        mesh_source_hash
+    );
+    assert_eq!(
+        loaded_sidecars
+            .registry()
             .metadata_by_path(&material_path)
             .unwrap()
             .dependencies,
         texture_ids
+    );
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
     );
 
     for texture_id in &texture_ids {
@@ -9583,7 +9635,10 @@ texture.transmission_filter.source_channel=alpha
     let material_id = material_metadata.id;
 
     assert_eq!(material_metadata.labels, vec!["Material/AliasMaps"]);
-    assert_eq!(material_metadata.dependencies, vec![occlusion_id, transmission_id]);
+    assert_eq!(
+        material_metadata.dependencies,
+        vec![occlusion_id, transmission_id]
+    );
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -9687,10 +9742,8 @@ texture.transmission_filter=models/textures/{stem}.texture\n"
         )
         .into_bytes();
         let material_source = if directive == "map_transmittance_color" {
-            format!(
-                "newmtl Clear\n{directive} -imfchan alpha textures/{stem}.texture\n"
-            )
-            .into_bytes()
+            format!("newmtl Clear\n{directive} -imfchan alpha textures/{stem}.texture\n")
+                .into_bytes()
         } else {
             material_source
         };
@@ -9819,7 +9872,8 @@ fn database_model_importer_preserves_obj_pbr_material_extension_long_aliases() {
         let config = database_config(&format!("builtin_model_obj_{stem}"));
         let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
         let mesh_path = AssetPath::parse(&format!("models/{stem}.Panel.mesh"));
-        let material_path = AssetPath::parse(&format!("models/{stem}.Material_Extensions.material"));
+        let material_path =
+            AssetPath::parse(&format!("models/{stem}.Material_Extensions.material"));
         let texture_path = AssetPath::parse(&format!("models/textures/{stem}.texture"));
         let material_library = format!("{stem}.mtl");
         let model_source = format!(
@@ -9990,15 +10044,13 @@ f 1 2 3\n"
             || directive == "map_normalgl"
             || directive == "map_normaldx"
         {
-                format!(
+            format!(
                     "newmtl Surface\n{directive} -imfchan blue -colorspace Non-Color textures/{stem}.texture\n"
                 )
                 .into_bytes()
         } else {
-            format!(
-                "newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
-            )
-            .into_bytes()
+            format!("newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n")
+                .into_bytes()
         };
         let expected_material = format!(
             "# mtllib {material_library}\n\
@@ -11561,14 +11613,21 @@ base_color=0.2,0.3,0.4,1
 
     let model_id = database.import_asset_path(&model_path).unwrap();
     let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
-    let material_metadata = database
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.labels, vec!["Material/Rich"]);
+        assert!(material_metadata.dependencies.is_empty());
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
+    let material_id = database
         .registry()
         .metadata_by_path(&material_path)
-        .unwrap();
-    let material_id = material_metadata.id;
-
-    assert_eq!(material_metadata.labels, vec!["Material/Rich"]);
-    assert!(material_metadata.dependencies.is_empty());
+        .unwrap()
+        .id;
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11580,6 +11639,14 @@ base_color=0.2,0.3,0.4,1
     database.save_all_metadata_sidecars().unwrap();
     let mut loaded_sidecars = AssetDatabase::new(config.clone());
     loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
+    );
     assert_eq!(
         loaded_sidecars
             .registry()
@@ -11694,14 +11761,21 @@ emissive=0.100000225,0.10000761,0.099983454
 
     let model_id = database.import_asset_path(&model_path).unwrap();
     let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
-    let material_metadata = database
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.labels, vec!["Material/Xyz"]);
+        assert!(material_metadata.dependencies.is_empty());
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
+    let material_id = database
         .registry()
         .metadata_by_path(&material_path)
-        .unwrap();
-    let material_id = material_metadata.id;
-
-    assert_eq!(material_metadata.labels, vec!["Material/Xyz"]);
-    assert!(material_metadata.dependencies.is_empty());
+        .unwrap()
+        .id;
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11771,6 +11845,14 @@ emissive=0.100000225,0.10000761,0.099983454
             0.50000125, 0.500038, 0.49991727
         ]))
     );
+    assert_eq!(
+        database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
+    );
 }
 
 #[test]
@@ -11808,14 +11890,21 @@ custom.index_of_refraction.float=1.33
 
     let model_id = database.import_asset_path(&model_path).unwrap();
     let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
-    let material_metadata = database
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.labels, vec!["Material/Ior"]);
+        assert!(material_metadata.dependencies.is_empty());
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
+    let material_id = database
         .registry()
         .metadata_by_path(&material_path)
-        .unwrap();
-    let material_id = material_metadata.id;
-
-    assert_eq!(material_metadata.labels, vec!["Material/Ior"]);
-    assert!(material_metadata.dependencies.is_empty());
+        .unwrap()
+        .id;
     assert_eq!(
         fs::read(config.imported_root.join(material_path.path())).unwrap(),
         expected_material
@@ -11827,6 +11916,14 @@ custom.index_of_refraction.float=1.33
     database.save_all_metadata_sidecars().unwrap();
     let mut loaded_sidecars = AssetDatabase::new(config.clone());
     loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
+    );
     assert_eq!(
         loaded_sidecars
             .registry()
@@ -11928,15 +12025,22 @@ texture.specular.color_space=non_color
     let specular_id = database.import_asset_path(&specular_path).unwrap();
     let model_id = database.import_asset_path(&model_path).unwrap();
     let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
-    let material_metadata = database
+    let material_source_hash = {
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        assert_eq!(material_metadata.labels, vec!["Material/Lit"]);
+        assert!(material_metadata.dependencies.contains(&occlusion_id));
+        assert!(material_metadata.dependencies.contains(&specular_id));
+        assert!(material_metadata.source_hash.is_some());
+        material_metadata.source_hash
+    };
+    let material_id = database
         .registry()
         .metadata_by_path(&material_path)
-        .unwrap();
-    let material_id = material_metadata.id;
-
-    assert_eq!(material_metadata.labels, vec!["Material/Lit"]);
-    assert!(material_metadata.dependencies.contains(&occlusion_id));
-    assert!(material_metadata.dependencies.contains(&specular_id));
+        .unwrap()
+        .id;
     let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
     assert!(model_dependencies.contains(&mesh_id));
     assert!(model_dependencies.contains(&material_id));
@@ -11951,6 +12055,14 @@ texture.specular.color_space=non_color
     database.save_all_metadata_sidecars().unwrap();
     let mut loaded_sidecars = AssetDatabase::new(config.clone());
     loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .source_hash,
+        material_source_hash
+    );
     let loaded_material_dependencies = &loaded_sidecars
         .registry()
         .metadata_by_path(&material_path)
@@ -12387,7 +12499,7 @@ newmtl Normal
 map_normal -imfchan blue textures/normal_map.texture
 "
     .to_vec();
-let expected_kn_material = b"# mtllib normal_map_aliases.mtl
+    let expected_kn_material = b"# mtllib normal_map_aliases.mtl
 name=Kn
 texture.normal=models/textures/kn_normal.texture
 texture.normal.bump_scale=0.4
@@ -21595,7 +21707,10 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.metadata.source_hash, texture_source_hash);
-    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -21902,7 +22017,10 @@ fn database_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     assert_eq!(output.bytes, expected_cooked);
     assert_eq!(output.version_hash, VersionHash(4));
     assert_eq!(output.metadata.source_hash, mesh_source_hash);
-    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected_cooked
@@ -22293,7 +22411,10 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.metadata.source_hash, shader_source_hash);
-    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22370,7 +22491,10 @@ fn database_shader_importer_preserves_glsl_source_language() {
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.metadata.source_hash, shader_source_hash);
-    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22440,7 +22564,10 @@ fn database_shader_importer_preserves_spv_source_language() {
     assert_eq!(output.bytes, expected);
     assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.metadata.source_hash, shader_source_hash);
-    assert_eq!(output.metadata, database.registry().get(id).unwrap().clone());
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
