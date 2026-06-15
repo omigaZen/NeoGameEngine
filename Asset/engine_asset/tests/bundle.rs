@@ -3233,6 +3233,25 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         Some(content_hash(&texture_bytes(1, 1, 37)))
     );
 
+    let registry_path = root.join("zstd_packages.txt");
+    registry.save_to_file(&registry_path).unwrap();
+    let loaded_registry = AssetPackageRegistry::load_from_file(&registry_path).unwrap();
+    assert_eq!(loaded_registry, registry);
+    let loaded_composite = store.build_composite_io(&loaded_registry).unwrap();
+    assert_eq!(
+        loaded_composite
+            .read("textures/zstd_extra_a.texture")
+            .unwrap(),
+        texture_bytes(1, 1, 36)
+    );
+    assert_eq!(
+        loaded_composite
+            .metadata("textures/zstd_extra_b.texture")
+            .unwrap()
+            .hash,
+        Some(content_hash(&texture_bytes(1, 1, 37)))
+    );
+
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_io(composite);
     server.register_builtin_loaders();

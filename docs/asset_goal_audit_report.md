@@ -2412,6 +2412,14 @@ Result: the Zstd artifact-registry regression now also covers package removal an
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
+```
+
+Result: the Zstd artifact-registry regression now also pins text registry persistence. Saving the registry to text and loading it back preserves the Zstd package records, and the reloaded registry still builds the same composite IO view for the Zstd package bytes.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
 ```
 
