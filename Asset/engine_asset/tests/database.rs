@@ -12453,6 +12453,131 @@ texture.emissive.projection=sphere
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_emission_color_texture_alias() {
+    let config = database_config("builtin_model_obj_emission_color_texture_alias");
+    let model_path = AssetPath::parse("models/emission_color.obj");
+    let mesh_path = AssetPath::parse("models/emission_color.Panel.mesh");
+    let material_path = AssetPath::parse("models/emission_color.Material_Glow.material");
+    let emissive_path = AssetPath::parse("models/textures/glow_emission.texture");
+    let model_source = b"mtllib emission_color.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Glow
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Glow
+map_emission_color -type sphere -imfchan r textures/glow_emission.texture
+"
+    .to_vec();
+    let expected_material = b"# mtllib emission_color.mtl
+name=Glow
+texture.emissive=models/textures/glow_emission.texture
+texture.emissive.source_channel=red
+texture.emissive.projection=sphere
+"
+    .to_vec();
+    let emissive_source = texture_bytes(1, 1, 107);
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/emission_color.mtl", material_source);
+    io.insert(emissive_path.path(), emissive_source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let emissive_id = database.import_asset_path(&emissive_path).unwrap();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Glow"]);
+    assert!(material_metadata.dependencies.contains(&emissive_id));
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert!(model_dependencies.contains(&mesh_id));
+    assert!(model_dependencies.contains(&material_id));
+    let material_dependencies = &database.registry().get(material_id).unwrap().dependencies;
+    assert!(material_dependencies.contains(&emissive_id));
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+
+    database.save_all_metadata_sidecars().unwrap();
+    let mut loaded_sidecars = AssetDatabase::new(config.clone());
+    loaded_sidecars.load_metadata_sidecars().unwrap();
+    let loaded_material_dependencies = &loaded_sidecars
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap()
+        .dependencies;
+    assert!(loaded_material_dependencies.contains(&emissive_id));
+
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(emissive_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "material_emission_color_alias",
+            vec![mesh_id, material_id, emissive_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    let bundle_material_dependencies = reader.manifest().dependencies(material_id).unwrap();
+    assert!(bundle_material_dependencies.contains(&emissive_id));
+    assert_eq!(
+        reader.manifest().dependencies(emissive_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(material.textures[0].name, "emissive");
+    assert_eq!(material.textures[0].texture.id(), emissive_id);
+    assert_eq!(
+        material.textures[0].options.source_channel,
+        Some(MaterialTextureChannel::Red)
+    );
+    assert_eq!(
+        material.textures[0].options.projection,
+        Some(MaterialTextureProjection::Sphere)
+    );
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_metallic_and_roughness_texture_maps() {
     let config = database_config("builtin_model_obj_metallic_roughness_texture_maps");
     let model_path = AssetPath::parse("models/metallic_roughness.obj");
