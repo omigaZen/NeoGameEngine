@@ -1058,6 +1058,17 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         "packages/valid.nga_bundle",
         vec![("textures/valid.texture", texture_bytes(1, 1, 1))],
     );
+    let dependency_registry = AssetPackageRegistry::new(vec![valid
+        .clone()
+        .with_package_dependency(AssetPackageDependency::new("base_dependency", 2))])
+    .unwrap();
+    let malformed_dependency_text = dependency_registry
+        .to_text()
+        .replace("base_dependency:2:", "base_dependency:2");
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&malformed_dependency_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package dependency field")
+    ));
     let (mut duplicate_name, _duplicate_bundle, _) = texture_package(
         "valid",
         AssetIoLayerKind::Mod,
