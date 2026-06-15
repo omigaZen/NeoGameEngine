@@ -277,6 +277,47 @@ fn hot_reload_async_watch_backend_reports_errors_and_stop_drops_pending_notifica
 }
 
 #[test]
+fn hot_reload_async_watch_backend_start_and_stop_are_idempotent() {
+    let path = AssetPath::parse("textures/async_idempotent.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+
+    server
+        .watch_hot_reload_path_with_backend(path.clone(), HotReloadWatchBackend::AsyncNotification)
+        .unwrap();
+
+    let first_start = server.start_hot_reload_async_watch_backend().unwrap();
+    assert!(first_start.is_running());
+    assert_eq!(first_start.watched_paths, 1);
+    assert_eq!(first_start.pending_notifications, 0);
+
+    let second_start = server.start_hot_reload_async_watch_backend().unwrap();
+    assert!(second_start.is_running());
+    assert_eq!(second_start.watched_paths, 1);
+    assert_eq!(second_start.pending_notifications, 0);
+
+    assert!(server
+        .notify_hot_reload_async_watch_change(path.clone())
+        .unwrap());
+    assert_eq!(server.hot_reload_async_watch_report().pending_notifications, 1);
+
+    let first_stop = server.stop_hot_reload_async_watch_backend().unwrap();
+    assert!(!first_stop.is_running());
+    assert_eq!(first_stop.pending_notifications, 0);
+    assert_eq!(first_stop.dropped_notifications, 1);
+
+    let second_stop = server.stop_hot_reload_async_watch_backend().unwrap();
+    assert!(!second_stop.is_running());
+    assert_eq!(second_stop.pending_notifications, 0);
+    assert_eq!(second_stop.dropped_notifications, 1);
+
+    assert!(!server
+        .notify_hot_reload_async_watch_change(path)
+        .unwrap());
+    assert_eq!(server.hot_reload_async_watch_report().dropped_notifications, 2);
+}
+
+#[test]
 fn hot_reload_success_keeps_handle_id_and_replaces_asset_after_upload() {
     let path = AssetPath::parse("textures/hero.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));

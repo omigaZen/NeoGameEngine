@@ -1757,6 +1757,14 @@ Result: bundle-registry validation now has explicit regression coverage for zero
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload hot_reload_async_watch_backend_start_and_stop_are_idempotent
+```
+
+Result: the async hot-reload watch backend now has an explicit state-machine regression for repeated `start` and `stop` calls. Starting twice keeps the backend running without disturbing queued notifications, stopping twice keeps it stopped without double-counting dropped notifications, and notifications sent while stopped still increment the dropped counter.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
 C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
