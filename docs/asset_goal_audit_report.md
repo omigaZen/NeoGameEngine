@@ -123,6 +123,14 @@ Result: `SceneCooker` and `PrefabCooker` now have direct pass-through round-trip
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_scene_prefab_and_physics_mesh_cookers_pass_through_runtime_and_source_bytes
+```
+
+Result: `SceneCooker`, `PrefabCooker`, and `PhysicsMeshCooker` now have direct runtime/source pass-through evidence: runtime and source bytes are preserved unchanged, `SceneCooker` and `PrefabCooker` report `VersionHash(1)`, and `PhysicsMeshCooker` reports `VersionHash(1)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_occlusion_texture_colorspace
 ```
 

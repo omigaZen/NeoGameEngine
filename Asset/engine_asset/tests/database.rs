@@ -1773,6 +1773,113 @@ fn database_font_cooker_canonicalizes_runtime_and_source_bytes() {
 }
 
 #[test]
+fn database_scene_prefab_and_physics_mesh_cookers_pass_through_runtime_and_source_bytes() {
+    let scene_path = AssetPath::parse("scenes/cooked_runtime.scene");
+    let prefab_path = AssetPath::parse("prefabs/cooked_runtime.prefab");
+    let physics_path = AssetPath::parse("physics/cooked_runtime.physics");
+    let scene_runtime_bytes =
+        b"NGA_SCENE_V1\nname=runtime_scene\ndependency=textures/albedo.texture\n".to_vec();
+    let prefab_runtime_bytes =
+        b"NGA_PREFAB_V1\ndependency=textures/albedo.texture\nroot=Root\n".to_vec();
+    let physics_runtime_bytes = physics_mesh_bytes();
+    let scene_runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(scene_path.clone()),
+        source_bytes: scene_runtime_bytes.clone(),
+    };
+    let prefab_runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(prefab_path.clone()),
+        source_bytes: prefab_runtime_bytes.clone(),
+    };
+    let physics_runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(physics_path.clone()),
+        source_bytes: physics_runtime_bytes.clone(),
+    };
+    let scene_runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), scene_path, AssetTypeId::of::<SceneAsset>());
+    let prefab_runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), prefab_path, AssetTypeId::of::<Prefab>());
+    let physics_runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        physics_path,
+        AssetTypeId::of::<PhysicsMesh>(),
+    );
+    let scene_source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(AssetPath::parse("scenes/from_source.scene")),
+        source_bytes: scene_runtime_bytes.clone(),
+    };
+    let prefab_source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(AssetPath::parse("prefabs/from_source.prefab")),
+        source_bytes: prefab_runtime_bytes.clone(),
+    };
+    let physics_source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(AssetPath::parse("physics/from_source.physics")),
+        source_bytes: physics_runtime_bytes.clone(),
+    };
+    let scene_source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        AssetPath::parse("scenes/from_source.scene"),
+        AssetTypeId::of::<SceneAsset>(),
+    );
+    let prefab_source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        AssetPath::parse("prefabs/from_source.prefab"),
+        AssetTypeId::of::<Prefab>(),
+    );
+    let physics_source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        AssetPath::parse("physics/from_source.physics"),
+        AssetTypeId::of::<PhysicsMesh>(),
+    );
+    let scene_cooker = SceneCooker::new();
+    let prefab_cooker = PrefabCooker::new();
+    let physics_cooker = PhysicsMeshCooker::new();
+
+    let scene_runtime_output = scene_cooker
+        .cook(&scene_runtime_ctx, &scene_runtime_metadata)
+        .unwrap();
+    let prefab_runtime_output = prefab_cooker
+        .cook(&prefab_runtime_ctx, &prefab_runtime_metadata)
+        .unwrap();
+    let physics_runtime_output = physics_cooker
+        .cook(&physics_runtime_ctx, &physics_runtime_metadata)
+        .unwrap();
+    let scene_source_output = scene_cooker
+        .cook(&scene_source_ctx, &scene_source_metadata)
+        .unwrap();
+    let prefab_source_output = prefab_cooker
+        .cook(&prefab_source_ctx, &prefab_source_metadata)
+        .unwrap();
+    let physics_source_output = physics_cooker
+        .cook(&physics_source_ctx, &physics_source_metadata)
+        .unwrap();
+
+    assert_eq!(scene_runtime_output.bytes, scene_runtime_bytes);
+    assert_eq!(scene_runtime_output.version_hash, VersionHash(1));
+    assert_eq!(scene_runtime_output.metadata, scene_runtime_metadata);
+    assert_eq!(prefab_runtime_output.bytes, prefab_runtime_bytes);
+    assert_eq!(prefab_runtime_output.version_hash, VersionHash(1));
+    assert_eq!(prefab_runtime_output.metadata, prefab_runtime_metadata);
+    assert_eq!(physics_runtime_output.bytes, physics_runtime_bytes);
+    assert_eq!(physics_runtime_output.version_hash, VersionHash(1));
+    assert_eq!(physics_runtime_output.metadata, physics_runtime_metadata);
+    assert_eq!(scene_source_output.bytes, scene_runtime_bytes);
+    assert_eq!(scene_source_output.version_hash, VersionHash(1));
+    assert_eq!(scene_source_output.metadata, scene_source_metadata);
+    assert_eq!(prefab_source_output.bytes, prefab_runtime_bytes);
+    assert_eq!(prefab_source_output.version_hash, VersionHash(1));
+    assert_eq!(prefab_source_output.metadata, prefab_source_metadata);
+    assert_eq!(physics_source_output.bytes, physics_runtime_bytes);
+    assert_eq!(physics_source_output.version_hash, VersionHash(1));
+    assert_eq!(physics_source_output.metadata, physics_source_metadata);
+}
+
+#[test]
 fn database_shader_cooker_canonicalizes_source_documents() {
     let shader_path = AssetPath::parse("shaders/cooked.wgsl");
     let source =
