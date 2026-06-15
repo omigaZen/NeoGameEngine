@@ -15217,6 +15217,46 @@ refl -type cylinder textures/reflection.texture
 }
 
 #[test]
+fn database_model_importer_reports_invalid_obj_material_texture_color_space() {
+    let config = database_config("builtin_model_obj_invalid_material_texture_colorspace");
+    let model_path = AssetPath::parse("models/bad_texture_colorspace.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_texture_colorspace.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_texture_colorspace.mtl",
+        b"newmtl Red
+map_Kd -colorspace invalid textures/albedo.texture
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_texture_colorspace.obj")
+                && message.contains(
+                    "OBJ material library `bad_texture_colorspace.mtl` at `models/bad_texture_colorspace.mtl` map_Kd option -colorspace value `invalid` on line 2"
+                )
+    ));
+}
+
+#[test]
 fn database_model_importer_reports_unterminated_obj_material_texture_quote() {
     let config = database_config("builtin_model_obj_unterminated_material_texture_quote");
     let model_path = AssetPath::parse("models/bad_texture_quote.obj");
