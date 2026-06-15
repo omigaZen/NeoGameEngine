@@ -1844,3 +1844,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming remove_st
 ```
 
 Result: `remove_streaming_region()` now has the same missing-region regression coverage. Removing an unknown streaming region returns `AddressNotFound` before any residency release or state mutation happens.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_builds_and_removes_package_files
+```
+
+Result: package artifact removal now also covers the post-delete read failure path. After `delete_artifact=true`, `load_package_bytes()` returns the expected IO error for the removed artifact path instead of silently reusing stale bytes.

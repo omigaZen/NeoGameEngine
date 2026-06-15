@@ -1259,6 +1259,10 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
     assert_eq!(removed.removed.name, "artifact_patch");
     assert!(removed.artifact_removed);
     assert!(!removed.artifact_path.exists());
+    assert!(matches!(
+        store.load_package_bytes(&removed.removed),
+        Err(AssetError::Io { message }) if message.contains("failed to read") && message.contains("artifact_patch.bundle")
+    ));
     assert!(!removed.conflicts.has_conflicts());
     assert_eq!(registry.packages().len(), 1);
     assert!(store.verify_registry(&registry).unwrap().all_available());
