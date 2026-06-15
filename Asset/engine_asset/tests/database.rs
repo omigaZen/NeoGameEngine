@@ -13329,6 +13329,128 @@ base_color=0,0,1,1
 }
 
 #[test]
+fn database_model_importer_includes_nested_obj_call_relative_material_libraries() {
+    let config = database_config("builtin_model_obj_nested_call_relative_material_libraries");
+    let model_path = AssetPath::parse("models/assembled.obj");
+    let include_path = AssetPath::parse("models/parts/assembly.obj");
+    let nested_include_path = AssetPath::parse("models/parts/sub/detail.obj");
+    let nested_material_library_path = AssetPath::parse("models/parts/sub/detail.mtl");
+    let mesh_path = AssetPath::parse("models/assembled.Panel.mesh");
+    let nested_material_path = AssetPath::parse("models/assembled.Material_Detail.material");
+    let model_source = b"call parts/assembly.obj
+"
+    .to_vec();
+    let include_source = b"call sub/detail.obj
+"
+    .to_vec();
+    let nested_include_source = b"mtllib detail.mtl
+usemtl Detail
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let nested_material_source = b"newmtl Detail
+Kd 0.75 0.25 0.25
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let expected_nested_material = b"# mtllib detail.mtl
+name=Detail
+base_color=0.75,0.25,0.25,1
+"
+    .to_vec();
+    let mut first_io = MemoryAssetIo::new();
+    first_io.insert(model_path.path(), model_source.clone());
+    first_io.insert(include_path.path(), include_source.clone());
+    first_io.insert(nested_include_path.path(), nested_include_source.clone());
+    first_io.insert(
+        nested_material_library_path.path(),
+        nested_material_source.clone(),
+    );
+    let mut first = AssetDatabase::new(config.clone());
+    first.set_io(first_io);
+    first.register_builtin_importers();
+
+    let model_id = first.import_asset_path(&model_path).unwrap();
+    let first_hash = first.registry().get(model_id).unwrap().source_hash.unwrap();
+    let mesh_metadata = first.registry().metadata_by_path(&mesh_path).unwrap();
+    let nested_material_metadata = first
+        .registry()
+        .metadata_by_path(&nested_material_path)
+        .unwrap();
+    let mesh_id = mesh_metadata.id;
+    let nested_material_id = nested_material_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["Panel"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(mesh_metadata.dependencies, vec![nested_material_id]);
+    assert_eq!(nested_material_metadata.labels, vec!["Material/Detail"]);
+    assert_eq!(
+        first.registry().get(model_id).unwrap().dependencies.len(),
+        2
+    );
+    assert!(first
+        .registry()
+        .get(model_id)
+        .unwrap()
+        .dependencies
+        .contains(&mesh_id));
+    assert!(first
+        .registry()
+        .get(model_id)
+        .unwrap()
+        .dependencies
+        .contains(&nested_material_id));
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_material_path.path())).unwrap(),
+        expected_nested_material
+    );
+    first.save_all_metadata_sidecars().unwrap();
+
+    let mut second_io = MemoryAssetIo::new();
+    second_io.insert(model_path.path(), model_source);
+    second_io.insert(include_path.path(), include_source);
+    second_io.insert(nested_include_path.path(), nested_include_source);
+    second_io.insert(
+        nested_material_library_path.path(),
+        b"newmtl Detail\nKd 0.25 0.75 0.25\n".to_vec(),
+    );
+    let mut second = AssetDatabase::new(config.clone());
+    second.set_io(second_io);
+    second.register_builtin_importers();
+
+    let report = second.scan_with_metadata().unwrap();
+    assert!(report.changed.contains(&model_path));
+    assert!(report.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic,
+            AssetDatabaseDiagnostic::ChangedSource {
+                id,
+                path,
+                previous_hash,
+                current_hash,
+            } if *id == model_id
+                && *path == model_path
+                && *previous_hash == first_hash
+                && previous_hash != current_hash
+        )
+    }));
+}
+
+#[test]
 #[cfg(feature = "bundle")]
 fn database_model_importer_accepts_nested_obj_display_attributes() {
     let config = database_config("builtin_model_obj_nested_display_attributes");
