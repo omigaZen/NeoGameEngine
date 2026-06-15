@@ -1048,6 +1048,14 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package count")
     ));
     assert!(matches!(
+        AssetPackageRegistry::from_text("NGA_ASSET_PACKAGE_REGISTRY_V1"),
+        Err(AssetError::Bundle { message }) if message.contains("missing `packages=` line")
+    ));
+    assert!(matches!(
+        AssetPackageRegistry::from_text("NGA_ASSET_PACKAGE_REGISTRY_V1\npackage=1"),
+        Err(AssetError::Bundle { message }) if message.contains("expected `packages=` line")
+    ));
+    assert!(matches!(
         AssetPackageRegistry::from_text(
             "NGA_ASSET_PACKAGE_REGISTRY_V1\npackages=1\npackage|1|0|true|patch|patch|packages/patch.nga_bundle|2\nNGA_BUNDLE_V2"
         ),
@@ -1111,6 +1119,14 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
     assert!(matches!(
         AssetPackageRegistry::from_text(&invalid_minimum_runtime_text),
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package minimum runtime version")
+    ));
+    let invalid_enabled_text =
+        dependency_registry
+            .to_text()
+            .replacen("package|1|0|true|", "package|1|0|maybe|", 1);
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_enabled_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package enabled")
     ));
     let missing_package_line_text = dependency_registry
         .to_text()
