@@ -8058,12 +8058,15 @@ usemtl Cutout\n\
 f 1 2 3\n"
         )
         .into_bytes();
-        let material_source =
-            format!("newmtl Cutout\n{directive} textures/{stem}_alpha.texture\n").into_bytes();
+        let material_source = format!(
+            "newmtl Cutout\n{directive} -colorspace Non-Color textures/{stem}_alpha.texture\n"
+        )
+        .into_bytes();
         let expected_material = format!(
             "# mtllib {material_library}\n\
 name=Cutout\n\
 texture.alpha=models/textures/{stem}_alpha.texture\n\
+texture.alpha.color_space=non_color\n\
 alpha_mode=blend\n"
         )
         .into_bytes();
@@ -8148,6 +8151,10 @@ alpha_mode=blend\n"
         assert_eq!(material.textures.len(), 1);
         assert_eq!(material.textures[0].name, "alpha");
         assert_eq!(material.textures[0].texture.id(), alpha_id);
+        assert_eq!(
+            material.textures[0].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
+        );
     }
 }
 
