@@ -2161,3 +2161,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture color-correction preservation now also has a stable negative polarity regression for `map_Kd -cc off`. A valid import keeps `texture.albedo.color_correction=false`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the disabled color-correction flag.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_blend_modes
+```
+
+Result: OBJ material texture blend-mode preservation now has a stable positive regression for `map_Kd -blendu ON -blendv OFF`. A valid import keeps `texture.albedo.blend_u=true` and `texture.albedo.blend_v=false`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the blend-mode flags.
