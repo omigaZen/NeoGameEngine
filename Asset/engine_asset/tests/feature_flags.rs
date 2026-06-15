@@ -64,6 +64,14 @@ fn disabled_async_loading_config_reports_visible_unsupported_diagnostic() {
 
     server.config_mut().enable_async_loading = true;
     let report = server.loading_policy_report();
+    assert_eq!(
+        report.async_loading_feature,
+        asset_feature_status(AssetFeature::AsyncLoading)
+    );
+    assert_eq!(
+        report.parallel_feature,
+        asset_feature_status(AssetFeature::Parallel)
+    );
     assert_eq!(report.mode, AssetLoadingExecutionMode::Synchronous);
     assert_eq!(report.effective_worker_threads, 0);
     assert_eq!(
@@ -87,7 +95,14 @@ fn enabled_async_loading_config_reports_worker_execution_mode() {
     server.set_async_loading_enabled(true).unwrap();
 
     let report = server.loading_policy_report();
-    assert!(report.async_loading_feature.enabled);
+    assert_eq!(
+        report.async_loading_feature,
+        asset_feature_status(AssetFeature::AsyncLoading)
+    );
+    assert_eq!(
+        report.parallel_feature,
+        asset_feature_status(AssetFeature::Parallel)
+    );
     assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
     assert_eq!(report.requested_async_loading, true);
     assert_eq!(report.effective_worker_threads, 1);
@@ -110,6 +125,14 @@ fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
 
     server.config_mut().worker_threads = 2;
     let report = server.loading_policy_report();
+    assert_eq!(
+        report.async_loading_feature,
+        asset_feature_status(AssetFeature::AsyncLoading)
+    );
+    assert_eq!(
+        report.parallel_feature,
+        asset_feature_status(AssetFeature::Parallel)
+    );
     assert_eq!(report.requested_worker_threads, 2);
     assert_eq!(report.effective_worker_threads, 0);
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -134,7 +157,14 @@ fn enabled_parallel_config_accepts_worker_count_without_async_loading() {
     server.set_parallel_worker_threads(4).unwrap();
 
     let report = server.loading_policy_report();
-    assert!(report.parallel_feature.enabled);
+    assert_eq!(
+        report.async_loading_feature,
+        asset_feature_status(AssetFeature::AsyncLoading)
+    );
+    assert_eq!(
+        report.parallel_feature,
+        asset_feature_status(AssetFeature::Parallel)
+    );
     assert_eq!(report.requested_worker_threads, 4);
     assert_eq!(report.effective_worker_threads, 0);
     assert!(report.diagnostics.is_empty());
@@ -151,7 +181,14 @@ fn enabled_async_parallel_config_reports_effective_worker_count() {
     server.set_parallel_worker_threads(4).unwrap();
 
     let report = server.loading_policy_report();
-    assert!(report.parallel_feature.enabled);
+    assert_eq!(
+        report.async_loading_feature,
+        asset_feature_status(AssetFeature::AsyncLoading)
+    );
+    assert_eq!(
+        report.parallel_feature,
+        asset_feature_status(AssetFeature::Parallel)
+    );
     assert_eq!(report.mode, AssetLoadingExecutionMode::WorkerAsync);
     assert_eq!(report.requested_worker_threads, 4);
     assert_eq!(report.effective_worker_threads, 4);
