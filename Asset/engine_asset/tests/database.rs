@@ -1769,6 +1769,28 @@ fn database_builtin_model_importer_generates_labeled_subresources_and_runtime_ou
         asset: material_id,
         dependency: texture_id,
     }));
+    assert!(database.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        model_id.raw(),
+        skeleton_id.raw()
+    )));
+    assert!(database.dependency_report_text().contains(&format!(
+        "edge|{}|{}",
+        model_id.raw(),
+        animation_id.raw()
+    )));
+    assert!(database
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", skeleton_id.raw())));
+    assert!(database
+        .dependency_report_json()
+        .contains(&format!("\"{}\"", animation_id.raw())));
+    assert!(database
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", skeleton_id.raw())));
+    assert!(database
+        .dependency_report_html()
+        .contains(&format!("<code>{}</code>", animation_id.raw())));
     let model_scope = database.scoped_dependency_report(model_id).unwrap();
     assert!(model_scope.direct_dependencies.contains(&material_id));
     assert!(model_scope.direct_dependencies.contains(&skeleton_id));
