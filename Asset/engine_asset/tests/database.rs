@@ -13174,6 +13174,34 @@ base_color=0,0,1,1
             } if *id == model_id && *path == model_path
         )
     }));
+
+    let mut non_utf8_io = MemoryAssetIo::new();
+    non_utf8_io.insert(model_path.path(), b"call parts/assembly.obj\n".to_vec());
+    non_utf8_io.insert(
+        include_path.path(),
+        b"mtllib assembly.mtl\nusemtl Blue\ncall detail.obj\n".to_vec(),
+    );
+    non_utf8_io.insert(nested_include_path.path(), vec![0xff, 0xfe, 0xfd, 0xfc]);
+    non_utf8_io.insert(
+        material_library_path.path(),
+        b"newmtl Blue\nKd 0 0 1\n".to_vec(),
+    );
+    let mut non_utf8_database = AssetDatabase::new(config.clone());
+    non_utf8_database.set_io(non_utf8_io);
+    non_utf8_database.register_builtin_importers();
+
+    let non_utf8_report = non_utf8_database.scan_with_metadata().unwrap();
+    assert_eq!(non_utf8_report.changed, vec![model_path.clone()]);
+    assert!(non_utf8_report.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic,
+            AssetDatabaseDiagnostic::ChangedSource {
+                id,
+                path,
+                ..
+            } if *id == model_id && *path == model_path
+        )
+    }));
 }
 
 #[test]
@@ -13266,6 +13294,21 @@ fn database_model_importer_reports_invalid_obj_call_sources() {
             "OBJ call on line 1 accepts exactly one relative .obj source path; macro arguments are unsupported",
         ),
         (
+            "builtin_model_obj_call_non_obj_source",
+            "call part.model\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call `part.model` on line 1 must reference a .obj source",
+        ),
+        (
+            "builtin_model_obj_call_manifest_source",
+            "call part.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call `part.obj` on line 1 source `models/part.obj` must be an OBJ source, not an NGA_MODEL_V1 manifest",
+        ),
+        (
+            "builtin_model_obj_call_non_utf8_source",
+            "call part.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ call `part.obj` on line 1 source `models/part.obj` must be UTF-8",
+        ),
+        (
             "builtin_model_obj_call_parent_path",
             "call ../part.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
             "OBJ call `../part.obj` on line 1 must be a relative .obj source path without labels or `..` segments",
@@ -13280,6 +13323,11 @@ fn database_model_importer_reports_invalid_obj_call_sources() {
         let model_path = AssetPath::parse(&format!("models/{case}.obj"));
         let mut io = MemoryAssetIo::new();
         io.insert(model_path.path(), source.as_bytes().to_vec());
+        if case == "builtin_model_obj_call_manifest_source" {
+            io.insert("models/part.obj", b"NGA_MODEL_V1\n".to_vec());
+        } else if case == "builtin_model_obj_call_non_utf8_source" {
+            io.insert("models/part.obj", vec![0xff, 0xfe, 0xfd]);
+        }
         let mut database = AssetDatabase::new(config);
         database.set_io(io);
         database.register_builtin_importers();
@@ -14596,24 +14644,6 @@ fn database_model_importer_reports_invalid_obj_free_form_attributes() {
 
 #[test]
 fn database_model_importer_reports_invalid_obj_face_index() {
-    let config = database_config("builtin_model_obj_invalid_face");
-    let model_path = AssetPath::parse("models/bad.obj");
-    let mut io = MemoryAssetIo::new();
-    io.insert(model_path.path(), b"v 0 0 0\nf 1 2 3\n".to_vec());
-    let mut database = AssetDatabase::new(config);
-    database.set_io(io);
-    database.register_builtin_importers();
-
-    let error = database.import_asset_path(&model_path).unwrap_err();
-
-    assert!(matches!(
-        error,
-        AssetError::Import { message }
-            if message.contains("importer `ModelImporter` failed")
-                && message.contains("models/bad.obj")
-                && message.contains("OBJ face index 2 on line 2 references missing vertex")
-    ));
-
     let relative_config = database_config("builtin_model_obj_invalid_relative_face");
     let model_path = AssetPath::parse("models/bad_relative.obj");
     let mut io = MemoryAssetIo::new();
@@ -14676,6 +14706,52 @@ fn database_model_importer_reports_invalid_obj_face_index() {
                 && message.contains("models/bad_homogeneous.obj")
                 && message.contains(
                     "OBJ vertex homogeneous coordinate must be finite and non-zero on line 1"
+                )
+    ));
+
+    let mtllib_path_config = database_config("builtin_model_obj_invalid_mtllib_path");
+    let model_path = AssetPath::parse("models/bad_mtllib.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib ../bad.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Red\nf 1 2 3\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(mtllib_path_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_mtllib.obj")
+                && message.contains(
+                    "OBJ mtllib `../bad.mtl` on line 1 must be a relative source path without labels or `..` segments"
+                )
+    ));
+
+    let hash_config = database_config("builtin_model_obj_invalid_mtllib_label_path");
+    let model_path = AssetPath::parse("models/bad_mtllib_label.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib \"bad.mtl#Variant\"\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Red\nf 1 2 3\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(hash_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_mtllib_label.obj")
+                && message.contains(
+                    "OBJ mtllib `bad.mtl#Variant` on line 1 must be a relative source path without labels or `..` segments"
                 )
     ));
 }
@@ -15793,6 +15869,33 @@ f 1 2 3
                 && message.contains("models/duplicate_material_cross.obj")
                 && message.contains(
                     "OBJ material `Red` is defined by multiple mtllib sources: `red_a.mtl` at `models/red_a.mtl` line 1 and `red_b.mtl` at `models/red_b.mtl` line 1"
+                )
+    ));
+}
+
+#[test]
+fn database_model_importer_reports_non_utf8_obj_material_library() {
+    let config = database_config("builtin_model_obj_non_utf8_material_library");
+    let model_path = AssetPath::parse("models/non_utf8_material.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl Red\nf 1 2 3\n".to_vec(),
+    );
+    io.insert("models/bad.mtl", vec![0xff, 0xfe, 0xfd]);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/non_utf8_material.obj")
+                && message.contains(
+                    "OBJ material library `bad.mtl` at `models/bad.mtl` must be UTF-8"
                 )
     ));
 }

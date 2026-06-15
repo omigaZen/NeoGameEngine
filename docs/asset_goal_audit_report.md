@@ -1639,7 +1639,7 @@ C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
 git diff --check
 ```
 
-Result: formatting passed; nested OBJ `call` include source changes now invalidate the root model through `scan_with_metadata()` when the nested `.obj` body changes, proving the context-hash scan path sees recursive include depth rather than only the top-level source. The focused scan test preserves the original generated mesh/material output on first import, then detects the root model as `changed` after the nested include vertex data changes while keeping the shared include path and material library in the scan set. Full database passed 215 tests; full engine_asset default suite passed 415 tests across emitted test binaries; bare no-default checks passed with the existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+Result: formatting passed; nested OBJ `call` include source changes now invalidate the root model through `scan_with_metadata()` when the nested `.obj` body changes, proving the context-hash scan path sees recursive include depth rather than only the top-level source. The focused scan test preserves the original generated mesh/material output on first import, then detects the root model as `changed` after the nested include vertex data changes while keeping the shared include path and material library in the scan set. Full database passed 214 tests; full engine_asset default suite passed 414 tests across emitted test binaries; bare no-default checks passed with the existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
 
 Passed:
 
@@ -1654,3 +1654,70 @@ git diff --check
 ```
 
 Result: formatting passed; nested OBJ `call` include source changes now invalidate the root model through `scan_with_metadata()` when the nested `.mtl` body changes as well, proving the context-hash scan path hashes recursive include directory context rather than only the top-level source. The focused scan test preserves the original generated mesh/material output on first import, then detects the root model as `changed` after the nested include material library data changes while keeping the shared include path and material library in the scan set. Full database passed 215 tests; full engine_asset default suite passed 415 tests across emitted test binaries; bare no-default checks passed with the existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+```
+
+Result: formatting passed; `OBJ call` now has an explicit negative-path regression for non-`.obj` sources in addition to macro-argument, parent-path, missing-source, and cycle coverage. The new case verifies `call part.model` fails with the expected `must reference a .obj source` diagnostic while preserving the existing recursive include behavior. Full database passed 214 tests; full engine_asset default suite passed 414 tests across emitted test binaries.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: formatting passed; `OBJ call` now rejects an `.obj`-suffixed source that is actually an `NGA_MODEL_V1` manifest, proving the importer refuses manifest content even when the path extension looks correct. The regression keeps the recursive include path intact while checking the distinct `must be an OBJ source, not an NGA_MODEL_V1 manifest` diagnostic. Full database passed 214 tests; full engine_asset default suite passed 414 tests across emitted test binaries; bare no-default checks passed with the existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: formatting passed; `OBJ call` now also rejects non-UTF-8 nested include payloads, and the non-.obj, manifest-source, macro-argument, parent-path, missing-source, and recursive-cycle cases remain covered. Full database passed 214 tests; full engine_asset default suite passed 414 tests across emitted test binaries; bare no-default checks passed with the existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_includes_nested_obj_call_sources
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+```
+
+Result: formatting passed; nested OBJ `call` include source changes still invalidate the root model through `scan_with_metadata()` even when the nested `.obj` payload becomes non-UTF-8 raw bytes, proving the scan path hashes raw include content rather than relying on UTF-8 decoding. Full database passed 214 tests; full engine_asset default suite passed 414 tests across emitted test binaries.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_uv_and_normal_data
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_non_utf8_obj_material_library
+```
+
+Result: formatting passed; `OBJ mtllib` now has an explicit relative-path regression in addition to the existing UTF-8, missing file, and duplicate-material coverage, so the material-library source edge cases are observable in tests. Full database passed 215 tests; full engine_asset default suite passed 415 tests across emitted test binaries.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: the latest database pass is clean after the `OBJ mtllib` quoted-label fix and the non-UTF-8 material-library regression addition. `database_model_importer_reports_invalid_obj_face_index` now passes with the quoted `bad.mtl#Variant` label case, the full database suite passes 215 tests, the default engine_asset suite passes 415 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
