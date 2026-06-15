@@ -18374,6 +18374,45 @@ fn database_builtin_texture_cooker_writes_runtime_loadable_output() {
 }
 
 #[test]
+fn database_texture_cooker_canonicalizes_runtime_and_source_bytes() {
+    let runtime_path = AssetPath::parse("textures/cooked.texture");
+    let runtime_bytes = texture_bytes(2, 1, 17);
+    let runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(runtime_path.clone()),
+        source_bytes: runtime_bytes.clone(),
+    };
+    let runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        runtime_path,
+        AssetTypeId::of::<Texture>(),
+    );
+    let source_path = AssetPath::parse("textures/from_source.texture");
+    let source_bytes = b"NGA_TEXTURE_SOURCE_V1\nsize=2x1\nrgba=17,17,17,17,17,17,17,17\n".to_vec();
+    let source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(source_path.clone()),
+        source_bytes: source_bytes.clone(),
+    };
+    let source_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        source_path,
+        AssetTypeId::of::<Texture>(),
+    );
+    let cooker = TextureCooker::new();
+
+    let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
+    let source_output = cooker.cook(&source_ctx, &source_metadata).unwrap();
+
+    assert_eq!(runtime_output.bytes, runtime_bytes);
+    assert_eq!(runtime_output.version_hash, VersionHash(2));
+    assert_eq!(runtime_output.metadata, runtime_metadata);
+    assert_eq!(source_output.bytes, runtime_bytes);
+    assert_eq!(source_output.version_hash, VersionHash(2));
+    assert_eq!(source_output.metadata, source_metadata);
+}
+
+#[test]
 fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies_and_load_runtime_docs(
 ) {
     let config = database_config("builtin_scene_prefab_import_cook_load");

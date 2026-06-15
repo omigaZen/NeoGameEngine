@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_texture_cooker_canonicalizes_runtime_and_source_bytes
+```
+
+Result: TextureCooker now has direct runtime/source round-trip evidence: runtime texture bytes stay unchanged, NGA_TEXTURE_SOURCE_V1 source documents canonicalize to the same runtime bytes, and both paths report VersionHash(2).
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_font_and_physics_mesh_cookers_pass_through_runtime_bytes
 ```
 
