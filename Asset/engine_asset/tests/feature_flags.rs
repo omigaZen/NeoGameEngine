@@ -161,7 +161,12 @@ fn zstd_feature_status_matches_bundle_codec_report() {
     assert_eq!(status.enabled, report.supported);
     if status.enabled {
         assert!(report.reason.is_none());
-        assert!(require_asset_feature(AssetFeature::Zstd).is_ok());
+        assert_eq!(require_asset_feature(AssetFeature::Zstd), Ok(()));
+        let bytes = BundleWriter::build_bytes("zstd_empty", CompressionKind::Zstd, Vec::new())
+            .unwrap();
+        let reader = BundleReader::from_bytes(&bytes).unwrap();
+        assert_eq!(reader.manifest().name, "zstd_empty");
+        assert!(reader.manifest().entries.is_empty());
     } else {
         assert_eq!(
             require_asset_feature(AssetFeature::Zstd),
