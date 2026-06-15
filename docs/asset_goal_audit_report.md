@@ -2423,7 +2423,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_installs_and_builds_zstd_audio_package_files
 ```
 
-Result: the audio partial now has a file-backed package-artifact regression. A Zstd Ogg audio package can be installed, read through composite IO, persisted to registry text and loaded back, and removed while preserving registry integrity and artifact cleanup.
+Result: the audio partial now has a file-backed package-artifact regression. A Zstd Ogg audio package can be installed, read through composite IO and range reads, persisted to registry text and loaded back, and removed while preserving registry integrity and artifact cleanup.
 
 Passed:
 

@@ -1832,6 +1832,10 @@ fn asset_package_artifact_store_installs_and_builds_zstd_audio_package_files() {
     assert_eq!(read_report.layer.name, "artifact_audio_zstd");
     assert_eq!(read_report.layer.kind, AssetIoLayerKind::Patch);
     assert_eq!(
+        composite.read_range("audio/voice.ogg", 0, 4).unwrap(),
+        audio_bytes[..4].to_vec()
+    );
+    assert_eq!(
         composite.metadata("audio/voice.ogg").unwrap().hash,
         Some(content_hash(&audio_bytes))
     );
