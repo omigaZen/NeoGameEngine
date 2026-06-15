@@ -1788,3 +1788,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: `AssetPackageArtifactStore::remove_package()` now has an explicit missing-package regression. Attempting to remove a package name that is not registered returns the expected bundle error instead of mutating registry state or touching artifacts.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_replaces_packages_with_matching_names
+```
+
+Result: `AssetPackageArtifactStore::install_package_bytes()` now has explicit replacement coverage. Installing a second package with the same name returns the replaced old record, updates the registry to the newer bundle id, and keeps the new artifact bytes readable through `load_package_bytes()`.

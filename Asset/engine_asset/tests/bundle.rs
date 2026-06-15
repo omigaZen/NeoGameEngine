@@ -1294,6 +1294,81 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
 }
 
 #[test]
+fn asset_package_artifact_store_replaces_packages_with_matching_names() {
+    let root = temp_dir("package_artifacts_replace");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+
+    let (_original_record, original_bundle, _) = texture_package(
+        "artifact_replace",
+        AssetIoLayerKind::Patch,
+        4,
+        BundleId(40),
+        "patches/artifact_replace_v1.bundle",
+        vec![("textures/replace.texture", texture_bytes(1, 1, 7))],
+    );
+    let original_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(40),
+                "artifact_replace",
+                AssetIoLayerKind::Patch,
+                4,
+                "patches/artifact_replace_v1.bundle",
+            ),
+            &original_bundle,
+        )
+        .unwrap();
+    assert!(original_install.replaced.is_none());
+
+    let (_replacement_record, replacement_bundle, _) = texture_package(
+        "artifact_replace",
+        AssetIoLayerKind::Patch,
+        7,
+        BundleId(41),
+        "patches/artifact_replace_v2.bundle",
+        vec![("textures/replace.texture", texture_bytes(1, 1, 13))],
+    );
+    let replacement_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(41),
+                "artifact_replace",
+                AssetIoLayerKind::Patch,
+                7,
+                "patches/artifact_replace_v2.bundle",
+            ),
+            &replacement_bundle,
+        )
+        .unwrap();
+    let replaced = replacement_install.replaced.expect("expected replacement");
+    assert_eq!(replaced.bundle_id, BundleId(40));
+    assert_eq!(replaced.name, "artifact_replace");
+    assert_eq!(replacement_install.record.bundle_id, BundleId(41));
+    assert_eq!(replacement_install.record.name, "artifact_replace");
+    assert_eq!(
+        store
+            .load_package_bytes(&replacement_install.record)
+            .unwrap(),
+        replacement_bundle
+    );
+    assert_eq!(
+        registry
+            .packages()
+            .iter()
+            .map(|package| (package.name.as_str(), package.bundle_id))
+            .collect::<Vec<_>>(),
+        vec![("artifact_replace", BundleId(41))]
+    );
+    assert!(store.verify_registry(&registry).unwrap().all_available());
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn asset_package_artifact_store_reports_missing_package_removal() {
     let root = temp_dir("package_artifacts_missing_remove");
     let _ = std::fs::remove_dir_all(&root);
