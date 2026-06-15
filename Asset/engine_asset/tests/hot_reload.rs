@@ -532,6 +532,27 @@ fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
 }
 
 #[test]
+fn reload_by_path_reports_missing_path_without_mutating_state() {
+    let path = AssetPath::parse("textures/missing.texture");
+    let loaded_path = AssetPath::parse("textures/loaded.texture");
+    let io = MemoryAssetIo::new().with_file(loaded_path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+    let texture: Handle<Texture> = server.load(loaded_path.clone());
+    server.update_loading();
+    finish_uploads(&mut server, 1);
+    assert_eq!(server.get(&texture).unwrap().width, 1);
+
+    let error = server.reload_by_path(&path).unwrap_err();
+    assert!(matches!(
+        error,
+        AssetError::PathNotFound { path: missing } if missing == path
+    ));
+    assert_eq!(server.state(&texture), AssetLoadState::Ready);
+    assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert!(server.error_by_id(texture.id()).is_none());
+}
+
+#[test]
 fn hot_reload_gpu_failure_rolls_back_without_replacing_old_asset() {
     let path = AssetPath::parse("textures/hero.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
