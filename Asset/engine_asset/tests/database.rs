@@ -14517,6 +14517,8 @@ texture.albedo=models/parts/sub/textures/detail albedo.texture
         .registry()
         .metadata_by_path(&nested_material_path)
         .unwrap();
+    let mesh_id = mesh_metadata.id;
+    let nested_material_id = nested_material_metadata.id;
 
     assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
     assert_eq!(mesh_metadata.labels, vec!["Panel"]);
@@ -14526,16 +14528,11 @@ texture.albedo=models/parts/sub/textures/detail albedo.texture
         nested_material_metadata.dependencies,
         vec![nested_texture_id]
     );
-    assert_eq!(
-        first.registry().get(model_id).unwrap().dependencies.len(),
-        3
-    );
-    assert!(first
-        .registry()
-        .get(model_id)
-        .unwrap()
-        .dependencies
-        .contains(&nested_texture_id));
+    let model_dependencies = &first.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies.len(), 3);
+    assert!(model_dependencies.contains(&mesh_id));
+    assert!(model_dependencies.contains(&nested_material_id));
+    assert!(model_dependencies.contains(&nested_texture_id));
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -14747,6 +14744,134 @@ i 0 1 2
         vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
     );
     assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_includes_nested_obj_quoted_material_texture_line_continuations() {
+    let config =
+        database_config("builtin_model_obj_nested_quoted_material_texture_line_continuations");
+    let model_path = AssetPath::parse("models/assembled_quoted_lines.obj");
+    let include_path = AssetPath::parse("models/parts/quoted_lines.obj");
+    let nested_include_path = AssetPath::parse("models/parts/sub/detail.obj");
+    let nested_material_library_path = AssetPath::parse("models/parts/sub/detail.mtl");
+    let nested_texture_path = AssetPath::parse("models/parts/sub/textures/detail albedo.texture");
+    let mesh_path = AssetPath::parse("models/assembled_quoted_lines.Quoted.mesh");
+    let nested_material_path =
+        AssetPath::parse("models/assembled_quoted_lines.Material_Quoted.material");
+    let model_source = b"call parts/quoted_lines.obj\n".to_vec();
+    let include_source = b"call sub/detail.obj\n".to_vec();
+    let nested_include_source =
+        b"mtllib detail.mtl\nusemtl Quoted\no Quoted\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+            .to_vec();
+    let nested_material_source = br#"newmtl Quoted
+map_Kd "textures/detail\
+ albedo.texture"
+"#
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let expected_nested_material = b"# mtllib detail.mtl
+name=Quoted
+texture.albedo=models/parts/sub/textures/detail albedo.texture
+"
+    .to_vec();
+    let nested_texture_source = texture_bytes(1, 1, 79);
+    let mut first_io = MemoryAssetIo::new();
+    first_io.insert(model_path.path(), model_source.clone());
+    first_io.insert(include_path.path(), include_source.clone());
+    first_io.insert(nested_include_path.path(), nested_include_source.clone());
+    first_io.insert(
+        nested_material_library_path.path(),
+        nested_material_source.clone(),
+    );
+    first_io.insert(nested_texture_path.path(), nested_texture_source.clone());
+    let mut first = AssetDatabase::new(config.clone());
+    first.set_io(first_io);
+    first.register_builtin_importers();
+    first.register_builtin_cookers();
+
+    let nested_texture_id = first.import_asset_path(&nested_texture_path).unwrap();
+    let model_id = first.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = first.registry().metadata_by_path(&mesh_path).unwrap();
+    let nested_material_metadata = first
+        .registry()
+        .metadata_by_path(&nested_material_path)
+        .unwrap();
+    let mesh_id = mesh_metadata.id;
+    let nested_material_id = nested_material_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(
+        nested_material_metadata.asset_type,
+        AssetTypeId::of::<Material>()
+    );
+    assert_eq!(mesh_metadata.labels, vec!["Quoted"]);
+    assert_eq!(nested_material_metadata.labels, vec!["Material/Quoted"]);
+    assert_eq!(
+        nested_material_metadata.dependencies,
+        vec![nested_texture_id]
+    );
+    let model_dependencies = &first.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies.len(), 3);
+    assert!(model_dependencies.contains(&mesh_metadata.id));
+    assert!(model_dependencies.contains(&nested_material_metadata.id));
+    assert!(model_dependencies.contains(&nested_texture_id));
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_material_path.path())).unwrap(),
+        expected_nested_material
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_texture_path.path())).unwrap(),
+        nested_texture_source
+    );
+    let mesh_output = first.cook_asset(mesh_id, TargetPlatform::Windows).unwrap();
+    first
+        .cook_asset(nested_material_id, TargetPlatform::Windows)
+        .unwrap();
+    first
+        .cook_asset(nested_texture_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = first
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "nested_quoted_material_texture_line_continuations",
+            vec![mesh_id, nested_material_id, nested_texture_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([nested_material_id].as_slice())
+    );
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(nested_material_id).unwrap();
+    assert_eq!(material.textures.len(), 1);
+    assert_eq!(material.textures[0].name, "albedo");
+    assert_eq!(material.textures[0].texture.id(), nested_texture_id);
 }
 
 #[test]
