@@ -22566,6 +22566,11 @@ fn database_audio_importer_allows_ogg_vorbis_compression_for_binary_source() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, source);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         source
@@ -22604,6 +22609,11 @@ fn database_audio_importer_allows_ogg_opus_compression_for_binary_source() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, source);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
 }
 
 #[test]
