@@ -111,6 +111,8 @@ pub struct EditorSmokeReport {
     pub animation_ready_with_dependencies: bool,
     pub animation_handles: usize,
     pub physics_ready_with_dependencies: bool,
+    pub physics_component_ready: bool,
+    pub physics_component_handles: usize,
     pub physics_world_mesh_ready: bool,
     pub physics_world_collider_ready: bool,
     pub physics_world_ray_hit: bool,
@@ -569,6 +571,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         animation_ready_with_dependencies: assets.is_ready_with_dependencies(&animation),
         animation_handles: 1,
         physics_ready_with_dependencies: assets.is_ready_with_dependencies(&physics),
+        physics_component_ready: physics_component.is_ready(&assets),
+        physics_component_handles: physics_component.asset_handles().len(),
         physics_world_mesh_ready: physics_bridge.mesh_ready,
         physics_world_collider_ready: physics_bridge.collider_ready,
         physics_world_ray_hit: physics_bridge.ray_hit,
@@ -1455,6 +1459,8 @@ mod tests {
         assert!(report.animation_ready_with_dependencies);
         assert_eq!(report.animation_handles, 1);
         assert!(report.physics_ready_with_dependencies);
+        assert!(report.physics_component_ready);
+        assert_eq!(report.physics_component_handles, 1);
         assert!(report.physics_world_mesh_ready);
         assert!(report.physics_world_collider_ready);
         assert!(report.physics_world_ray_hit);
