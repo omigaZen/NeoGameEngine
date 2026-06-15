@@ -1758,11 +1758,21 @@ fn database_builtin_model_importer_generates_labeled_subresources_and_runtime_ou
         dependency: material_id,
     }));
     assert!(report.edges.contains(&DependencyEdge {
+        asset: model_id,
+        dependency: skeleton_id,
+    }));
+    assert!(report.edges.contains(&DependencyEdge {
+        asset: model_id,
+        dependency: animation_id,
+    }));
+    assert!(report.edges.contains(&DependencyEdge {
         asset: material_id,
         dependency: texture_id,
     }));
     let model_scope = database.scoped_dependency_report(model_id).unwrap();
     assert!(model_scope.direct_dependencies.contains(&material_id));
+    assert!(model_scope.direct_dependencies.contains(&skeleton_id));
+    assert!(model_scope.direct_dependencies.contains(&animation_id));
     assert!(model_scope.transitive_dependencies.contains(&texture_id));
     assert!(database
         .scoped_dependency_report_html(model_id)
