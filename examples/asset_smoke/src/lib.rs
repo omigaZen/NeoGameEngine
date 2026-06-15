@@ -742,7 +742,7 @@ fn finish_uploads(assets: &mut AssetServer) {
     let uploads = assets.drain_gpu_uploads().collect::<Vec<_>>();
     for upload in &uploads {
         match upload.kind {
-            GpuUploadKind::Texture | GpuUploadKind::Shader => {
+            GpuUploadKind::Texture | GpuUploadKind::Shader | GpuUploadKind::Material => {
                 assert_eq!(upload.metadata, GpuUploadMetadata::None);
             }
             _ => {}
