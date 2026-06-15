@@ -1114,7 +1114,7 @@ impl AssetServer {
         paths: &[AssetPath],
     ) -> AssetResult<StreamingRegionId> {
         require_asset_feature(AssetFeature::Streaming)?;
-        let mut handles = Vec::with_capacity(paths.len());
+        let mut handles: Vec<UntypedHandle> = Vec::with_capacity(paths.len());
         for path in paths {
             let extension = path.extension().unwrap_or("");
             let asset_type = self
@@ -1124,6 +1124,9 @@ impl AssetServer {
                     extension: extension.to_owned(),
                 })?;
             let id = self.registry.get_or_create(path.clone(), asset_type);
+            if handles.iter().any(|handle| handle.id() == id) {
+                continue;
+            }
             handles.push(self.make_untyped_handle(id, asset_type, HandleStrength::Weak));
         }
         Ok(self.register_streaming_region(name, priority, handles))

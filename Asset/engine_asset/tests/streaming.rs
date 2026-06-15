@@ -117,6 +117,29 @@ fn streaming_region_preload_reports_real_progress_and_ready_state() {
 }
 
 #[test]
+fn streaming_region_paths_deduplicate_repeated_assets() {
+    let mut server = server_with_textures(&[("textures/a.texture", 1)]);
+    let region = server
+        .register_streaming_region_paths(
+            "room",
+            LoadPriority::Normal,
+            &[
+                AssetPath::parse("textures/a.texture"),
+                AssetPath::parse("textures/a.texture"),
+            ],
+        )
+        .unwrap();
+    let region_data = server.streaming_region(region).unwrap();
+    assert_eq!(region_data.assets.len(), 1);
+    assert_eq!(
+        region_data.assets[0].id(),
+        server
+            .id_from_path(&AssetPath::parse("textures/a.texture"))
+            .unwrap()
+    );
+}
+
+#[test]
 fn streaming_region_priority_controls_scheduler_order() {
     let mut config = AssetServerConfig::default();
     config.max_io_jobs_per_frame = 1;

@@ -2052,3 +2052,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload hot_relo
 ```
 
 Result: repeating `watch_hot_reload_path*` on the same path replaces the prior watch entry instead of duplicating it, and the latest backend selection and metadata are reflected in the watch table.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_paths_deduplicate_repeated_assets
+```
+
+Result: streaming region registration by path now deduplicates repeated paths before registration, so a region created from the same asset path twice still contains one asset handle.
