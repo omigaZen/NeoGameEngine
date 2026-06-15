@@ -79,6 +79,8 @@ pub struct SmokeReport {
     pub prefab_typed_trace: Vec<String>,
     pub render_handles: usize,
     pub audio_handles: usize,
+    pub audio_alt_ready: bool,
+    pub audio_alt_handles: usize,
     pub physics_handles: usize,
     pub events: usize,
     pub ready_events: usize,
@@ -151,6 +153,7 @@ pub fn run_smoke() -> SmokeReport {
         "NGA_PREFAB_V1\ndependency=meshes/tri.mesh\ndependency=materials/hero.material\nroot=Hero\ncomponent=Transform|translation=0,0,0\nchild=Weapon;parent=0\ncomponent=MeshRenderer|mesh=meshes/tri.mesh;material=materials/hero.material\n",
     );
     io.insert("audio/click.audio", audio_bytes());
+    io.insert("audio/click_alt.audio", audio_bytes());
     io.insert("physics/hero.physics", physics_mesh_bytes());
 
     let mut assets = AssetServer::new(AssetServerConfig::default());
@@ -162,6 +165,7 @@ pub fn run_smoke() -> SmokeReport {
         AssetPath::parse("materials/hero.material"),
         AssetPath::parse("materials/hero_normal.material"),
         AssetPath::parse("audio/click.audio"),
+        AssetPath::parse("audio/click_alt.audio"),
         AssetPath::parse("physics/hero.physics"),
     ]);
     let renderer = MeshRendererComponent {
@@ -173,6 +177,11 @@ pub fn run_smoke() -> SmokeReport {
         clip: assets.load("audio/click.audio"),
         looping: false,
         volume: 0.75,
+    };
+    let audio_alt = AudioSourceComponent {
+        clip: assets.load("audio/click_alt.audio"),
+        looping: true,
+        volume: 0.25,
     };
     let physics = PhysicsColliderComponent {
         mesh: assets.load("physics/hero.physics"),
@@ -206,6 +215,7 @@ pub fn run_smoke() -> SmokeReport {
         }
         if renderer.is_ready(&assets)
             && audio.is_ready(&assets)
+            && audio_alt.is_ready(&assets)
             && physics.is_ready(&assets)
             && assets.is_ready_with_dependencies(&normal_material)
             && scene.can_instantiate(&assets)
@@ -274,6 +284,7 @@ pub fn run_smoke() -> SmokeReport {
     SmokeReport {
         render_ready: renderer.is_ready(&assets),
         audio_ready: audio.is_ready(&assets),
+        audio_alt_handles: audio_alt.asset_handles().len(),
         physics_ready: physics.is_ready(&assets),
         scene_ready: scene.can_instantiate(&assets),
         prefab_ready: prefab.can_instantiate(&assets),
@@ -326,6 +337,7 @@ pub fn run_smoke() -> SmokeReport {
         prefab_typed_trace: prefab_typed_sink.events,
         render_handles: renderer.asset_handles().len(),
         audio_handles: audio.asset_handles().len(),
+        audio_alt_ready: audio_alt.is_ready(&assets),
         physics_handles: physics.asset_handles().len(),
         events: assets.events().len(),
         ready_events,
@@ -1154,12 +1166,13 @@ mod tests {
 
         assert!(report.render_ready);
         assert!(report.audio_ready);
+        assert!(report.audio_alt_ready);
         assert!(report.physics_ready);
         assert!(report.scene_ready);
         assert!(report.prefab_ready);
         assert!(report.material_ready_with_dependencies);
         assert!(report.group_ready);
-        assert_eq!(report.group_total_assets, 5);
+        assert_eq!(report.group_total_assets, 6);
         assert_eq!(report.group_ready_assets, report.group_total_assets);
         assert_eq!(report.material_dependencies, 2);
         assert_eq!(report.render_scene_meshes, 1);
@@ -1237,6 +1250,7 @@ mod tests {
         );
         assert_eq!(report.render_handles, 2);
         assert_eq!(report.audio_handles, 1);
+        assert_eq!(report.audio_alt_handles, 1);
         assert_eq!(report.physics_handles, 1);
         assert!(report.events >= 6);
         assert!(report.ready_events >= 6);
