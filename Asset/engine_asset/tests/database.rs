@@ -9799,7 +9799,7 @@ map_MR -imfchan green -colorspace Non-Color textures/packed_mr.texture
 map_MRA -imfchan red textures/packed_mra.texture
 newmtl LongPacked
 map_metallicroughness -imfchan blue textures/packed_metallicroughness.texture
-map_ARM -imfchan green -clamp on textures/packed_arm.texture
+map_ARM -imfchan green -clamp on -colorspace Non-Color textures/packed_arm.texture
 "
     .to_vec();
     let expected_materials = [
@@ -9819,6 +9819,7 @@ texture.metallic_roughness.source_channel=blue
 texture.arm=models/textures/packed_arm.texture
 texture.arm.sampler.address=clamp_to_edge
 texture.arm.source_channel=green
+texture.arm.color_space=non_color
 "
         .to_vec(),
     ];
