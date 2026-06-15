@@ -1828,3 +1828,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: `set_streaming_region_priority()` now has explicit missing-region coverage as well. An unknown `StreamingRegionId` returns `AddressNotFound` instead of mutating scheduler state or returning a bogus previous priority.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_state_apis_report_missing_region
+```
+
+Result: the remaining streaming region state APIs now have explicit missing-region coverage. `set_streaming_region_resident()`, `preload_streaming_region()`, `unload_streaming_region()`, `streaming_region_progress()`, and `streaming_region_state()` all return `AddressNotFound` for an unknown region id rather than touching unrelated state or synthesizing defaults.

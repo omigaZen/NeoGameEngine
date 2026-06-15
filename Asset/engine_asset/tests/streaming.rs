@@ -420,6 +420,33 @@ fn streaming_region_priority_reports_missing_region() {
 }
 
 #[test]
+fn streaming_region_state_apis_report_missing_region() {
+    let mut server = server_with_textures(&[("textures/extra.texture", 11)]);
+    let missing = StreamingRegionId(996);
+
+    assert!(matches!(
+        server.set_streaming_region_resident(missing, true),
+        Err(AssetError::AddressNotFound { address }) if address.contains("streaming region")
+    ));
+    assert!(matches!(
+        server.preload_streaming_region(missing),
+        Err(AssetError::AddressNotFound { address }) if address.contains("streaming region")
+    ));
+    assert!(matches!(
+        server.unload_streaming_region(missing),
+        Err(AssetError::AddressNotFound { address }) if address.contains("streaming region")
+    ));
+    assert!(matches!(
+        server.streaming_region_progress(missing),
+        Err(AssetError::AddressNotFound { address }) if address.contains("streaming region")
+    ));
+    assert!(matches!(
+        server.streaming_region_state(missing),
+        Err(AssetError::AddressNotFound { address }) if address.contains("streaming region")
+    ));
+}
+
+#[test]
 fn removing_resident_streaming_regions_releases_shared_residency_counts() {
     let mut server = server_with_textures(&[("textures/shared.texture", 5)]);
     let path = AssetPath::parse("textures/shared.texture");
