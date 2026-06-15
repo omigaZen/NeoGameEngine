@@ -2088,7 +2088,7 @@ C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
 git diff --check
 ```
 
-Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 222 tests, the default engine_asset suite passes 456 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
+Result: OBJ reflection texture projection coverage now includes the positive `refl -type sphere` path and a negative projection-regression path for invalid `-type` values. The focused database tests confirm the imported material preserves `texture.reflection.projection=sphere`, while the invalid case reports a visible `refl option -type value \`cylinder\`` import diagnostic with source-path context. The full database suite now passes 223 tests, the default engine_asset suite passes 457 tests, bare no-default checks still pass with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
 
 Passed:
 
@@ -2113,3 +2113,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture resolution preservation now has a stable positive regression for `-texres`. A valid `map_Kd -texres 1024 textures/texres_albedo.texture` import keeps `texture_resolution=1024`, preserves the resolved albedo dependency path, and loads back as a runtime `Material` whose `albedo` texture carries `texture_resolution=1024`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_antialiasing_enabled
+```
+
+Result: OBJ material texture antialiasing now has a stable positive regression for `map_aat ON`. A valid import keeps `custom.texture_antialias.bool=true`, preserves the resolved dependency path, and loads back as a runtime `Material` whose custom property is visible after bundle mount and runtime load.
