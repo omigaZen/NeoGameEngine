@@ -334,6 +334,12 @@ impl MountedBundleRegistry {
             });
         }
 
+        if index != lines.len() {
+            return Err(AssetError::Bundle {
+                message: "unexpected trailing mounted bundle registry data".to_owned(),
+            });
+        }
+
         Ok(Self::new(bundles))
     }
 }
@@ -1537,6 +1543,12 @@ impl AssetPackageRegistry {
                 .with_minimum_runtime_version(minimum_runtime_version)
                 .with_package_dependencies(package_dependencies),
             );
+        }
+
+        if index != lines.len() {
+            return Err(AssetError::Bundle {
+                message: "unexpected trailing asset package registry data".to_owned(),
+            });
         }
 
         Self::new(packages)

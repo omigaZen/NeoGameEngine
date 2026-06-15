@@ -2020,3 +2020,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bund
 ```
 
 Result: mounted bundle registry parsing now also rejects truncated manifests explicitly. Declaring two manifest lines for a mounted bundle but providing only one returns `mounted bundle 0 manifest is truncated`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: asset package registry parsing now rejects unexpected trailing registry data explicitly. Appending an extra line after the declared package manifest returns `unexpected trailing asset package registry data` instead of silently ignoring the tail.
