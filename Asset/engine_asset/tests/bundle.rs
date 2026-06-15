@@ -1921,6 +1921,12 @@ fn asset_package_dependency_compatibility_reports_missing_and_version_bounds() {
         Err(AssetError::Bundle { message }) if message.contains("max version is lower")
     ));
     assert!(matches!(
+        AssetPackageRegistry::new(vec![patch.clone().with_package_dependency(
+            AssetPackageDependency::new("base_dependency", 0)
+        )]),
+        Err(AssetError::Bundle { message }) if message.contains("min version must be greater than zero")
+    ));
+    assert!(matches!(
         AssetPackageRegistry::new(vec![patch.with_package_dependencies(vec![
             AssetPackageDependency::new("base_dependency", 2),
             AssetPackageDependency::new("base_dependency", 3),

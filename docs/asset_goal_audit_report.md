@@ -1892,3 +1892,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: package dependency validation now also has an explicit duplicate-entry regression. A package that declares the same dependency name twice is rejected with the expected `duplicate dependency` bundle diagnostic, in addition to the existing self-dependency and max-version bounds coverage.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_dependency_compatibility_reports_missing_and_version_bounds
+```
+
+Result: package dependency validation now also rejects zero minimum versions explicitly. A dependency declared with `min_version = 0` is rejected with the expected `min version must be greater than zero` bundle diagnostic before registry acceptance.
