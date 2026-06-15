@@ -12703,6 +12703,157 @@ texture.emissive.projection=sphere
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_specular_and_ambient_color_texture_aliases() {
+    for (directive, stem, channel, texel) in [
+        (
+            "map_specular_color",
+            "specular_color_direct_alias",
+            "specular",
+            108,
+        ),
+        (
+            "map_ambient_color",
+            "ambient_color_direct_alias",
+            "occlusion",
+            109,
+        ),
+    ] {
+        let config = database_config(&format!("builtin_model_obj_{stem}"));
+        let model_path = AssetPath::parse(&format!("models/{stem}.obj"));
+        let mesh_path = AssetPath::parse(&format!("models/{stem}.Panel.mesh"));
+        let material_path = AssetPath::parse(&format!("models/{stem}.Material_Alias.material"));
+        let texture_path = AssetPath::parse(&format!("models/textures/{stem}.texture"));
+        let material_library = format!("{stem}.mtl");
+        let model_source = format!(
+            "mtllib {material_library}\n\
+o Panel\n\
+v 0 0 0\n\
+v 1 0 0\n\
+v 0 1 0\n\
+usemtl Alias\n\
+f 1 2 3\n"
+        )
+        .into_bytes();
+        let material_source = if directive == "map_specular_color" {
+            format!(
+                "newmtl Alias\n{directive} -imfchan blue -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "newmtl Alias\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
+        };
+        let expected_material = if directive == "map_specular_color" {
+            format!(
+                "# mtllib {material_library}\n\
+name=Alias\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=blue\n\
+texture.{channel}.color_space=non_color\n"
+            )
+            .into_bytes()
+        } else {
+            format!(
+                "# mtllib {material_library}\n\
+name=Alias\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.color_space=non_color\n"
+            )
+            .into_bytes()
+        };
+        let texture_source = texture_bytes(1, 1, texel);
+        let mut io = MemoryAssetIo::new();
+        io.insert(model_path.path(), model_source);
+        io.insert(format!("models/{material_library}"), material_source);
+        io.insert(texture_path.path(), texture_source.clone());
+        let mut database = AssetDatabase::new(config.clone());
+        database.set_io(io);
+        database.register_builtin_importers();
+        database.register_builtin_cookers();
+
+        let texture_id = database.import_asset_path(&texture_path).unwrap();
+        let model_id = database.import_asset_path(&model_path).unwrap();
+        let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+        let material_metadata = database
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap();
+        let material_id = material_metadata.id;
+
+        assert_eq!(material_metadata.labels, vec!["Material/Alias"]);
+        assert_eq!(material_metadata.dependencies, vec![texture_id]);
+        assert_eq!(
+            fs::read(config.imported_root.join(material_path.path())).unwrap(),
+            expected_material
+        );
+        assert_eq!(
+            database.registry().get(model_id).unwrap().dependencies,
+            vec![texture_id, mesh_id, material_id]
+        );
+
+        database
+            .cook_asset(texture_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(mesh_id, TargetPlatform::Windows)
+            .unwrap();
+        database
+            .cook_asset(material_id, TargetPlatform::Windows)
+            .unwrap();
+        let bundle = database
+            .build_bundle(&AssetDatabaseBundleBuild::new(
+                &format!("{stem}_model"),
+                vec![mesh_id, material_id, texture_id],
+            ))
+            .unwrap();
+        let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+        assert_eq!(reader.manifest().name, format!("{stem}_model"));
+        assert_eq!(
+            reader.manifest().dependencies(mesh_id),
+            Some([material_id].as_slice())
+        );
+        assert_eq!(
+            reader.manifest().dependencies(material_id),
+            Some([texture_id].as_slice())
+        );
+        assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+        let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+        let mut server = AssetServer::new(AssetServerConfig::default());
+        server.set_io(bundle_io);
+        server.register_builtin_loaders();
+        let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+        let group = server.preload_bundle(&mounted);
+        for _ in 0..8 {
+            server.update_loading();
+            finish_uploads(&mut server);
+            if server.group_state(&group) == AssetLoadState::Ready {
+                break;
+            }
+        }
+
+        assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+        let material = server.get_by_id::<Material>(material_id).unwrap();
+        assert_eq!(material.textures.len(), 1);
+        assert_eq!(material.textures[0].name, channel);
+        assert_eq!(material.textures[0].texture.id(), texture_id);
+        assert_eq!(
+            material.textures[0].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
+        );
+        if directive == "map_specular_color" {
+            assert_eq!(
+                material.textures[0].options.source_channel,
+                Some(MaterialTextureChannel::Blue)
+            );
+        }
+    }
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_metallic_and_roughness_texture_maps() {
     let config = database_config("builtin_model_obj_metallic_roughness_texture_maps");
     let model_path = AssetPath::parse("models/metallic_roughness.obj");
