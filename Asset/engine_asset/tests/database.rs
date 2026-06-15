@@ -1797,6 +1797,22 @@ fn database_builtin_model_importer_generates_labeled_subresources_and_runtime_ou
     assert!(model_scope.direct_dependencies.contains(&animation_id));
     assert!(model_scope.transitive_dependencies.contains(&texture_id));
     assert!(database
+        .scoped_dependency_report_json(model_id)
+        .unwrap()
+        .contains(&format!("\"{}\"", skeleton_id.raw())));
+    assert!(database
+        .scoped_dependency_report_json(model_id)
+        .unwrap()
+        .contains(&format!("\"{}\"", animation_id.raw())));
+    assert!(database
+        .scoped_dependency_report_html(model_id)
+        .unwrap()
+        .contains(&format!("<code>{}</code>", skeleton_id.raw())));
+    assert!(database
+        .scoped_dependency_report_html(model_id)
+        .unwrap()
+        .contains(&format!("<code>{}</code>", animation_id.raw())));
+    assert!(database
         .scoped_dependency_report_html(model_id)
         .unwrap()
         .contains("models/hero.Material_Hero.material"));
