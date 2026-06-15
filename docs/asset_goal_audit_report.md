@@ -2439,4 +2439,4 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_face_outline_aliases
 ```
 
-Result: the OBJ face-outline alias now has a positive regression. `fo` face lines are accepted as regular OBJ faces, import into a generated mesh subresource, preserve dependency metadata, and round-trip through database cook/bundle/runtime preload with the same triangle geometry as `f` faces.
+Result: the OBJ face-outline alias now has a positive regression. `Fo` face lines are accepted as regular OBJ faces, import into a generated mesh subresource, preserve dependency metadata, and round-trip through database cook/bundle/runtime preload with the same triangle geometry as `f` faces.

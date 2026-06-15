@@ -15905,7 +15905,7 @@ fn database_model_importer_accepts_obj_face_outline_aliases() {
 v 0 0 0
 v 1 0 0
 v 0 1 0
-fo 1 2 3
+Fo 1 2 3
 "
     .to_vec();
     let expected_mesh = b"v 0 0 0
