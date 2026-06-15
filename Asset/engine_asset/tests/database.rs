@@ -9034,9 +9034,9 @@ map_ambient_color -imfchan red textures/alias_ambient.texture
 map_emissive_color textures/alias_emissive.texture
 map_transmission_color -imfchan alpha textures/alias_transmission.texture
 map_ior textures/alias_ior.texture
-map_clear_coat textures/alias_clearcoat.texture
-map_clear_coat_roughness textures/alias_clearcoat_roughness.texture
-map_anisotropyrotation textures/alias_anisotropy_rotation.texture
+map_clear_coat -colorspace Non-Color textures/alias_clearcoat.texture
+map_clear_coat_roughness -colorspace Non-Color textures/alias_clearcoat_roughness.texture
+map_anisotropyrotation -colorspace Non-Color textures/alias_anisotropy_rotation.texture
 "
     .to_vec();
     let expected_material = b"# mtllib pbr_texture_scalar_aliases.mtl
@@ -9050,8 +9050,11 @@ texture.transmission_filter=models/textures/alias_transmission.texture
 texture.transmission_filter.source_channel=alpha
 texture.index_of_refraction=models/textures/alias_ior.texture
 texture.clearcoat=models/textures/alias_clearcoat.texture
+texture.clearcoat.color_space=non_color
 texture.clearcoat_roughness=models/textures/alias_clearcoat_roughness.texture
+texture.clearcoat_roughness.color_space=non_color
 texture.anisotropy_rotation=models/textures/alias_anisotropy_rotation.texture
+texture.anisotropy_rotation.color_space=non_color
 "
     .to_vec();
     let mut io = MemoryAssetIo::new();
