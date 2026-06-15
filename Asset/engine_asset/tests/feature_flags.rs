@@ -134,6 +134,18 @@ fn editor_feature_status_matches_composed_feature_gate() {
     }
 }
 
+#[cfg(not(feature = "editor"))]
+#[test]
+fn disabled_editor_feature_reports_visible_unsupported_diagnostic() {
+    let status = asset_feature_status(AssetFeature::Editor);
+    assert!(!status.enabled);
+    assert_eq!(status.name, "editor");
+    assert_eq!(
+        require_asset_feature(AssetFeature::Editor),
+        Err(AssetError::Unsupported("asset editor feature is disabled"))
+    );
+}
+
 #[cfg(not(feature = "parallel"))]
 #[test]
 fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
