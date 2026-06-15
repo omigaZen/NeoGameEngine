@@ -2169,3 +2169,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture blend-mode preservation now has a stable positive regression for `map_Kd -blendu ON -blendv OFF`. A valid import keeps `texture.albedo.blend_u=true` and `texture.albedo.blend_v=false`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the blend-mode flags.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_material_texture_boost
+```
+
+Result: OBJ material texture boost preservation now has a stable positive regression for `map_Kd -boost 1.5`. A valid import keeps `texture.albedo.boost=1.5`, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the boost value.
