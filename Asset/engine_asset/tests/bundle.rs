@@ -1096,6 +1096,13 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         AssetPackageRegistry::from_text(&invalid_priority_text),
         Err(AssetError::Bundle { message }) if message.contains("invalid asset package priority")
     ));
+    let invalid_version_text = dependency_registry
+        .to_text()
+        .replacen("|1|1|base_dependency", "|abc|1|base_dependency", 1);
+    assert!(matches!(
+        AssetPackageRegistry::from_text(&invalid_version_text),
+        Err(AssetError::Bundle { message }) if message.contains("invalid asset package version")
+    ));
     let missing_package_line_text = dependency_registry
         .to_text()
         .replace("packages=1", "packages=2");
