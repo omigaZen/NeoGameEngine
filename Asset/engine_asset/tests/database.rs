@@ -15297,6 +15297,46 @@ map_Kd -boost inf textures/albedo.texture
 }
 
 #[test]
+fn database_model_importer_reports_invalid_obj_material_texture_remap() {
+    let config = database_config("builtin_model_obj_invalid_material_texture_remap");
+    let model_path = AssetPath::parse("models/bad_texture_remap.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_texture_remap.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_texture_remap.mtl",
+        b"newmtl Red
+map_Kd -mm 0.2 0.7 nope textures/albedo.texture
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_texture_remap.obj")
+                && message.contains(
+                    "OBJ material library `bad_texture_remap.mtl` at `models/bad_texture_remap.mtl` map_Kd texture paths on line 2"
+                )
+    ));
+}
+
+#[test]
 fn database_model_importer_reports_unterminated_obj_material_texture_quote() {
     let config = database_config("builtin_model_obj_unterminated_material_texture_quote");
     let model_path = AssetPath::parse("models/bad_texture_quote.obj");
