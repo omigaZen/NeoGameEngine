@@ -1923,6 +1923,31 @@ fn asset_package_dependency_compatibility_reports_missing_and_version_bounds() {
 }
 
 #[test]
+fn asset_package_dependency_compatibility_reports_separator_diagnostics() {
+    let (package, _bundle, _) = texture_package(
+        "separator_package",
+        AssetIoLayerKind::BaseBundle,
+        5,
+        BundleId(33),
+        "packages/separator_package.bundle",
+        vec![("textures/separator_package.texture", texture_bytes(1, 1, 4))],
+    );
+
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![package.clone().with_package_dependency(
+            AssetPackageDependency::new("bad:dependency", 1)
+        )]),
+        Err(AssetError::Bundle { message }) if message.contains("dependency separators")
+    ));
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![package.with_package_dependency(
+            AssetPackageDependency::new("bad,dependency", 1)
+        )]),
+        Err(AssetError::Bundle { message }) if message.contains("dependency separators")
+    ));
+}
+
+#[test]
 fn asset_package_asset_override_report_tracks_semantic_policy_issues() {
     let base_dependency = AssetId::new();
     let base_material = AssetId::new();

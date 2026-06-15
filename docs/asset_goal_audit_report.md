@@ -1876,3 +1876,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: the streaming residency toggle now has an explicit idempotence regression. Repeating `set_streaming_region_resident(..., true)` or `(..., false)` on the same region does not double-count or double-release residency, and unload behavior remains stable across repeated calls.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_dependency_compatibility_reports_separator_diagnostics
+```
+
+Result: `AssetPackageRegistry::new()` now has explicit dependency-name separator coverage. Package dependency names containing `:` or `,` are rejected with the expected `dependency separators` bundle diagnostic before registry acceptance.
