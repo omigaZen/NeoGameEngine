@@ -9197,7 +9197,7 @@ opacity 0.7
 ambient_color 0.01 0.02 0.03
 specular_color 0.4 0.5 0.6
 emissive_color 0.05 0.06 0.07
-transmission_color 0.2 0.25 0.3
+transmittance_color 0.2 0.25 0.3
 metalness 0.4
 roughness 0.35
 clear_coat 0.55
