@@ -15656,6 +15656,11 @@ fn database_model_importer_reports_invalid_obj_display_attributes() {
             "too many OBJ shadow_obj values on line 1",
         ),
         (
+            "builtin_model_obj_extra_shadow_object_attribute_off",
+            "shadow_obj off extra\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "too many OBJ shadow_obj values on line 1",
+        ),
+        (
             "builtin_model_obj_invalid_shadow_object_path",
             "shadow_obj ../shadows.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
             "OBJ shadow_obj `../shadows.obj` on line 1 must be a relative source path without labels or `..` segments",
@@ -15668,6 +15673,11 @@ fn database_model_importer_reports_invalid_obj_display_attributes() {
         (
             "builtin_model_obj_extra_trace_object_attribute",
             "trace_obj a.obj b.obj\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "too many OBJ trace_obj values on line 1",
+        ),
+        (
+            "builtin_model_obj_extra_trace_object_attribute_off",
+            "trace_obj off extra\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
             "too many OBJ trace_obj values on line 1",
         ),
         (
