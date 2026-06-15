@@ -19409,7 +19409,7 @@ fn database_texture_cooker_canonicalizes_source_documents() {
     let source = b"NGA_TEXTURE_SOURCE_V1\nsize=2x1\nrgba=255,0,0,255;0,255,0,255\n".to_vec();
     let expected = texture_rgba_bytes(2, 1, &[255, 0, 0, 255, 0, 255, 0, 255]);
     let mut io = MemoryAssetIo::new();
-    io.insert(path.path(), source);
+    io.insert(path.path(), source.clone());
     let mut database = AssetDatabase::new(config.clone());
     database.set_io(io);
     database.register_builtin_importers();
@@ -19455,7 +19455,7 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
     let source = b"NGA_TEXTURE_SOURCE_V1\nsize=2x1\nrgba=255,0,0,255;0,255,0,255\n".to_vec();
     let expected = texture_rgba_bytes(2, 1, &[255, 0, 0, 255, 0, 255, 0, 255]);
     let mut io = MemoryAssetIo::new();
-    io.insert(path.path(), source);
+    io.insert(path.path(), source.clone());
     let mut database = AssetDatabase::new(config.clone());
     database.set_io(io);
     database.register_builtin_importers();
@@ -21004,7 +21004,7 @@ fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
     let source = b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=2\nformat=f32\nframes=0.0, 0.5; -0.5, 1.0\nstreaming=true\n".to_vec();
     let expected = b"NGA_AUDIO_V1\nsample_rate=48000\nchannels=2\nformat=f32\nsamples=0,0.5,-0.5,1\nstreaming=true\n".to_vec();
     let mut io = MemoryAssetIo::new();
-    io.insert(path.path(), source);
+    io.insert(path.path(), source.clone());
     let mut database = AssetDatabase::new(config.clone());
     database.set_io(io);
     database.register_builtin_importers();
@@ -21055,6 +21055,48 @@ fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
     assert_eq!(loaded.channels, 2);
     assert!(loaded.streaming);
     assert_eq!(loaded.samples, AudioSamples::F32(vec![0.0, 0.5, -0.5, 1.0]));
+}
+
+#[test]
+fn database_audio_importer_preserves_binary_wav_bytes() {
+    let config = database_config("audio_importer_binary_wav_round_trip");
+    let path = AssetPath::parse("audio/roundtrip.wav");
+    let source = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<AudioClip>());
+    assert_eq!(metadata.importer.as_deref(), Some("AudioImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        source
+    );
+
+    database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert!(fs::metadata(config.cooked_root.join(path.path())).is_ok());
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let audio: Handle<AudioClip> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 44_100);
+    assert_eq!(loaded.channels, 2);
+    assert!(!loaded.streaming);
+    assert_eq!(loaded.samples, AudioSamples::I16(vec![0, 1000, -1000, 500]));
 }
 
 #[test]
