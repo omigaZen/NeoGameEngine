@@ -1764,6 +1764,10 @@ fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payload
     assert_eq!(server.group_state(&group), AssetLoadState::Ready);
     let handle = Handle::<Texture>::strong(base_ids[0]);
     assert!(server.is_ready(&handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().path,
+        Some(AssetPath::parse("textures/runtime_artifact.texture"))
+    );
 
     let missing_patch = AssetPackageRecord::new(
         patch_record.bundle_id,
@@ -2809,6 +2813,10 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
         .all(|group| server.group_state(group) == AssetLoadState::Ready));
     let handle = Handle::<Texture>::strong(base_ids[0]);
     assert!(server.is_ready(&handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().path,
+        Some(AssetPath::parse("textures/react.texture"))
+    );
 
     let mut disabled_patch = patch_install.record.clone();
     disabled_patch.enabled = false;
@@ -2826,6 +2834,10 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
         .is_some());
     assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
     assert!(server.is_ready(&handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().path,
+        Some(AssetPath::parse("textures/react.texture"))
+    );
 
     let activation = server
         .activate_asset_package_registry_from_artifacts(
