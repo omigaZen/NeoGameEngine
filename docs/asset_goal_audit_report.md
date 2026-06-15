@@ -2028,3 +2028,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: asset package registry parsing now rejects unexpected trailing registry data explicitly. Appending an extra line after the declared package manifest returns `unexpected trailing asset package registry data` instead of silently ignoring the tail.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_registry_reports_invalid_metadata_and_payload_mismatch
+```
+
+Result: bundle manifest parsing now also rejects unexpected trailing manifest data explicitly. A manifest that declares zero chunks and entries but still includes an extra line returns `unexpected trailing bundle manifest data`.

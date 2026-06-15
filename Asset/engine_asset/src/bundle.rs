@@ -2494,6 +2494,11 @@ fn deserialize_manifest_v2<'a>(
         })?;
         entries.push(deserialize_entry_v2(line)?);
     }
+    if lines.next().is_some() {
+        return Err(AssetError::Bundle {
+            message: "unexpected trailing bundle manifest data".to_owned(),
+        });
+    }
     Ok(BundleManifest {
         name: name.to_owned(),
         compression,
@@ -2536,6 +2541,11 @@ fn deserialize_manifest_v1<'a>(
             content_hash: ContentHash(0),
         }]
     };
+    if lines.next().is_some() {
+        return Err(AssetError::Bundle {
+            message: "unexpected trailing bundle manifest data".to_owned(),
+        });
+    }
     Ok(BundleManifest {
         name: name.to_owned(),
         compression,

@@ -1074,6 +1074,12 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
         ),
         Err(AssetError::Bundle { message }) if message.contains("unexpected trailing asset package registry data")
     ));
+    assert!(matches!(
+        AssetPackageRegistry::from_text(
+            "NGA_ASSET_PACKAGE_REGISTRY_V3\npackages=1\npackage|1|0|true|patch|patch|packages/patch.nga_bundle|1|1||6\nNGA_BUNDLE_V2\nname=patch\ncompression=none\nchunks=0\nentries=0\nextra"
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("unexpected trailing bundle manifest data")
+    ));
 
     let (valid, _valid_bundle, _) = texture_package(
         "valid",
@@ -2111,6 +2117,12 @@ fn mounted_bundle_registry_reports_missing_and_invalid_bundle_lines() {
             "NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundles=1\nbundle|1|5\nNGA_BUNDLE_V2\nname=patch\ncompression=none\nchunks=0\nentries=0\nextra"
         ),
         Err(AssetError::Bundle { message }) if message.contains("unexpected trailing mounted bundle registry data")
+    ));
+    assert!(matches!(
+        MountedBundleRegistry::from_text(
+            "NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundles=1\nbundle|1|6\nNGA_BUNDLE_V2\nname=patch\ncompression=none\nchunks=0\nentries=0\nextra"
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("unexpected trailing bundle manifest data")
     ));
 }
 
