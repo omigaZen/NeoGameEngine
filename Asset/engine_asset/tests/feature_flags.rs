@@ -117,6 +117,23 @@ fn enabled_async_loading_config_reports_worker_execution_mode() {
     assert_eq!(server.validate_loading_policy(), Ok(()));
 }
 
+#[test]
+fn editor_feature_status_matches_composed_feature_gate() {
+    let status = asset_feature_status(AssetFeature::Editor);
+    assert_eq!(status.enabled, asset_feature_enabled(AssetFeature::Editor));
+    assert_eq!(status.name, "editor");
+    if status.enabled {
+        assert_eq!(require_asset_feature(AssetFeature::Editor), Ok(()));
+        assert_eq!(asset_feature_status(AssetFeature::Importers).enabled, status.enabled);
+        assert_eq!(asset_feature_status(AssetFeature::Cookers).enabled, status.enabled);
+    } else {
+        assert_eq!(
+            require_asset_feature(AssetFeature::Editor),
+            Err(AssetError::Unsupported("asset editor feature is disabled"))
+        );
+    }
+}
+
 #[cfg(not(feature = "parallel"))]
 #[test]
 fn disabled_parallel_worker_config_reports_visible_unsupported_diagnostic() {
@@ -771,9 +788,10 @@ fn hot_reload_feature_entry_points_match_gate() {
 #[test]
 fn streaming_feature_entry_points_match_gate() {
     let mut server = AssetServer::new(AssetServerConfig::default());
-    let missing_region = StreamingRegionId(42);
+    let _missing_region = StreamingRegionId(42);
 
-    if asset_feature_enabled(AssetFeature::Streaming) {
+    #[cfg(feature = "streaming")]
+    {
         let region = server
             .register_streaming_region_paths("empty", LoadPriority::Low, &[])
             .unwrap();
@@ -788,7 +806,10 @@ fn streaming_feature_entry_points_match_gate() {
             server.streaming_region_progress(region),
             Ok(LoadProgress::default())
         );
-    } else {
+    }
+
+    #[cfg(not(feature = "streaming"))]
+    {
         assert_eq!(
             server.register_streaming_region_paths("empty", LoadPriority::Low, &[]),
             Err(AssetError::Unsupported(
@@ -813,43 +834,43 @@ fn streaming_feature_entry_points_match_gate() {
             ))
         );
         assert_eq!(
-            server.set_streaming_region_resident(missing_region, true),
+            server.set_streaming_region_resident(_missing_region, true),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         );
         assert_eq!(
-            server.set_streaming_region_priority(missing_region, LoadPriority::Immediate),
+            server.set_streaming_region_priority(_missing_region, LoadPriority::Immediate),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         );
         assert!(matches!(
-            server.preload_streaming_region(missing_region),
+            server.preload_streaming_region(_missing_region),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         ));
         assert_eq!(
-            server.unload_streaming_region(missing_region),
+            server.unload_streaming_region(_missing_region),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         );
         assert_eq!(
-            server.streaming_region_progress(missing_region),
+            server.streaming_region_progress(_missing_region),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         );
         assert_eq!(
-            server.streaming_region_state(missing_region),
+            server.streaming_region_state(_missing_region),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
         );
         assert_eq!(
-            server.remove_streaming_region(missing_region),
+            server.remove_streaming_region(_missing_region),
             Err(AssetError::Unsupported(
                 "asset streaming feature is disabled"
             ))
