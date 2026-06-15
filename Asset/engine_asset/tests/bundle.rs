@@ -473,6 +473,114 @@ fn bundle_rle_compression_round_trip_exposes_chunk_reports_and_ranges() {
 }
 
 #[test]
+#[cfg(feature = "zstd")]
+fn bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches() {
+    let first_id = AssetId::new();
+    let second_id = AssetId::new();
+    let third_id = AssetId::new();
+    let first = texture_bytes(1, 1, 21);
+    let second = texture_bytes(1, 1, 22);
+    let third = texture_bytes(1, 1, 23);
+    let bundle = BundleWriter::build_bytes_with_options(
+        "zstd_cache_textures",
+        BundleBuildOptions::new(CompressionKind::Zstd).with_chunk_policy(
+            BundleChunkPartitionPolicy::MaxUncompressedBytes(first.len()),
+        ),
+        vec![
+            BundleAsset {
+                id: first_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/first.texture"),
+                bytes: first.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: second_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/second.texture"),
+                bytes: second.clone(),
+                dependencies: Vec::new(),
+            },
+            BundleAsset {
+                id: third_id,
+                asset_type: AssetTypeId::of::<Texture>(),
+                path: AssetPath::parse("textures/third.texture"),
+                bytes: third.clone(),
+                dependencies: Vec::new(),
+            },
+        ],
+    )
+    .unwrap();
+
+    let reader = BundleReader::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(reader.manifest().compression, CompressionKind::Zstd);
+    assert_eq!(reader.manifest().chunks.len(), 3);
+    assert_eq!(reader.chunk_cache_stats().max_decoded_chunks, Some(1));
+
+    let first_prefetch = reader
+        .prefetch_path(&AssetPath::parse("textures/first.texture"))
+        .unwrap();
+    assert_eq!(first_prefetch.decoded_chunks, vec![0]);
+    assert!(first_prefetch.evicted_chunks.is_empty());
+    assert_eq!(reader.chunk_cache_stats().decoded_chunks, 1);
+    assert_eq!(reader.chunk_cache_stats().prefetched_chunks, 1);
+
+    let second_prefetch = reader.prefetch_chunk(1).unwrap();
+    assert_eq!(second_prefetch.decoded_chunks, vec![1]);
+    assert_eq!(second_prefetch.evicted_chunks, vec![0]);
+    let stats = reader.chunk_cache_stats();
+    assert_eq!(stats.decoded_chunks, 1);
+    assert_eq!(stats.cache_misses, 2);
+    assert_eq!(stats.cache_evictions, 1);
+    assert_eq!(stats.prefetched_chunks, 2);
+
+    let bundle_io = BundleAssetIo::from_bytes_with_loading_policy(
+        &bundle,
+        BundleChunkLoadingPolicy::OnDemandCachedLimited {
+            max_decoded_chunks: 2,
+        },
+    )
+    .unwrap();
+    let prefetch = bundle_io
+        .prefetch_paths(&["textures/first.texture", "textures/second.texture"])
+        .unwrap();
+    assert_eq!(prefetch.cache_misses, 2);
+    assert_eq!(prefetch.decoded_chunks, vec![0, 1]);
+    assert!(prefetch.evicted_chunks.is_empty());
+    let third_prefetch = bundle_io.prefetch_path("textures/third.texture").unwrap();
+    assert_eq!(third_prefetch.decoded_chunks, vec![2]);
+    assert_eq!(third_prefetch.evicted_chunks, vec![0]);
+    let stats = bundle_io.chunk_cache_stats();
+    assert_eq!(stats.decoded_chunks, 2);
+    assert_eq!(stats.cache_evictions, 1);
+    assert_eq!(stats.prefetched_chunks, 3);
+
+    let (range, report) = bundle_io
+        .read_range_with_report("textures/second.texture", 8, 4)
+        .unwrap();
+    assert_eq!(range, second[8..12]);
+    assert_eq!(report.entry, second_id);
+    assert_eq!(report.chunk_index, 1);
+    assert_eq!(report.chunk_compression, CompressionKind::Zstd);
+    assert_eq!(report.cache_status, BundleChunkCacheStatus::Hit);
+    assert_eq!(bundle_io.chunk_cache_stats().cache_hits, 1);
+    assert_eq!(
+        bundle_io.read_range("textures/first.texture", 0, 8).unwrap(),
+        first[0..8]
+    );
+    assert_eq!(
+        bundle_io.metadata("textures/third.texture").unwrap().hash,
+        Some(content_hash(&third))
+    );
+}
+
+#[test]
 fn bundle_chunk_partition_policy_and_on_demand_cache_are_observable() {
     let first_id = AssetId::new();
     let second_id = AssetId::new();

@@ -2360,3 +2360,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_f
 ```
 
 Result: `FontImporter` now has direct importer evidence for validated binary font files: `.ttf` and `.otf` sources preserve their raw bytes through `ImportContext`, keep importer/version metadata stable, and load back into runtime `Font` values with the expected TrueType/OpenType data variants.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_zstd_compression_round_trip_exposes_chunk_reports_and_prefetches
+```
+
+Result: the Zstd bundle path now has a non-empty on-demand cached regression in addition to the empty-manifest smoke. A multi-chunk Zstd bundle now exercises `prefetch_path`/`prefetch_chunk`/`prefetch_paths` cache misses, LRU eviction, chunk cache statistics, and `BundleChunkReadReport` cache-hit behavior while still round-tripping the expected compressed chunk metadata.
