@@ -2384,3 +2384,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_write
 ```
 
 Result: the same Zstd file-backed regression now also pins manifest dependency preservation. The written bundle keeps the root entry dependency graph intact on disk and when reloaded through `BundleReader`/`BundleAssetIo`, including the dependent entry's path hash and the dependent read path itself.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle bundle_writer_writes_zstd_file_and_returns_manifest
+```
+
+Result: the file-backed Zstd regression now also verifies read and range diagnostics from `BundleAssetIo`. Reopening the bundle from disk keeps `read_with_report` / `read_range_with_report` path metadata and Zstd chunk-compression reporting stable, not just the plain `read`/`metadata` success path.

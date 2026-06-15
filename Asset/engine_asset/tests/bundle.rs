@@ -934,6 +934,20 @@ fn bundle_writer_writes_zstd_file_and_returns_manifest() {
         },
     )
     .unwrap();
+    let (read_bytes, read_report) = bundle_io
+        .read_with_report("textures/persisted_zstd.texture")
+        .unwrap();
+    assert_eq!(read_bytes, first);
+    assert_eq!(read_report.chunk_compression, CompressionKind::Zstd);
+    assert_eq!(read_report.path, Some(AssetPath::parse("textures/persisted_zstd.texture")));
+    let (_, range_report) = bundle_io
+        .read_range_with_report("textures/persisted_zstd_extra.texture", 0, second.len() as u64)
+        .unwrap();
+    assert_eq!(range_report.chunk_compression, CompressionKind::Zstd);
+    assert_eq!(
+        range_report.path,
+        Some(AssetPath::parse("textures/persisted_zstd_extra.texture"))
+    );
     assert_eq!(
         bundle_io
             .read_range("textures/persisted_zstd.texture", 0, first.len() as u64)
