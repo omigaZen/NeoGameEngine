@@ -22236,6 +22236,11 @@ fn database_audio_importer_converts_source_to_runtime_audio_bytes() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
