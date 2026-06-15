@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_material_cooker_canonicalizes_runtime_and_source_bytes
+```
+
+Result: `MaterialCooker` now has direct runtime/source round-trip evidence: runtime material bytes stay unchanged, normalized source documents canonicalize to the same runtime bytes, and both paths report `VersionHash(2)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_shader_cooker_canonicalizes_runtime_and_source_bytes
 ```
 
