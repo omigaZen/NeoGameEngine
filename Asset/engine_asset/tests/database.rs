@@ -18800,6 +18800,84 @@ fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies
 }
 
 #[test]
+fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependencies() {
+    let scene_path = AssetPath::parse("scenes/imported.scene");
+    let prefab_path = AssetPath::parse("prefabs/imported.prefab");
+    let texture_path = AssetPath::parse("textures/shared.texture");
+    let material_path = AssetPath::parse("materials/shared.material");
+    let mesh_path = AssetPath::parse("meshes/shared.mesh");
+    let scene_bytes =
+        b"NGA_SCENE_V1\nname=imported_scene\ndependency=textures/shared.texture\ndependency=materials/shared.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/shared.mesh;material=materials/shared.material\n".to_vec();
+    let prefab_bytes =
+        b"NGA_PREFAB_V1\ndependency=textures/shared.texture\ndependency=materials/shared.material\nroot=Root\ncomponent=Transform|translation=0,0,0\nchild=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/shared.mesh;material=materials/shared.material\n".to_vec();
+    let texture_id = AssetId::new();
+    let material_id = AssetId::new();
+    let mesh_id = AssetId::new();
+    let mut registry = AssetRegistry::new();
+    registry.insert(AssetMetadata::runtime(
+        texture_id,
+        texture_path.clone(),
+        AssetTypeId::of::<Texture>(),
+    ));
+    registry.insert(AssetMetadata::runtime(
+        material_id,
+        material_path.clone(),
+        AssetTypeId::of::<Material>(),
+    ));
+    registry.insert(AssetMetadata::runtime(
+        mesh_id,
+        mesh_path.clone(),
+        AssetTypeId::of::<Mesh>(),
+    ));
+    let scene_source = SourceAsset {
+        path: scene_path.clone(),
+        bytes: scene_bytes.clone(),
+        hash: ContentHash(0),
+    };
+    let prefab_source = SourceAsset {
+        path: prefab_path.clone(),
+        bytes: prefab_bytes.clone(),
+        hash: ContentHash(0),
+    };
+    let scene_importer = SceneImporter::new();
+    let prefab_importer = PrefabImporter::new();
+    let settings = ImporterSettings::default();
+    let mut scene_ctx = ImportContext::with_registry(&registry);
+    let mut prefab_ctx = ImportContext::with_registry(&registry);
+
+    let scene_output = scene_importer
+        .import(&mut scene_ctx, &scene_source, &settings)
+        .unwrap();
+    let prefab_output = prefab_importer
+        .import(&mut prefab_ctx, &prefab_source, &settings)
+        .unwrap();
+
+    assert_eq!(scene_output.metadata.path.as_ref(), Some(&scene_path));
+    assert_eq!(scene_output.metadata.importer.as_deref(), Some("SceneImporter"));
+    assert_eq!(scene_output.metadata.importer_version, 1);
+    assert_eq!(scene_output.metadata.source_path.as_ref(), Some(&scene_path));
+    assert_eq!(scene_output.metadata.cooked_path.as_ref(), Some(&scene_path));
+    assert_eq!(scene_output.metadata.version_hash, Some(VersionHash(1)));
+    assert_eq!(scene_output.version_hash, VersionHash(1));
+    assert_eq!(scene_output.generated.len(), 1);
+    assert_eq!(scene_output.generated[0].bytes, scene_bytes);
+    assert_eq!(scene_output.generated[0].path, scene_path);
+    assert_eq!(scene_output.dependencies, vec![texture_id, material_id, mesh_id]);
+
+    assert_eq!(prefab_output.metadata.path.as_ref(), Some(&prefab_path));
+    assert_eq!(prefab_output.metadata.importer.as_deref(), Some("PrefabImporter"));
+    assert_eq!(prefab_output.metadata.importer_version, 1);
+    assert_eq!(prefab_output.metadata.source_path.as_ref(), Some(&prefab_path));
+    assert_eq!(prefab_output.metadata.cooked_path.as_ref(), Some(&prefab_path));
+    assert_eq!(prefab_output.metadata.version_hash, Some(VersionHash(1)));
+    assert_eq!(prefab_output.version_hash, VersionHash(1));
+    assert_eq!(prefab_output.generated.len(), 1);
+    assert_eq!(prefab_output.generated[0].bytes, prefab_bytes);
+    assert_eq!(prefab_output.generated[0].path, prefab_path);
+    assert_eq!(prefab_output.dependencies, vec![texture_id, material_id, mesh_id]);
+}
+
+#[test]
 fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtime_docs() {
     let config = database_config("builtin_animation_skeleton_import_cook_load");
     let animation_path = AssetPath::parse("animations/hero.animation");

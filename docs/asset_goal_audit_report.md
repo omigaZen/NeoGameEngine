@@ -2328,3 +2328,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database roughness_
 ```
 
 Result: the roughness texture regression now also preserves `texture.roughness.color_space=non_color` for `map_Ns -colorspace Non-Color` in addition to the existing roughness source-channel evidence, and the runtime-loaded `Material` carries the same color-space setting through the bundle path.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_scene_and_prefab_importers_preserve_runtime_documents_and_dependencies
+```
+
+Result: `SceneImporter` and `PrefabImporter` now have direct importer evidence: scene and prefab source documents preserve their runtime bytes, register dependency ids through `ImportContext`, and report `VersionHash(1)` with importer/version/source metadata intact.
