@@ -131,6 +131,14 @@ Result: `SceneCooker`, `PrefabCooker`, and `PhysicsMeshCooker` now have direct r
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_mesh_cooker_canonicalizes_runtime_and_source_bytes
+```
+
+Result: `MeshCooker` now has direct runtime/source round-trip evidence: runtime binary mesh bytes stay unchanged, text mesh source documents canonicalize to the same runtime bytes, and both paths report `VersionHash(4)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_occlusion_texture_colorspace
 ```
 

@@ -19356,6 +19356,40 @@ fn database_mesh_cooker_compacts_mobile_web_vertices() {
 }
 
 #[test]
+fn database_mesh_cooker_canonicalizes_runtime_and_source_bytes() {
+    let runtime_path = AssetPath::parse("meshes/cooked_runtime.mesh");
+    let source_path = AssetPath::parse("meshes/from_source.mesh");
+    let runtime_bytes = simple_binary_mesh_bytes();
+    let source_bytes = mesh_bytes();
+    let expected_source_bytes = simple_binary_mesh_bytes();
+    let runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(runtime_path.clone()),
+        source_bytes: runtime_bytes.clone(),
+    };
+    let source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(source_path.clone()),
+        source_bytes: source_bytes.clone(),
+    };
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Mesh>());
+    let source_metadata =
+        AssetMetadata::runtime(AssetId::new(), source_path, AssetTypeId::of::<Mesh>());
+    let cooker = MeshCooker::new();
+
+    let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
+    let source_output = cooker.cook(&source_ctx, &source_metadata).unwrap();
+
+    assert_eq!(runtime_output.bytes, runtime_bytes);
+    assert_eq!(runtime_output.version_hash, VersionHash(4));
+    assert_eq!(runtime_output.metadata, runtime_metadata);
+    assert_eq!(source_output.bytes, expected_source_bytes);
+    assert_eq!(source_output.version_hash, VersionHash(4));
+    assert_eq!(source_output.metadata, source_metadata);
+}
+
+#[test]
 fn database_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     let config = database_config("mesh_importer_source_conversion");
     let path = AssetPath::parse("meshes/generated.mesh");
