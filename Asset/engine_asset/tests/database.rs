@@ -13535,6 +13535,124 @@ map_Kd ../escape.texture
 }
 
 #[test]
+fn database_model_importer_includes_nested_obj_quoted_material_texture_paths() {
+    let config = database_config("builtin_model_obj_nested_quoted_material_texture_paths");
+    let model_path = AssetPath::parse("models/assembled.obj");
+    let include_path = AssetPath::parse("models/parts/assembly.obj");
+    let nested_include_path = AssetPath::parse("models/parts/sub/detail.obj");
+    let nested_material_library_path = AssetPath::parse("models/parts/sub/detail.mtl");
+    let nested_texture_path = AssetPath::parse("models/parts/sub/textures/detail albedo.texture");
+    let mesh_path = AssetPath::parse("models/assembled.Panel.mesh");
+    let nested_material_path = AssetPath::parse("models/assembled.Material_Detail.material");
+    let model_source = b"call parts/assembly.obj
+"
+    .to_vec();
+    let include_source = b"call sub/detail.obj
+"
+    .to_vec();
+    let nested_include_source = b"mtllib detail.mtl
+usemtl Detail
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+"
+    .to_vec();
+    let nested_material_source = b"newmtl Detail
+map_Kd \"textures/detail albedo.texture\"
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let expected_nested_material = b"# mtllib detail.mtl
+name=Detail
+texture.albedo=models/parts/sub/textures/detail albedo.texture
+"
+    .to_vec();
+    let nested_texture_source = texture_bytes(1, 1, 77);
+    let mut first_io = MemoryAssetIo::new();
+    first_io.insert(model_path.path(), model_source.clone());
+    first_io.insert(include_path.path(), include_source.clone());
+    first_io.insert(nested_include_path.path(), nested_include_source.clone());
+    first_io.insert(
+        nested_material_library_path.path(),
+        nested_material_source.clone(),
+    );
+    first_io.insert(nested_texture_path.path(), nested_texture_source.clone());
+    let mut first = AssetDatabase::new(config.clone());
+    first.set_io(first_io);
+    first.register_builtin_importers();
+    first.register_builtin_cookers();
+
+    let nested_texture_id = first.import_asset_path(&nested_texture_path).unwrap();
+    let model_id = first.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = first.registry().metadata_by_path(&mesh_path).unwrap();
+    let nested_material_metadata = first
+        .registry()
+        .metadata_by_path(&nested_material_path)
+        .unwrap();
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["Panel"]);
+    assert_eq!(mesh_metadata.dependencies.len(), 1);
+    assert_eq!(nested_material_metadata.labels, vec!["Material/Detail"]);
+    assert_eq!(nested_material_metadata.dependencies, vec![nested_texture_id]);
+    assert_eq!(
+        first.registry().get(model_id).unwrap().dependencies.len(),
+        3
+    );
+    assert!(first
+        .registry()
+        .get(model_id)
+        .unwrap()
+        .dependencies
+        .contains(&nested_texture_id));
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_material_path.path())).unwrap(),
+        expected_nested_material
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_texture_path.path())).unwrap(),
+        nested_texture_source
+    );
+    first.save_all_metadata_sidecars().unwrap();
+
+    let mut second_io = MemoryAssetIo::new();
+    second_io.insert(model_path.path(), model_source);
+    second_io.insert(include_path.path(), include_source);
+    second_io.insert(nested_include_path.path(), nested_include_source);
+    second_io.insert(
+        nested_material_library_path.path(),
+        b"newmtl Detail\nmap_Kd \"textures/detail albedo.texture\"\n".to_vec(),
+    );
+    second_io.insert(nested_texture_path.path(), texture_bytes(1, 1, 123));
+    let mut second = AssetDatabase::new(config.clone());
+    second.set_io(second_io);
+    second.register_builtin_importers();
+    second.register_builtin_cookers();
+
+    let second_nested_texture_id = second.import_asset_path(&nested_texture_path).unwrap();
+    let _ = second.import_asset_path(&model_path).unwrap();
+    let second_nested_material_metadata = second
+        .registry()
+        .metadata_by_path(&nested_material_path)
+        .unwrap();
+    assert_eq!(
+        second_nested_material_metadata.dependencies,
+        vec![second_nested_texture_id]
+    );
+}
+
+#[test]
 #[cfg(feature = "bundle")]
 fn database_model_importer_accepts_nested_obj_display_attributes() {
     let config = database_config("builtin_model_obj_nested_display_attributes");
