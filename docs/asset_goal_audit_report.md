@@ -1780,3 +1780,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: bundle artifact removal now has explicit coverage for both artifact-deleting and artifact-preserving paths. `delete_artifact=true` still removes the file and updates the registry, while `delete_artifact=false` keeps the artifact on disk, returns `artifact_removed=false`, and still allows `load_package_bytes()` to read the preserved payload after the logical registry removal.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_reports_missing_package_removal
+```
+
+Result: `AssetPackageArtifactStore::remove_package()` now has an explicit missing-package regression. Attempting to remove a package name that is not registered returns the expected bundle error instead of mutating registry state or touching artifacts.

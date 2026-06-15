@@ -1294,6 +1294,21 @@ fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
 }
 
 #[test]
+fn asset_package_artifact_store_reports_missing_package_removal() {
+    let root = temp_dir("package_artifacts_missing_remove");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+
+    assert!(matches!(
+        store.remove_package(&mut registry, "missing_package", true),
+        Err(AssetError::Bundle { message }) if message.contains("asset package `missing_package` is not registered")
+    ));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payloads() {
     let root = temp_dir("package_artifact_activation");
     let _ = std::fs::remove_dir_all(&root);
