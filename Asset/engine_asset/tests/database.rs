@@ -12766,7 +12766,7 @@ f 1 2 3\n"
             .into_bytes()
         } else {
             format!(
-                "newmtl Alias\n{directive} -colorspace Non-Color textures/{stem}.texture\n"
+                "newmtl Alias\n{directive} -imfchan red -colorspace Non-Color textures/{stem}.texture\n"
             )
             .into_bytes()
         };
@@ -12784,6 +12784,7 @@ texture.{channel}.color_space=non_color\n"
                 "# mtllib {material_library}\n\
 name=Alias\n\
 texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=red\n\
 texture.{channel}.color_space=non_color\n"
             )
             .into_bytes()
@@ -12868,12 +12869,14 @@ texture.{channel}.color_space=non_color\n"
             material.textures[0].options.color_space,
             Some(MaterialTextureColorSpace::NonColor)
         );
-        if directive == "map_specular_color" {
-            assert_eq!(
-                material.textures[0].options.source_channel,
-                Some(MaterialTextureChannel::Blue)
-            );
-        }
+        assert_eq!(
+            material.textures[0].options.source_channel,
+            Some(if directive == "map_specular_color" {
+                MaterialTextureChannel::Blue
+            } else {
+                MaterialTextureChannel::Red
+            })
+        );
     }
 }
 
