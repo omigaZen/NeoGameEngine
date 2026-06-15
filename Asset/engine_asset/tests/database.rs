@@ -1817,6 +1817,37 @@ fn database_builtin_model_importer_generates_labeled_subresources_and_runtime_ou
         .unwrap()
         .contains("models/hero.Material_Hero.material"));
 
+    let text_path = config.imported_root.join("model_dependencies.txt");
+    let json_path = config.imported_root.join("model_dependencies.json");
+    let html_path = config.imported_root.join("model_dependencies.html");
+    let scoped_json_path = config.imported_root.join("model_scope.json");
+    let scoped_html_path = config.imported_root.join("model_scope.html");
+    database.save_dependency_report_text(&text_path).unwrap();
+    database.save_dependency_report_json(&json_path).unwrap();
+    database.save_dependency_report_html(&html_path).unwrap();
+    database
+        .save_scoped_dependency_report_json(model_id, &scoped_json_path)
+        .unwrap();
+    database
+        .save_scoped_dependency_report_html(model_id, &scoped_html_path)
+        .unwrap();
+
+    let text = fs::read_to_string(text_path).unwrap();
+    assert!(text.contains(&format!("edge|{}|{}", model_id.raw(), skeleton_id.raw())));
+    assert!(text.contains(&format!("edge|{}|{}", model_id.raw(), animation_id.raw())));
+    let json = fs::read_to_string(json_path).unwrap();
+    assert!(json.contains(&format!("\"{}\"", skeleton_id.raw())));
+    assert!(json.contains(&format!("\"{}\"", animation_id.raw())));
+    let html = fs::read_to_string(html_path).unwrap();
+    assert!(html.contains(&format!("<code>{}</code>", skeleton_id.raw())));
+    assert!(html.contains(&format!("<code>{}</code>", animation_id.raw())));
+    let scoped_json = fs::read_to_string(scoped_json_path).unwrap();
+    assert!(scoped_json.contains(&format!("\"{}\"", skeleton_id.raw())));
+    assert!(scoped_json.contains(&format!("\"{}\"", animation_id.raw())));
+    let scoped_html = fs::read_to_string(scoped_html_path).unwrap();
+    assert!(scoped_html.contains(&format!("<code>{}</code>", skeleton_id.raw())));
+    assert!(scoped_html.contains(&format!("<code>{}</code>", animation_id.raw())));
+
     database.save_registry().unwrap();
     database.save_all_metadata_sidecars().unwrap();
     let mut loaded_sidecars = AssetDatabase::new(config.clone());
