@@ -21062,6 +21062,8 @@ fn database_audio_importer_preserves_binary_wav_bytes() {
     let config = database_config("audio_importer_binary_wav_round_trip");
     let path = AssetPath::parse("audio/roundtrip.wav");
     let source = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
+    let expected = b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=2\nformat=i16\nsamples=0,1000,-1000,500\nstreaming=false\n"
+        .to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(path.path(), source.clone());
     let mut database = AssetDatabase::new(config.clone());
@@ -21081,7 +21083,7 @@ fn database_audio_importer_preserves_binary_wav_bytes() {
     );
 
     database.cook_asset(id, TargetPlatform::Windows).unwrap();
-    assert!(fs::metadata(config.cooked_root.join(path.path())).is_ok());
+    assert_eq!(fs::read(config.cooked_root.join(path.path())).unwrap(), expected);
 
     let mut server = AssetServer::new(AssetServerConfig {
         root: config.cooked_root.clone(),

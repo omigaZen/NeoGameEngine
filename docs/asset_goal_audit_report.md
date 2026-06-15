@@ -86,7 +86,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_audio_cooker_canonicalizes_runtime_and_wav_bytes
 ```
 
-Result: `AudioCooker` now has direct runtime/WAV round-trip evidence: runtime audio bytes stay unchanged, IEEE-float WAV bytes and binary PCM16 WAV bytes canonicalize to the same runtime bytes, and both paths report `VersionHash(8)`.
+Result: `AudioCooker` now has direct runtime/WAV round-trip evidence: runtime audio bytes stay unchanged, IEEE-float WAV bytes and binary PCM16 WAV bytes canonicalize to the same runtime bytes, both paths report `VersionHash(8)`, and the binary PCM16 WAV path now also pins the exact cooked output bytes.
 
 Passed:
 
