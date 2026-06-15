@@ -300,6 +300,29 @@ fn hot_reload_async_watch_backend_reports_errors_and_stop_drops_pending_notifica
 }
 
 #[test]
+fn hot_reload_async_watch_notification_is_dropped_after_unwatch() {
+    let path = AssetPath::parse("textures/async_unwatch.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+
+    server
+        .watch_hot_reload_path_with_backend(path.clone(), HotReloadWatchBackend::AsyncNotification)
+        .unwrap();
+    server.start_hot_reload_async_watch_backend().unwrap();
+    assert!(server
+        .notify_hot_reload_async_watch_change(path.clone())
+        .unwrap());
+    assert!(server.unwatch_hot_reload_path(&path));
+
+    let report = server.poll_hot_reload_watches().unwrap();
+    assert_eq!(report.async_notifications, 1);
+    assert_eq!(report.dropped_notifications, 1);
+    assert!(report.changed.is_empty());
+    assert!(report.errors.is_empty());
+    assert!(server.hot_reload_watch(&path).is_none());
+}
+
+#[test]
 fn hot_reload_async_watch_backend_start_and_stop_are_idempotent() {
     let path = AssetPath::parse("textures/async_idempotent.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));

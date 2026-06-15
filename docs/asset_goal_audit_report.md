@@ -2060,3 +2060,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: streaming region registration by path now deduplicates repeated paths before registration, so a region created from the same asset path twice still contains one asset handle.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload hot_reload_async_watch_notification_is_dropped_after_unwatch
+```
+
+Result: async hot reload notifications that were already queued are explicitly dropped when the watch is removed before polling, and the drop is surfaced in the poll report.
