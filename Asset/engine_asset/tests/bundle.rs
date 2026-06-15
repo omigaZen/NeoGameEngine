@@ -2060,6 +2060,41 @@ fn asset_server_rejects_incompatible_package_activation_transactionally() {
 }
 
 #[test]
+fn asset_server_rejects_packages_for_runtime_version_too_old() {
+    let (base, base_bundle, _base_ids) = texture_package(
+        "base_runtime_gate",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(12),
+        "packages/base_runtime_gate.nga_bundle",
+        vec![("textures/runtime_gate.texture", texture_bytes(1, 1, 6))],
+    );
+    let gated = base.with_minimum_runtime_version(2);
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    server.register_builtin_loaders();
+
+    let registry = AssetPackageRegistry::new(vec![gated.clone()]).unwrap();
+    let preview = server
+        .preview_asset_package_update(&registry, AssetPackageUpdatePolicy::default())
+        .unwrap();
+    assert!(!preview.is_compatible());
+    assert_eq!(
+        preview.compatibility_issues[0].kind,
+        AssetPackageCompatibilityIssueKind::RuntimeTooOld
+    );
+    assert_eq!(preview.compatibility_issues[0].runtime_version, 1);
+    assert_eq!(preview.compatibility_issues[0].minimum_runtime_version, 2);
+    assert!(matches!(
+        server.activate_asset_package_registry(registry, AssetPackageUpdatePolicy::default()),
+        Err(AssetError::Bundle { message })
+            if message.contains("base_runtime_gate") && message.contains("requires runtime package version 2, current runtime is 1")
+    ));
+    assert!(server.asset_package_registry().packages().is_empty());
+}
+
+#[test]
 fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
     let ready_bytes = texture_bytes(1, 1, 7);
     let (base, base_bundle, base_ids) = texture_package(

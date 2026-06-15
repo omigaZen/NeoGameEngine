@@ -1722,6 +1722,25 @@ Result: formatting passed; `MeshCooker` now has explicit Android/iOS/Web coverag
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_server_rejects_packages_for_runtime_version_too_old
+```
+
+Result: the package activation path now has an explicit runtime-version gate regression. A package with `minimum_runtime_version=2` is rejected under the default runtime version `1`, `preview_asset_package_update()` reports `RuntimeTooOld`, and `activate_asset_package_registry()` fails with the expected `requires runtime package version 2, current runtime is 1` message. The existing bundle/package activation coverage remains unchanged otherwise.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
+C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
+git diff --check
+```
+
+Result: the bundle suite stays green with 28 tests, including the new runtime-version gate regression, and the default engine_asset suite stays green across 415 tests. The no-default check still passes with the existing unused shader helper warning, and whitespace checks still only report CRLF conversion warnings.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --quiet
 C:\Users\JM\.cargo\bin\cargo.exe check -p engine_asset --no-default-features
