@@ -1161,6 +1161,66 @@ fn asset_package_registry_reports_invalid_metadata_and_payload_mismatch() {
 }
 
 #[test]
+fn asset_package_registry_rejects_registry_separator_tokens() {
+    let (_valid, _valid_bundle, _) = texture_package(
+        "valid",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(1),
+        "packages/valid.nga_bundle",
+        vec![("textures/valid.texture", texture_bytes(1, 1, 1))],
+    );
+
+    let (mut separator_name, separator_bundle, _) = texture_package(
+        "separator_name",
+        AssetIoLayerKind::Patch,
+        1,
+        BundleId(2),
+        "packages/separator_name.nga_bundle",
+        vec![("textures/other.texture", texture_bytes(1, 1, 2))],
+    );
+    separator_name.name = "separator|name".to_owned();
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![separator_name]),
+        Err(AssetError::Bundle { message }) if message.contains("package name") && message.contains("registry separators")
+    ));
+
+    let (mut separator_path, _separator_bundle, _) = texture_package(
+        "separator_path",
+        AssetIoLayerKind::Patch,
+        2,
+        BundleId(3),
+        "packages/separator_path.nga_bundle",
+        vec![("textures/other.texture", texture_bytes(1, 1, 3))],
+    );
+    separator_path.bundle_path = "packages/sep|path.nga_bundle".to_owned();
+    assert!(matches!(
+        AssetPackageRegistry::new(vec![separator_path]),
+        Err(AssetError::Bundle { message }) if message.contains("package bundle path") && message.contains("registry separators")
+    ));
+
+    let separator_registry = AssetPackageRegistry::new(vec![{
+        let mut record = texture_package(
+            "separator_text",
+            AssetIoLayerKind::Patch,
+            3,
+            BundleId(4),
+            "packages/separator_text.nga_bundle",
+            vec![("textures/other.texture", texture_bytes(1, 1, 4))],
+        )
+        .0;
+        record.name = "separator\ntext".to_owned();
+        record
+    }]);
+    assert!(matches!(
+        separator_registry,
+        Err(AssetError::Bundle { message }) if message.contains("package name") && message.contains("registry separators")
+    ));
+
+    let _ = separator_bundle;
+}
+
+#[test]
 fn asset_package_artifact_store_installs_builds_and_removes_package_files() {
     let root = temp_dir("package_artifacts");
     let _ = std::fs::remove_dir_all(&root);
