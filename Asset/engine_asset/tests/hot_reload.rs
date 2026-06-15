@@ -503,6 +503,24 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
 }
 
 #[test]
+fn reload_by_id_reports_missing_asset_without_mutating_state() {
+    let path = AssetPath::parse("textures/reload_by_id.texture");
+    let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
+    let mut server = server_with_io(io);
+    let texture: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_uploads(&mut server, 1);
+    assert_eq!(server.get(&texture).unwrap().width, 1);
+
+    let missing = AssetId::new();
+    let error = server.reload_by_id(missing).unwrap_err();
+    assert!(matches!(error, AssetError::AssetNotFound { id } if id == missing));
+    assert_eq!(server.state(&texture), AssetLoadState::Ready);
+    assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert!(server.error_by_id(texture.id()).is_none());
+}
+
+#[test]
 fn reload_by_path_clears_failure_diagnostic_by_later_successful_reload() {
     let path = AssetPath::parse("textures/by_path.texture");
     let io = MemoryAssetIo::new().with_file(path.path(), texture_bytes(1, 1, 10));
