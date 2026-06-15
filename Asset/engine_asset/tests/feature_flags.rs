@@ -607,9 +607,15 @@ fn streaming_feature_entry_points_match_gate() {
     let missing_region = StreamingRegionId(42);
 
     if asset_feature_enabled(AssetFeature::Streaming) {
-        assert!(server
+        let region = server
             .register_streaming_region_paths("empty", LoadPriority::Low, &[])
-            .is_ok());
+            .unwrap();
+        let registered = server.streaming_region(region).unwrap();
+        assert_eq!(registered.id, region);
+        assert_eq!(registered.name, "empty");
+        assert_eq!(registered.priority, LoadPriority::Low);
+        assert!(registered.assets.is_empty());
+        assert!(!registered.resident);
     } else {
         assert_eq!(
             server.register_streaming_region_paths("empty", LoadPriority::Low, &[]),
