@@ -229,6 +229,28 @@ fn scoped_dependency_report_exports_root_subgraph_and_missing_root_errors() {
     assert!(html.contains(&format!("data-root=\"{}\"", scene.id().raw())));
     assert!(html.contains(&format!("<code>{}</code>", material_id.raw())));
     assert!(!html.contains(&unrelated.id().raw().to_string()));
+
+    let text_path = std::env::temp_dir().join("asset_smoke_scoped_dependency.txt");
+    let dot_path = std::env::temp_dir().join("asset_smoke_scoped_dependency.dot");
+    let json_path = std::env::temp_dir().join("asset_smoke_scoped_dependency.json");
+    let html_path = std::env::temp_dir().join("asset_smoke_scoped_dependency.html");
+    server
+        .save_scoped_dependency_report_text(scene.id(), &text_path)
+        .unwrap();
+    server
+        .save_scoped_dependency_report_dot(scene.id(), &dot_path)
+        .unwrap();
+    server
+        .save_scoped_dependency_report_json(scene.id(), &json_path)
+        .unwrap();
+    server
+        .save_scoped_dependency_report_html(scene.id(), &html_path)
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(text_path).unwrap(), text);
+    assert_eq!(std::fs::read_to_string(dot_path).unwrap(), dot);
+    assert_eq!(std::fs::read_to_string(json_path).unwrap(), json);
+    assert_eq!(std::fs::read_to_string(html_path).unwrap(), html);
+
     assert!(matches!(
         server.scoped_dependency_report(AssetId::from_u128(0xdead_beef)),
         Err(AssetError::AssetNotFound { .. })
