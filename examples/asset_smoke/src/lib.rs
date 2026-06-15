@@ -118,7 +118,11 @@ pub struct EditorSmokeReport {
     pub physics_world_ray_hit: bool,
     pub physics_world_triangles: usize,
     pub scene_ready_with_dependencies: bool,
+    pub scene_instance_ready: bool,
+    pub scene_instance_handles: usize,
     pub prefab_ready_with_dependencies: bool,
+    pub prefab_instance_ready: bool,
+    pub prefab_instance_handles: usize,
     pub runtime_dependencies: usize,
     pub scene_dependencies: usize,
     pub prefab_dependencies: usize,
@@ -578,7 +582,11 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         physics_world_ray_hit: physics_bridge.ray_hit,
         physics_world_triangles: physics_bridge.triangles,
         scene_ready_with_dependencies: assets.is_ready_with_dependencies(&scene),
+        scene_instance_ready: scene_instance.asset_handles().len() == 1,
+        scene_instance_handles: scene_instance.asset_handles().len(),
         prefab_ready_with_dependencies: assets.is_ready_with_dependencies(&prefab),
+        prefab_instance_ready: prefab_instance.asset_handles().len() == 1,
+        prefab_instance_handles: prefab_instance.asset_handles().len(),
         runtime_dependencies: assets
             .dependency_graph()
             .direct_dependencies(material.id())
@@ -1466,7 +1474,11 @@ mod tests {
         assert!(report.physics_world_ray_hit);
         assert_eq!(report.physics_world_triangles, 1);
         assert!(report.scene_ready_with_dependencies);
+        assert!(report.scene_instance_ready);
+        assert_eq!(report.scene_instance_handles, 1);
         assert!(report.prefab_ready_with_dependencies);
+        assert!(report.prefab_instance_ready);
+        assert_eq!(report.prefab_instance_handles, 1);
         assert_eq!(report.runtime_dependencies, 1);
         assert_eq!(report.scene_dependencies, 4);
         assert_eq!(report.prefab_dependencies, 4);
