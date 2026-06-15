@@ -329,8 +329,8 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     let physics_path = AssetPath::parse("physics/editor.physics");
     let scene_path = AssetPath::parse("scenes/editor.scene");
     let prefab_path = AssetPath::parse("prefabs/editor.prefab");
-    let material_source =
-        b"name=editor\ntexture.albedo=textures/editor.texture\nbase_color=0.25,0.5,1,1\n".to_vec();
+    let material_source = b"name=editor\ntexture.albedo=textures/editor.texture\ntexture.albedo.boost=1.25\ntexture.albedo.transform.offset=0.25,0.5,0\ntexture.albedo.transform.scale=2,3,1\ntexture.albedo.transform.turbulence=0.01,0.02,0.03\nbase_color=0.25,0.5,1,1\n"
+        .to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(texture_path.path(), texture_bytes(1, 1));
     io.insert(mesh_path.path(), mesh_bytes());
@@ -450,6 +450,21 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
         .instantiation_commands(&assets)
         .map(|commands| commands.len())
         .unwrap_or_default();
+    let material_asset = assets.get(&material).unwrap();
+    assert_eq!(material_asset.textures.len(), 1);
+    assert_eq!(material_asset.textures[0].options.boost, Some(1.25));
+    assert_eq!(
+        material_asset.textures[0].options.transform.offset,
+        [0.25, 0.5, 0.0]
+    );
+    assert_eq!(
+        material_asset.textures[0].options.transform.scale,
+        [2.0, 3.0, 1.0]
+    );
+    assert_eq!(
+        material_asset.textures[0].options.transform.turbulence,
+        [0.01, 0.02, 0.03]
+    );
     let mut scene_sink = RecordingInstantiationSink::default();
     let mut prefab_sink = RecordingInstantiationSink::default();
     assert!(scene_instance.instantiate(&assets, &mut scene_sink));

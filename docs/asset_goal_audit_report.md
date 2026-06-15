@@ -2185,3 +2185,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture transform preservation now has a stable positive regression for `map_Kd -o 0.25 0.5 0 -s 2 3 1 -t 0.01 0.02 0.03`. A valid import keeps the offset, scale, and turbulence payloads intact, preserves the resolved dependency path, and loads back as a runtime `Material` whose albedo texture carries the full transform state.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p asset_smoke
+```
+
+Result: `examples/asset_smoke` now exercises the same material texture-transform and boost metadata end to end. The editor smoke path loads a material with `texture.albedo.boost=1.25` and `texture.albedo.transform.offset/scale/turbulence`, then asserts those values survive to the runtime-loaded `Material` while the existing mesh/audio/physics/scene/prefab smoke checks continue to pass.
