@@ -21467,6 +21467,11 @@ fn database_shader_importer_preserves_spv_source_language() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22840,6 +22845,10 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(output.bytes, expected);
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
