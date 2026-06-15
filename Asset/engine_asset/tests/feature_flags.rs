@@ -624,6 +624,11 @@ fn streaming_feature_entry_points_match_gate() {
         assert_eq!(registered.priority, LoadPriority::Low);
         assert!(registered.assets.is_empty());
         assert!(!registered.resident);
+        assert_eq!(server.streaming_region_state(region), Ok(AssetLoadState::Ready));
+        assert_eq!(
+            server.streaming_region_progress(region),
+            Ok(LoadProgress::default())
+        );
     } else {
         assert_eq!(
             server.register_streaming_region_paths("empty", LoadPriority::Low, &[]),
