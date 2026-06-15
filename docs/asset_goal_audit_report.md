@@ -2352,3 +2352,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: `MaterialImporter` now has direct importer evidence for texture metadata fields beyond the existing source-channel coverage: a direct material source document preserves albedo/normal texture metadata such as source-channel, boost, color-correction, colorspace, and bump-scale through `ImportContext`, and the runtime-loaded `Material` reads the same texture options back.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_font_importer_preserves_binary_font_bytes
+```
+
+Result: `FontImporter` now has direct importer evidence for validated binary font files: `.ttf` and `.otf` sources preserve their raw bytes through `ImportContext`, keep importer/version metadata stable, and load back into runtime `Font` values with the expected TrueType/OpenType data variants.

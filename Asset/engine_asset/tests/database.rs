@@ -21628,6 +21628,76 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
 }
 
 #[test]
+fn database_font_importer_preserves_binary_font_bytes() {
+    let config = database_config("font_importer_binary_font_round_trip");
+    let truetype_path = AssetPath::parse("fonts/roundtrip.ttf");
+    let opentype_path = AssetPath::parse("fonts/roundtrip.otf");
+    let truetype_bytes = b"\x00\x01\x00\x00roundtrip.ttf".to_vec();
+    let opentype_bytes = b"OTTOroundtrip.otf".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(truetype_path.path(), truetype_bytes.clone());
+    io.insert(opentype_path.path(), opentype_bytes.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let truetype_id = database.import_asset_path(&truetype_path).unwrap();
+    let opentype_id = database.import_asset_path(&opentype_path).unwrap();
+    let truetype_metadata = database.registry().get(truetype_id).unwrap();
+    let opentype_metadata = database.registry().get(opentype_id).unwrap();
+    assert_eq!(truetype_metadata.asset_type, AssetTypeId::of::<Font>());
+    assert_eq!(opentype_metadata.asset_type, AssetTypeId::of::<Font>());
+    assert_eq!(truetype_metadata.importer.as_deref(), Some("FontImporter"));
+    assert_eq!(opentype_metadata.importer.as_deref(), Some("FontImporter"));
+    assert_eq!(truetype_metadata.importer_version, 3);
+    assert_eq!(opentype_metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(truetype_path.path())).unwrap(),
+        truetype_bytes
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(opentype_path.path())).unwrap(),
+        opentype_bytes
+    );
+
+    let truetype_output = database
+        .cook_asset(truetype_id, TargetPlatform::Windows)
+        .unwrap();
+    let opentype_output = database
+        .cook_asset(opentype_id, TargetPlatform::Windows)
+        .unwrap();
+    assert_eq!(truetype_output.bytes, truetype_bytes);
+    assert_eq!(opentype_output.bytes, opentype_bytes);
+    assert_eq!(
+        fs::read(config.cooked_root.join(truetype_path.path())).unwrap(),
+        truetype_bytes
+    );
+    assert_eq!(
+        fs::read(config.cooked_root.join(opentype_path.path())).unwrap(),
+        opentype_bytes
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let truetype: Handle<Font> = server.load(truetype_path);
+    let opentype: Handle<Font> = server.load(opentype_path);
+    server.update_loading();
+
+    assert!(server.is_ready(&truetype));
+    assert!(server.is_ready(&opentype));
+    let truetype_loaded = server.get(&truetype).unwrap();
+    let opentype_loaded = server.get(&opentype).unwrap();
+    assert_eq!(truetype_loaded.family_name, "roundtrip");
+    assert_eq!(opentype_loaded.family_name, "roundtrip");
+    assert!(matches!(truetype_loaded.data, FontData::TrueType(ref bytes) if bytes == &truetype_bytes));
+    assert!(matches!(opentype_loaded.data, FontData::OpenType(ref bytes) if bytes == &opentype_bytes));
+}
+
+#[test]
 fn database_font_importer_reports_invalid_source_bitmap() {
     let config = database_config("font_importer_invalid_source");
     let path = AssetPath::parse("fonts/invalid.font");
