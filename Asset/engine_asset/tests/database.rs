@@ -20659,6 +20659,11 @@ fn database_texture_importer_converts_text_source_to_runtime_texture_bytes() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -21317,6 +21322,11 @@ fn database_shader_importer_canonicalizes_source_to_runtime_wgsl() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
@@ -22267,7 +22277,12 @@ fn database_audio_importer_preserves_binary_wav_bytes() {
         source
     );
 
-    database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.version_hash, VersionHash(8));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected
