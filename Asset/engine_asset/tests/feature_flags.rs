@@ -1,3 +1,5 @@
+use std::fs;
+
 use engine_asset::prelude::*;
 
 fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
@@ -213,7 +215,8 @@ fn filesystem_feature_gate_matches_filesystem_io_behavior() {
 
 #[test]
 fn importer_feature_gates_match_registration_paths() {
-    let mut database = AssetDatabase::new(database_config("importer_feature_gates"));
+    let config = database_config("importer_feature_gates");
+    let mut database = AssetDatabase::new(config.clone());
     database.set_io(
         MemoryAssetIo::new()
             .with_file("shaders/pbr.wgsl", shader_bytes())
@@ -250,6 +253,21 @@ fn importer_feature_gates_match_registration_paths() {
             .unwrap();
         let metadata = database.registry().get(id).unwrap();
         assert_eq!(metadata.asset_type, AssetTypeId::of::<Texture>());
+        assert_eq!(metadata.importer.as_deref(), Some("TextureImporter"));
+        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(
+            metadata.source_path.as_ref(),
+            Some(&AssetPath::parse("textures/albedo.texture"))
+        );
+        assert_eq!(
+            metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("textures/albedo.texture"))
+        );
+        assert_eq!(
+            fs::read(config.imported_root.join("textures/albedo.texture"))
+            .unwrap(),
+            texture_bytes(1, 1, 7)
+        );
         let shader_id = database
             .import_asset_path(&AssetPath::parse("shaders/pbr.wgsl"))
             .unwrap();
