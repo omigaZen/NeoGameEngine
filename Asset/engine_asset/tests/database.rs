@@ -18413,6 +18413,50 @@ fn database_texture_cooker_canonicalizes_runtime_and_source_bytes() {
 }
 
 #[test]
+fn database_audio_cooker_canonicalizes_runtime_and_wav_bytes() {
+    let runtime_path = AssetPath::parse("audio/cooked.audio");
+    let runtime_bytes = audio_bytes();
+    let runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(runtime_path.clone()),
+        source_bytes: runtime_bytes.clone(),
+    };
+    let runtime_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        runtime_path,
+        AssetTypeId::of::<AudioClip>(),
+    );
+    let wav_path = AssetPath::parse("audio/from_wav.audio");
+    let mut wav_samples = Vec::new();
+    for sample in [0.0f32, 0.5, -0.5] {
+        wav_samples.extend_from_slice(&sample.to_le_bytes());
+    }
+    let wav_bytes = wav_format_bytes(44_100, 1, 3, 32, &wav_samples);
+    let wav_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(wav_path.clone()),
+        source_bytes: wav_bytes.clone(),
+    };
+    let wav_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        wav_path,
+        AssetTypeId::of::<AudioClip>(),
+    );
+    let cooker = AudioCooker::new();
+    let expected = b"NGA_AUDIO_V1\nsample_rate=44100\nchannels=1\nformat=f32\nsamples=0,0.5,-0.5\nstreaming=false\n".to_vec();
+
+    let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
+    let wav_output = cooker.cook(&wav_ctx, &wav_metadata).unwrap();
+
+    assert_eq!(runtime_output.bytes, expected);
+    assert_eq!(runtime_output.version_hash, VersionHash(8));
+    assert_eq!(runtime_output.metadata, runtime_metadata);
+    assert_eq!(wav_output.bytes, expected);
+    assert_eq!(wav_output.version_hash, VersionHash(8));
+    assert_eq!(wav_output.metadata, wav_metadata);
+}
+
+#[test]
 fn database_builtin_scene_and_prefab_importers_and_cookers_preserve_dependencies_and_load_runtime_docs(
 ) {
     let config = database_config("builtin_scene_prefab_import_cook_load");

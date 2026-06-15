@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_audio_cooker_canonicalizes_runtime_and_wav_bytes
+```
+
+Result: `AudioCooker` now has direct runtime/WAV round-trip evidence: runtime audio bytes stay unchanged, IEEE-float WAV bytes canonicalize to the same runtime bytes, and both paths report `VersionHash(8)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_texture_cooker_canonicalizes_runtime_and_source_bytes
 ```
 
