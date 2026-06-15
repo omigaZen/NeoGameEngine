@@ -726,3 +726,28 @@ fn streaming_region_bundle_subset_preserves_manifest_metadata_and_validates_ids(
         Err(AssetError::Bundle { .. })
     ));
 }
+
+#[test]
+fn streaming_region_bundle_subset_deduplicates_repeated_ids() {
+    let (ids, bundle) = texture_bundle(
+        "subset_dedup",
+        vec![("textures/base.texture", texture_bytes(1, 1, 10), Vec::new())],
+    );
+    let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle).unwrap();
+
+    let region = server
+        .register_streaming_region_bundle_subset(
+            "subset",
+            LoadPriority::Normal,
+            mounted.id,
+            &[ids[0], ids[0]],
+        )
+        .unwrap();
+    let region_data = server.streaming_region(region).unwrap();
+    assert_eq!(region_data.assets.len(), 1);
+    assert_eq!(region_data.assets[0].id(), ids[0]);
+}

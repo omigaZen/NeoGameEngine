@@ -1213,6 +1213,9 @@ impl AssetServer {
         let entries = self.bundle_entries(bundle)?;
         let mut subset = Vec::with_capacity(assets.len());
         for id in assets {
+            if subset.iter().any(|entry: &BundleEntry| entry.id == *id) {
+                continue;
+            }
             let entry = entries
                 .iter()
                 .find(|entry| entry.id == *id)

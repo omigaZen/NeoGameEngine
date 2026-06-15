@@ -2036,3 +2036,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: bundle manifest parsing now also rejects unexpected trailing manifest data explicitly. A manifest that declares zero chunks and entries but still includes an extra line returns `unexpected trailing bundle manifest data`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_bundle_subset_deduplicates_repeated_ids
+```
+
+Result: streaming bundle subset registration now deduplicates repeated asset ids before region registration, so a subset request containing the same asset twice still registers a single region asset and avoids duplicate residency entries.
