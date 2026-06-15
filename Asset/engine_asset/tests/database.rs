@@ -12793,6 +12793,11 @@ f 1 2 3\n"
                 "newmtl Alias\n{directive} -imfchan red -colorspace Non-Color textures/{stem}.texture\n"
             )
             .into_bytes()
+        } else if directive == "map_transmission_color" {
+            format!(
+                "newmtl Alias\n{directive} -imfchan alpha -colorspace Non-Color textures/{stem}.texture\n"
+            )
+            .into_bytes()
         } else {
             format!(
                 "newmtl Alias\n{directive} -imfchan alpha -colorspace Non-Color textures/{stem}.texture\n"
@@ -12814,6 +12819,15 @@ texture.{channel}.color_space=non_color\n"
 name=Alias\n\
 texture.{channel}=models/textures/{stem}.texture\n\
 texture.{channel}.source_channel=red\n\
+texture.{channel}.color_space=non_color\n"
+            )
+            .into_bytes()
+        } else if directive == "map_transmission_color" {
+            format!(
+                "# mtllib {material_library}\n\
+name=Alias\n\
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.source_channel=alpha\n\
 texture.{channel}.color_space=non_color\n"
             )
             .into_bytes()
@@ -12913,6 +12927,8 @@ texture.{channel}.color_space=non_color\n"
                 MaterialTextureChannel::Blue
             } else if directive == "map_ambient_color" {
                 MaterialTextureChannel::Red
+            } else if directive == "map_transmission_color" {
+                MaterialTextureChannel::Alpha
             } else {
                 MaterialTextureChannel::Alpha
             })
