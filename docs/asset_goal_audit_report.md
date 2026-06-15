@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_font_and_physics_mesh_cookers_pass_through_runtime_bytes
+```
+
+Result: `FontCooker` and `PhysicsMeshCooker` now have direct pass-through round-trip evidence: cooked bytes are preserved unchanged, `FontCooker` reports `VersionHash(2)`, and `PhysicsMeshCooker` reports `VersionHash(1)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_scene_and_prefab_cookers_pass_through_runtime_bytes
 ```
 

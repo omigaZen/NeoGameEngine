@@ -1662,6 +1662,43 @@ fn database_scene_and_prefab_cookers_pass_through_runtime_bytes() {
 }
 
 #[test]
+fn database_font_and_physics_mesh_cookers_pass_through_runtime_bytes() {
+    let font_path = AssetPath::parse("fonts/cooked.font");
+    let physics_path = AssetPath::parse("physics/cooked.physics");
+    let font_source = font_bytes();
+    let physics_source = physics_mesh_bytes();
+    let font_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(font_path.clone()),
+        source_bytes: font_source.clone(),
+    };
+    let physics_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(physics_path.clone()),
+        source_bytes: physics_source.clone(),
+    };
+    let font_metadata =
+        AssetMetadata::runtime(AssetId::new(), font_path, AssetTypeId::of::<Font>());
+    let physics_metadata = AssetMetadata::runtime(
+        AssetId::new(),
+        physics_path,
+        AssetTypeId::of::<PhysicsMesh>(),
+    );
+    let font_cooker = FontCooker::new();
+    let physics_cooker = PhysicsMeshCooker::new();
+
+    let font_output = font_cooker.cook(&font_ctx, &font_metadata).unwrap();
+    let physics_output = physics_cooker.cook(&physics_ctx, &physics_metadata).unwrap();
+
+    assert_eq!(font_output.bytes, font_source);
+    assert_eq!(font_output.version_hash, VersionHash(2));
+    assert_eq!(font_output.metadata, font_metadata);
+    assert_eq!(physics_output.bytes, physics_source);
+    assert_eq!(physics_output.version_hash, VersionHash(1));
+    assert_eq!(physics_output.metadata, physics_metadata);
+}
+
+#[test]
 fn database_shader_cooker_canonicalizes_source_documents() {
     let shader_path = AssetPath::parse("shaders/cooked.wgsl");
     let source =
