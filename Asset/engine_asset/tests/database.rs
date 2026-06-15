@@ -13335,6 +13335,9 @@ fn database_model_importer_includes_nested_obj_call_relative_material_libraries(
     let include_path = AssetPath::parse("models/parts/assembly.obj");
     let nested_include_path = AssetPath::parse("models/parts/sub/detail.obj");
     let nested_material_library_path = AssetPath::parse("models/parts/sub/detail.mtl");
+    let nested_texture_path = AssetPath::parse("models/parts/sub/textures/detail_albedo.texture");
+    let nested_texture_alt_path =
+        AssetPath::parse("models/parts/sub/textures/detail_albedo_alt.texture");
     let mesh_path = AssetPath::parse("models/assembled.Panel.mesh");
     let nested_material_path = AssetPath::parse("models/assembled.Material_Detail.material");
     let model_source = b"call parts/assembly.obj
@@ -13347,13 +13350,13 @@ fn database_model_importer_includes_nested_obj_call_relative_material_libraries(
 usemtl Detail
 o Panel
 v 0 0 0
-v 1 0 0
-v 0 1 0
-f 1 2 3
+    v 1 0 0
+    v 0 1 0
+    f 1 2 3
 "
     .to_vec();
     let nested_material_source = b"newmtl Detail
-Kd 0.75 0.25 0.25
+map_Kd textures/detail_albedo.texture
 "
     .to_vec();
     let expected_mesh = b"v 0 0 0
@@ -13364,9 +13367,11 @@ i 0 1 2
     .to_vec();
     let expected_nested_material = b"# mtllib detail.mtl
 name=Detail
-base_color=0.75,0.25,0.25,1
+texture.albedo=models/parts/sub/textures/detail_albedo.texture
 "
     .to_vec();
+    let nested_texture_source = texture_bytes(1, 1, 77);
+    let nested_texture_alt_source = texture_bytes(1, 1, 123);
     let mut first_io = MemoryAssetIo::new();
     first_io.insert(model_path.path(), model_source.clone());
     first_io.insert(include_path.path(), include_source.clone());
@@ -13375,10 +13380,13 @@ base_color=0.75,0.25,0.25,1
         nested_material_library_path.path(),
         nested_material_source.clone(),
     );
+    first_io.insert(nested_texture_path.path(), nested_texture_source.clone());
     let mut first = AssetDatabase::new(config.clone());
     first.set_io(first_io);
     first.register_builtin_importers();
+    first.register_builtin_cookers();
 
+    let nested_texture_id = first.import_asset_path(&nested_texture_path).unwrap();
     let model_id = first.import_asset_path(&model_path).unwrap();
     let first_hash = first.registry().get(model_id).unwrap().source_hash.unwrap();
     let mesh_metadata = first.registry().metadata_by_path(&mesh_path).unwrap();
@@ -13386,6 +13394,7 @@ base_color=0.75,0.25,0.25,1
         .registry()
         .metadata_by_path(&nested_material_path)
         .unwrap();
+    let nested_texture_metadata = first.registry().metadata_by_path(&nested_texture_path).unwrap();
     let mesh_id = mesh_metadata.id;
     let nested_material_id = nested_material_metadata.id;
 
@@ -13394,9 +13403,12 @@ base_color=0.75,0.25,0.25,1
     assert_eq!(mesh_metadata.importer_version, 111);
     assert_eq!(mesh_metadata.dependencies, vec![nested_material_id]);
     assert_eq!(nested_material_metadata.labels, vec!["Material/Detail"]);
+    assert_eq!(nested_material_metadata.dependencies, vec![nested_texture_id]);
+    assert_eq!(nested_texture_metadata.asset_type, AssetTypeId::of::<Texture>());
+    assert_eq!(nested_texture_metadata.labels, Vec::<String>::new());
     assert_eq!(
         first.registry().get(model_id).unwrap().dependencies.len(),
-        2
+        3
     );
     assert!(first
         .registry()
@@ -13410,6 +13422,12 @@ base_color=0.75,0.25,0.25,1
         .unwrap()
         .dependencies
         .contains(&nested_material_id));
+    assert!(first
+        .registry()
+        .get(model_id)
+        .unwrap()
+        .dependencies
+        .contains(&nested_texture_id));
     assert_eq!(
         fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
         expected_mesh
@@ -13417,6 +13435,10 @@ base_color=0.75,0.25,0.25,1
     assert_eq!(
         fs::read(config.imported_root.join(nested_material_path.path())).unwrap(),
         expected_nested_material
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(nested_texture_path.path())).unwrap(),
+        nested_texture_source
     );
     first.save_all_metadata_sidecars().unwrap();
 
@@ -13426,12 +13448,17 @@ base_color=0.75,0.25,0.25,1
     second_io.insert(nested_include_path.path(), nested_include_source);
     second_io.insert(
         nested_material_library_path.path(),
-        b"newmtl Detail\nKd 0.25 0.75 0.25\n".to_vec(),
+        b"newmtl Detail\nmap_Kd textures/detail_albedo_alt.texture\n".to_vec(),
     );
+    second_io.insert(nested_texture_alt_path.path(), nested_texture_alt_source.clone());
     let mut second = AssetDatabase::new(config.clone());
     second.set_io(second_io);
     second.register_builtin_importers();
+    second.register_builtin_cookers();
 
+    let second_nested_texture_id = second
+        .import_asset_path(&nested_texture_alt_path)
+        .unwrap();
     let report = second.scan_with_metadata().unwrap();
     assert!(report.changed.contains(&model_path));
     assert!(report.diagnostics.iter().any(|diagnostic| {
@@ -13448,6 +13475,15 @@ base_color=0.75,0.25,0.25,1
                 && previous_hash != current_hash
         )
     }));
+
+    let reimported_id = second.import_asset_path(&model_path).unwrap();
+    assert_eq!(reimported_id, model_id);
+    let nested_material_metadata = second
+        .registry()
+        .metadata_by_path(&nested_material_path)
+        .unwrap();
+    assert_eq!(nested_material_metadata.dependencies.len(), 1);
+    assert_eq!(nested_material_metadata.dependencies[0], second_nested_texture_id);
 }
 
 #[test]
