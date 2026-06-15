@@ -2092,6 +2092,10 @@ fn mounted_bundle_registry_reports_missing_and_invalid_bundle_lines() {
         MountedBundleRegistry::from_text("NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundles=1\nbundlex|1|1"),
         Err(AssetError::Bundle { message }) if message.contains("invalid mounted bundle line 0")
     ));
+    assert!(matches!(
+        MountedBundleRegistry::from_text("NGA_MOUNTED_BUNDLE_REGISTRY_V1\nbundles=1\nbundle|abc|1"),
+        Err(AssetError::Bundle { message }) if message.contains("invalid mounted bundle id")
+    ));
 }
 
 #[test]

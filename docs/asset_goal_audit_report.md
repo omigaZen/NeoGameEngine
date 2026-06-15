@@ -2004,3 +2004,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bund
 ```
 
 Result: mounted bundle registry parsing now also rejects missing and malformed bundle records explicitly. A registry that claims one bundle but provides none returns `missing mounted bundle line 0`, and a line whose prefix is not `bundle` returns `invalid mounted bundle line 0`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle mounted_bundle_registry_reports_missing_and_invalid_bundle_lines
+```
+
+Result: mounted bundle registry parsing now also rejects malformed bundle ids explicitly. Replacing the bundle id with `abc` returns `invalid mounted bundle id` before the mounted bundle manifest is parsed.
