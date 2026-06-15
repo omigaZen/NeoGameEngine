@@ -9538,11 +9538,13 @@ f 1 2 3\n"
         )
         .into_bytes();
         let material_source =
-            format!("newmtl Surface\n{directive} textures/{stem}.texture\n").into_bytes();
+            format!("newmtl Surface\n{directive} -colorspace Non-Color textures/{stem}.texture\n")
+                .into_bytes();
         let expected_material = format!(
             "# mtllib {material_library}\n\
 name=Surface\n\
-texture.{channel}=models/textures/{stem}.texture\n"
+texture.{channel}=models/textures/{stem}.texture\n\
+texture.{channel}.color_space=non_color\n"
         )
         .into_bytes();
         let texture_source = texture_bytes(1, 1, texel);
@@ -9625,6 +9627,10 @@ texture.{channel}=models/textures/{stem}.texture\n"
         assert_eq!(material.textures.len(), 1);
         assert_eq!(material.textures[0].name, channel);
         assert_eq!(material.textures[0].texture.id(), texture_id);
+        assert_eq!(
+            material.textures[0].options.color_space,
+            Some(MaterialTextureColorSpace::NonColor)
+        );
     }
 }
 
