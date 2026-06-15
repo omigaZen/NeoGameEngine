@@ -1836,3 +1836,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming
 ```
 
 Result: the remaining streaming region state APIs now have explicit missing-region coverage. `set_streaming_region_resident()`, `preload_streaming_region()`, `unload_streaming_region()`, `streaming_region_progress()`, and `streaming_region_state()` all return `AddressNotFound` for an unknown region id rather than touching unrelated state or synthesizing defaults.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming remove_streaming_region_reports_missing_region
+```
+
+Result: `remove_streaming_region()` now has the same missing-region regression coverage. Removing an unknown streaming region returns `AddressNotFound` before any residency release or state mutation happens.

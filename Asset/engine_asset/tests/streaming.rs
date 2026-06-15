@@ -469,6 +469,17 @@ fn removing_resident_streaming_regions_releases_shared_residency_counts() {
 }
 
 #[test]
+fn remove_streaming_region_reports_missing_region() {
+    let mut server = server_with_textures(&[("textures/shared.texture", 5)]);
+    let missing = StreamingRegionId(995);
+    let err = server.remove_streaming_region(missing).unwrap_err();
+    assert!(matches!(
+        err,
+        AssetError::AddressNotFound { address } if address.contains("streaming region")
+    ));
+}
+
+#[test]
 fn memory_budget_eviction_skips_resident_streaming_assets_until_residency_clears() {
     let mut config = AssetServerConfig::default();
     config.gc.memory_budget_bytes = Some(0);
