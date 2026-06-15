@@ -401,6 +401,11 @@ fn cooker_feature_gates_match_registration_paths() {
     if asset_feature_enabled(AssetFeature::TextureCooker) {
         let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
         assert_eq!(output.id, id);
+        assert_eq!(output.metadata.path.as_ref(), Some(&AssetPath::parse("textures/albedo.texture")));
+        assert_eq!(output.metadata.asset_type, Texture::TYPE_ID);
+        assert_eq!(output.metadata.cooked_path.as_ref(), Some(&AssetPath::parse("textures/albedo.texture")));
+        assert_eq!(output.metadata.cooked_hash, Some(output.content_hash));
+        assert_eq!(output.metadata.version_hash, Some(VersionHash(2)));
         assert_eq!(output.bytes, texture_bytes(1, 1, 7));
     } else {
         assert!(matches!(
@@ -422,6 +427,56 @@ fn cooker_feature_gates_match_registration_paths() {
         let skeleton_output = database
             .cook_asset(skeleton_id, TargetPlatform::Windows)
             .unwrap();
+        assert_eq!(
+            scene_output.metadata.path.as_ref(),
+            Some(&AssetPath::parse("scenes/hero.scene"))
+        );
+        assert_eq!(scene_output.metadata.asset_type, SceneAsset::TYPE_ID);
+        assert_eq!(
+            scene_output.metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("scenes/hero.scene"))
+        );
+        assert_eq!(scene_output.metadata.cooked_hash, Some(scene_output.content_hash));
+        assert_eq!(scene_output.metadata.version_hash, Some(VersionHash(1)));
+        assert_eq!(
+            prefab_output.metadata.path.as_ref(),
+            Some(&AssetPath::parse("prefabs/hero.prefab"))
+        );
+        assert_eq!(prefab_output.metadata.asset_type, Prefab::TYPE_ID);
+        assert_eq!(
+            prefab_output.metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("prefabs/hero.prefab"))
+        );
+        assert_eq!(prefab_output.metadata.cooked_hash, Some(prefab_output.content_hash));
+        assert_eq!(prefab_output.metadata.version_hash, Some(VersionHash(1)));
+        assert_eq!(
+            animation_output.metadata.path.as_ref(),
+            Some(&AssetPath::parse("animations/hero.animation"))
+        );
+        assert_eq!(animation_output.metadata.asset_type, AnimationClip::TYPE_ID);
+        assert_eq!(
+            animation_output.metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("animations/hero.animation"))
+        );
+        assert_eq!(
+            animation_output.metadata.cooked_hash,
+            Some(animation_output.content_hash)
+        );
+        assert_eq!(animation_output.metadata.version_hash, Some(VersionHash(2)));
+        assert_eq!(
+            skeleton_output.metadata.path.as_ref(),
+            Some(&AssetPath::parse("skeletons/hero.skeleton"))
+        );
+        assert_eq!(skeleton_output.metadata.asset_type, Skeleton::TYPE_ID);
+        assert_eq!(
+            skeleton_output.metadata.cooked_path.as_ref(),
+            Some(&AssetPath::parse("skeletons/hero.skeleton"))
+        );
+        assert_eq!(
+            skeleton_output.metadata.cooked_hash,
+            Some(skeleton_output.content_hash)
+        );
+        assert_eq!(skeleton_output.metadata.version_hash, Some(VersionHash(2)));
         assert_eq!(scene_output.bytes, scene_bytes());
         assert_eq!(prefab_output.bytes, prefab_bytes());
         assert_eq!(animation_output.bytes, animation_runtime_bytes());
