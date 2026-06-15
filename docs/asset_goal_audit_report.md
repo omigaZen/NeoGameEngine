@@ -67,6 +67,14 @@ Result: `MaterialCooker` now has direct runtime/source round-trip evidence: runt
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_font_cooker_canonicalizes_runtime_and_source_bytes
+```
+
+Result: `FontCooker` now has direct runtime/source pass-through evidence: runtime bitmap font bytes stay unchanged, validated bitmap source documents pass through unchanged, and both paths report `VersionHash(2)`.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_shader_cooker_canonicalizes_runtime_and_source_bytes
 ```
 

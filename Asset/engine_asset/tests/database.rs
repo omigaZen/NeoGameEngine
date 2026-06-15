@@ -1739,6 +1739,40 @@ fn database_font_and_physics_mesh_cookers_pass_through_runtime_bytes() {
 }
 
 #[test]
+fn database_font_cooker_canonicalizes_runtime_and_source_bytes() {
+    let runtime_path = AssetPath::parse("fonts/cooked_runtime.font");
+    let runtime_bytes = font_bytes();
+    let runtime_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(runtime_path.clone()),
+        source_bytes: runtime_bytes.clone(),
+    };
+    let runtime_metadata =
+        AssetMetadata::runtime(AssetId::new(), runtime_path, AssetTypeId::of::<Font>());
+    let source_path = AssetPath::parse("fonts/from_source.font");
+    let source_bytes =
+        b"NGA_FONT_V1\nfamily=Mono\nglyph=char=A;size=1x1;bitmap=255\n".to_vec();
+    let source_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(source_path.clone()),
+        source_bytes: source_bytes.clone(),
+    };
+    let source_metadata =
+        AssetMetadata::runtime(AssetId::new(), source_path, AssetTypeId::of::<Font>());
+    let cooker = FontCooker::new();
+
+    let runtime_output = cooker.cook(&runtime_ctx, &runtime_metadata).unwrap();
+    let source_output = cooker.cook(&source_ctx, &source_metadata).unwrap();
+
+    assert_eq!(runtime_output.bytes, runtime_bytes);
+    assert_eq!(runtime_output.version_hash, VersionHash(2));
+    assert_eq!(runtime_output.metadata, runtime_metadata);
+    assert_eq!(source_output.bytes, source_bytes);
+    assert_eq!(source_output.version_hash, VersionHash(2));
+    assert_eq!(source_output.metadata, source_metadata);
+}
+
+#[test]
 fn database_shader_cooker_canonicalizes_source_documents() {
     let shader_path = AssetPath::parse("shaders/cooked.wgsl");
     let source =
