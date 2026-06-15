@@ -9032,7 +9032,7 @@ f 1 2 3
 map_specular_color -imfchan blue textures/alias_specular.texture
 map_ambient_color -imfchan red textures/alias_ambient.texture
 map_emissive_color textures/alias_emissive.texture
-map_transmission_color -imfchan green textures/alias_transmission.texture
+map_transmission_color -imfchan alpha textures/alias_transmission.texture
 map_ior textures/alias_ior.texture
 map_clear_coat textures/alias_clearcoat.texture
 map_clear_coat_roughness textures/alias_clearcoat_roughness.texture
@@ -9047,7 +9047,7 @@ texture.occlusion=models/textures/alias_ambient.texture
 texture.occlusion.source_channel=red
 texture.emissive=models/textures/alias_emissive.texture
 texture.transmission_filter=models/textures/alias_transmission.texture
-texture.transmission_filter.source_channel=green
+texture.transmission_filter.source_channel=alpha
 texture.index_of_refraction=models/textures/alias_ior.texture
 texture.clearcoat=models/textures/alias_clearcoat.texture
 texture.clearcoat_roughness=models/textures/alias_clearcoat_roughness.texture
