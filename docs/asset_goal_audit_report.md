@@ -59,6 +59,14 @@ Runtime MVP slice now exists in `engine_asset`:
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_occlusion_and_emissive_texture_colorspace
+```
+
+Result: `map_Ka`/`map_Ke` ambient-emissive texture regression now preserves `texture.occlusion.color_space=non_color` and `texture.emissive.color_space=non_color` in generated material text, sidecars, bundle manifests, and runtime `Material` loads; source-channel preservation remains covered; the focused database test passed.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_roughness_extensions
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_ambient_and_specular_texture_maps
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_parses_obj_quoted_material_texture_paths

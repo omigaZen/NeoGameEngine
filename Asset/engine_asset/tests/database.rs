@@ -7947,17 +7947,19 @@ usemtl Lit
 f 1 2 3
 "
     .to_vec();
-    let material_source = b"newmtl Lit
-map_Ka -imfchan green textures/panel_ao.texture
-map_Ke -imfchan red textures/panel_emissive.texture
+let material_source = b"newmtl Lit
+map_Ka -imfchan green -colorspace Non-Color textures/panel_ao.texture
+map_Ke -imfchan red -colorspace Non-Color textures/panel_emissive.texture
 "
     .to_vec();
     let expected_material = b"# mtllib light_source.mtl
 name=Lit
 texture.occlusion=models/textures/panel_ao.texture
 texture.occlusion.source_channel=green
+texture.occlusion.color_space=non_color
 texture.emissive=models/textures/panel_emissive.texture
 texture.emissive.source_channel=red
+texture.emissive.color_space=non_color
 "
     .to_vec();
     let occlusion_source = texture_bytes(1, 1, 95);
@@ -8066,11 +8068,19 @@ texture.emissive.source_channel=red
         material.textures[0].options.source_channel,
         Some(MaterialTextureChannel::Green)
     );
+    assert_eq!(
+        material.textures[0].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
+    );
     assert_eq!(material.textures[1].name, "emissive");
     assert_eq!(material.textures[1].texture.id(), emissive_id);
     assert_eq!(
         material.textures[1].options.source_channel,
         Some(MaterialTextureChannel::Red)
+    );
+    assert_eq!(
+        material.textures[1].options.color_space,
+        Some(MaterialTextureColorSpace::NonColor)
     );
 }
 
