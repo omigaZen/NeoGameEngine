@@ -522,6 +522,7 @@ fn reload_by_id_reports_missing_asset_without_mutating_state() {
     assert!(matches!(error, AssetError::AssetNotFound { id } if id == missing));
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
@@ -577,6 +578,10 @@ fn reload_by_path_reports_missing_path_without_mutating_state() {
     ));
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().path,
+        Some(loaded_path)
+    );
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
@@ -595,6 +600,7 @@ fn queue_hot_reload_id_reports_missing_asset_without_mutating_state() {
     assert!(matches!(error, AssetError::AssetNotFound { id } if id == missing));
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
