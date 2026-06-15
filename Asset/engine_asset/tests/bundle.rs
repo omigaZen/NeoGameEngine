@@ -2717,6 +2717,117 @@ fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
 }
 
 #[test]
+fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
+    let root = temp_dir("package_artifact_reactivate");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+    let (base_record_seed, base_bundle, base_ids) = texture_package(
+        "artifact_react_base",
+        AssetIoLayerKind::BaseBundle,
+        10,
+        BundleId(80),
+        "unused/react_base.bundle",
+        vec![("textures/react.texture", texture_bytes(1, 1, 15))],
+    );
+    let (patch_record_seed, patch_bundle, _) = texture_package(
+        "artifact_react_patch",
+        AssetIoLayerKind::Patch,
+        0,
+        BundleId(81),
+        "unused/react_patch.bundle",
+        vec![("textures/react.texture", texture_bytes(1, 1, 25))],
+    );
+
+    let base_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                base_record_seed.bundle_id,
+                "artifact_react_base",
+                AssetIoLayerKind::BaseBundle,
+                10,
+                "base/react_base.bundle",
+            )
+            .with_package_version(2),
+            &base_bundle,
+        )
+        .unwrap();
+    let patch_install = store
+        .install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                patch_record_seed.bundle_id,
+                "artifact_react_patch",
+                AssetIoLayerKind::Patch,
+                0,
+                "patches/react_patch.bundle",
+            ),
+            &patch_bundle,
+        )
+        .unwrap();
+
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(store.build_composite_io(&registry).unwrap());
+    server.register_builtin_loaders();
+    let activation = server
+        .activate_asset_package_registry_from_artifacts(
+            registry.clone(),
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        )
+        .unwrap();
+    assert_eq!(activation.mounted_bundles.len(), 2);
+    let groups = activation
+        .mounted_bundles
+        .iter()
+        .map(|mounted| server.preload_bundle(mounted))
+        .collect::<Vec<_>>();
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(71))),
+    );
+    assert!(groups
+        .iter()
+        .all(|group| server.group_state(group) == AssetLoadState::Ready));
+    let handle = Handle::<Texture>::strong(base_ids[0]);
+    assert!(server.is_ready(&handle));
+
+    let mut disabled_patch = patch_install.record.clone();
+    disabled_patch.enabled = false;
+    let disabled_registry =
+        AssetPackageRegistry::new(vec![disabled_patch, base_install.record.clone()]).unwrap();
+    let restored = server
+        .restore_asset_package_registry(disabled_registry.clone())
+        .unwrap();
+    assert_eq!(restored.len(), 1);
+    assert!(server
+        .mounted_bundle(patch_install.record.bundle_id)
+        .is_none());
+    assert!(server
+        .mounted_bundle(base_install.record.bundle_id)
+        .is_some());
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert!(server.is_ready(&handle));
+
+    let activation = server
+        .activate_asset_package_registry_from_artifacts(
+            disabled_registry,
+            AssetPackageUpdatePolicy::default(),
+            &root,
+        )
+        .unwrap();
+    assert_eq!(activation.mounted_bundles.len(), 1);
+    assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert!(server.is_ready(&handle));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn asset_server_loads_texture_from_bundle_io() {
     let (id, bundle) = texture_bundle("textures/albedo.texture", texture_bytes(2, 1, 5));
     let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
