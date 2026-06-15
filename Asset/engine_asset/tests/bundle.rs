@@ -1743,8 +1743,16 @@ fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payload
         )
         .unwrap();
 
+    let composite = store.build_composite_io(&registry).unwrap();
+    let (metadata, resolution) = composite
+        .metadata_with_diagnostics("textures/runtime_artifact.texture")
+        .unwrap();
+    assert_eq!(metadata.size, texture_bytes(1, 1, 15).len() as u64);
+    assert_eq!(resolution.layer.name, "artifact_runtime_base");
+    assert_eq!(resolution.layer.kind, AssetIoLayerKind::BaseBundle);
+
     let mut server = AssetServer::new(AssetServerConfig::default());
-    server.set_io(store.build_composite_io(&registry).unwrap());
+    server.set_io(composite);
     server.register_builtin_loaders();
     let activation = server
         .activate_asset_package_registry_from_artifacts(
