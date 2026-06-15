@@ -1852,3 +1852,11 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_packag
 ```
 
 Result: package artifact removal now also covers the post-delete read failure path. After `delete_artifact=true`, `load_package_bytes()` returns the expected IO error for the removed artifact path instead of silently reusing stale bytes.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_rejects_bundle_path_escape
+```
+
+Result: `AssetPackageArtifactStore` now has explicit artifact-path escape coverage. Both the helper path resolver and `install_package_bytes()` reject `"../escape.bundle"` before any artifact write can happen, so package payloads cannot escape the artifact root.

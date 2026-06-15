@@ -1447,6 +1447,44 @@ fn asset_package_artifact_store_replaces_packages_with_matching_bundle_ids() {
 }
 
 #[test]
+fn asset_package_artifact_store_rejects_bundle_path_escape() {
+    let root = temp_dir("package_artifacts_escape");
+    let _ = std::fs::remove_dir_all(&root);
+    let store = AssetPackageArtifactStore::new(&root);
+    let mut registry = AssetPackageRegistry::default();
+
+    let (_record, bundle, _) = texture_package(
+        "artifact_escape",
+        AssetIoLayerKind::Patch,
+        4,
+        BundleId(60),
+        "patches/artifact_escape.bundle",
+        vec![("textures/escape.texture", texture_bytes(1, 1, 21))],
+    );
+
+    assert!(matches!(
+        store.artifact_path("../escape.bundle"),
+        Err(AssetError::Bundle { message }) if message.contains("must be relative") || message.contains("cannot escape the artifact root")
+    ));
+    assert!(matches!(
+        store.install_package_bytes(
+            &mut registry,
+            AssetPackageInstallRequest::new(
+                BundleId(60),
+                "artifact_escape",
+                AssetIoLayerKind::Patch,
+                4,
+                "../escape.bundle",
+            ),
+            &bundle,
+        ),
+        Err(AssetError::Bundle { message }) if message.contains("cannot escape the artifact root")
+    ));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn asset_package_artifact_store_reports_missing_package_removal() {
     let root = temp_dir("package_artifacts_missing_remove");
     let _ = std::fs::remove_dir_all(&root);
