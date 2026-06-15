@@ -20947,6 +20947,10 @@ fn database_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     assert_eq!(output.bytes, expected_cooked);
     assert_eq!(output.version_hash, VersionHash(4));
     assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
+    assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         expected_cooked
     );
@@ -21038,6 +21042,10 @@ fn database_mesh_importer_validates_binary_source_and_preserves_runtime_bytes() 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, binary_mesh_bytes());
     assert_eq!(output.version_hash, VersionHash(4));
+    assert_eq!(
+        output.metadata,
+        database.registry().get(id).unwrap().clone()
+    );
     assert_eq!(
         fs::read(config.cooked_root.join(path.path())).unwrap(),
         binary_mesh_bytes()

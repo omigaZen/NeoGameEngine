@@ -104,7 +104,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_texture_cooker_canonicalizes_runtime_and_source_bytes
 ```
 
-Result: TextureCooker now has direct runtime/source round-trip evidence: runtime texture bytes stay unchanged, NGA_TEXTURE_SOURCE_V1 source documents canonicalize to the same runtime bytes, and both paths report VersionHash(2) while preserving the expected runtime metadata. The texture importer smoke now also pins the cooked output version hash and metadata; AudioCooker/AudioImporter, FontCooker/FontImporter, PhysicsMeshCooker/PhysicsMeshImporter, MaterialCooker, ShaderCooker, SceneCooker, and PrefabCooker now also pin their output metadata alongside bytes/version-hash round trips, keeping the cooker evidence on the same level as TextureCooker. Font/audio importer smoke now likewise pins the cooked output version hash and metadata for their source/binary direct round trips.
+Result: TextureCooker now has direct runtime/source round-trip evidence: runtime texture bytes stay unchanged, NGA_TEXTURE_SOURCE_V1 source documents canonicalize to the same runtime bytes, and both paths report VersionHash(2) while preserving the expected runtime metadata. The texture importer smoke now also pins the cooked output version hash and metadata; AudioCooker/AudioImporter, FontCooker/FontImporter, PhysicsMeshCooker/PhysicsMeshImporter, MeshCooker/MeshImporter, MaterialCooker, ShaderCooker, SceneCooker, and PrefabCooker now also pin their output metadata alongside bytes/version-hash round trips, keeping the cooker evidence on the same level as TextureCooker. Font/audio importer smoke now likewise pins the cooked output version hash and metadata for their source/binary direct round trips.
 
 Passed:
 
