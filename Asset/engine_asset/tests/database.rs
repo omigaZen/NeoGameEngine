@@ -14443,8 +14443,8 @@ fn database_model_importer_accepts_nested_obj_display_attributes() {
 MAPLIB procedural.map detail.map
 UseMap CheckerMap
 usemap OFF
-SHADOW_OBJ shadows.obj
-trace_obj rays.obj
+SHADOW_OBJ off
+trace_obj off
 CTECH cparm 8
 ctech curv 0.25 30
 STECH cparma 4 6

@@ -2447,4 +2447,4 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_render_object_off_attributes
 ```
 
-Result: OBJ render-object off-state coverage now has a positive regression. `shadow_obj off` and `trace_obj off` are accepted as ignored render-object directives, the generated mesh still imports/cooks/bundles/preloads correctly, and the importer no longer only exercises render-object handling through path-based validation cases.
+Result: OBJ render-object off-state coverage now has a positive regression. `shadow_obj off` and `trace_obj off` are accepted as ignored render-object directives, including in nested `call` include sources, and the generated mesh still imports/cooks/bundles/preloads correctly so render-object handling is no longer only exercised through path-based validation cases.
