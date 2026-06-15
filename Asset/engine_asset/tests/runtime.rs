@@ -894,6 +894,7 @@ fn shader_spirv_load_reaches_ready_after_renderer_upload_handoff() {
         uploads[0].label.as_deref(),
         Some("shaders/compute.spv#compute")
     );
+    assert_eq!(uploads[0].metadata, GpuUploadMetadata::None);
     assert_eq!(uploads[0].bytes, bytes);
 
     server.finish_gpu_uploads(vec![GpuUploadResult::ok(
@@ -933,6 +934,7 @@ fn shader_glsl_load_reaches_ready_without_reflection_after_renderer_upload_hando
         uploads[0].label.as_deref(),
         Some("shaders/compute.glsl#compute")
     );
+    assert_eq!(uploads[0].metadata, GpuUploadMetadata::None);
     assert_eq!(uploads[0].bytes, bytes);
 
     server.finish_gpu_uploads(vec![GpuUploadResult::ok(
