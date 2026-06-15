@@ -1864,6 +1864,14 @@ Result: `AssetPackageArtifactStore` now has explicit artifact-path escape covera
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test bundle asset_package_artifact_store_rejects_absolute_bundle_path
+```
+
+Result: the artifact-path validator also rejects absolute bundle paths. A Windows-style absolute path such as `"C:/escape.bundle"` is rejected both by `artifact_path()` and by `install_package_bytes()` before any artifact write can happen.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test streaming streaming_region_resident_toggle_is_idempotent
 ```
 
