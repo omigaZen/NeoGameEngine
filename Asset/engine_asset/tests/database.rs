@@ -14940,6 +14940,145 @@ base_color=0.25,0.5,0.75,1
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_parses_obj_quoted_line_continuations() {
+    let config = database_config("builtin_model_obj_quoted_line_continuations");
+    let model_path = AssetPath::parse("models/continued_quoted.obj");
+    let mesh_path = AssetPath::parse("models/continued_quoted.Continued.mesh");
+    let material_path =
+        AssetPath::parse("models/continued_quoted.Material_Red_Metal.material");
+    let model_source = br#"mtllib "continued\
+ quoted.mtl"
+o Continued
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+usemtl "Red\
+ Metal"
+f 1 2 \
+  3 4
+"#
+    .to_vec();
+    let material_source = br#"newmtl "Red\
+ Metal"
+Kd 0.25 \
+  0.5 0.75
+"#
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+i 0 1 2
+i 0 2 3
+"
+    .to_vec();
+    let expected_material = b"# mtllib continued quoted.mtl
+name=Red Metal
+base_color=0.25,0.5,0.75,1
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/continued quoted.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let mesh_id = mesh_metadata.id;
+    let material_id = material_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(material_metadata.asset_type, AssetTypeId::of::<Material>());
+    assert_eq!(mesh_metadata.labels, vec!["Continued"]);
+    assert_eq!(material_metadata.labels, vec!["Material/Red Metal"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(material_metadata.importer_version, 111);
+    assert_eq!(mesh_metadata.dependencies, vec![material_id]);
+    assert!(material_metadata.dependencies.is_empty());
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id, material_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let material_output = database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "quoted_line_continuations",
+            vec![mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+    assert_eq!(
+        reader.read_path(&material_path).unwrap(),
+        material_output.bytes
+    );
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(mesh_id),
+        vec![material_id]
+    );
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0]
+        ]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2, 0, 2, 3]);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(material.properties.base_color, [0.25, 0.5, 0.75, 1.0]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_accepts_obj_parameter_vertices() {
     let config = database_config("builtin_model_obj_parameter_vertices");
     let model_path = AssetPath::parse("models/parameter_vertices.obj");
