@@ -9796,9 +9796,9 @@ f 4 5 6
     .to_vec();
     let material_source = b"newmtl ShortPacked
 map_MR -imfchan green -colorspace Non-Color textures/packed_mr.texture
-map_MRA -imfchan red textures/packed_mra.texture
+map_MRA -imfchan red -colorspace Non-Color textures/packed_mra.texture
 newmtl LongPacked
-map_metallicroughness -imfchan blue textures/packed_metallicroughness.texture
+map_metallicroughness -imfchan blue -colorspace Non-Color textures/packed_metallicroughness.texture
 map_ARM -imfchan green -clamp on -colorspace Non-Color textures/packed_arm.texture
 "
     .to_vec();
@@ -9810,12 +9810,14 @@ texture.metallic_roughness.source_channel=green
 texture.metallic_roughness.color_space=non_color
 texture.mra=models/textures/packed_mra.texture
 texture.mra.source_channel=red
+texture.mra.color_space=non_color
 "
         .to_vec(),
         b"# mtllib packed_aliases.mtl
 name=LongPacked
 texture.metallic_roughness=models/textures/packed_metallicroughness.texture
 texture.metallic_roughness.source_channel=blue
+texture.metallic_roughness.color_space=non_color
 texture.arm=models/textures/packed_arm.texture
 texture.arm.sampler.address=clamp_to_edge
 texture.arm.source_channel=green
