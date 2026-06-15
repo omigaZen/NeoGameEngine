@@ -135,6 +135,19 @@ fn dependency_report_exports_edges_and_topological_order() {
     assert!(html.contains("textures/&lt;albedo&gt;&amp;hero.texture"));
     assert!(!html.contains(texture_path));
 
+    let text_path = std::env::temp_dir().join("asset_smoke_dependency_report.txt");
+    let dot_path = std::env::temp_dir().join("asset_smoke_dependency_report.dot");
+    let json_path = std::env::temp_dir().join("asset_smoke_dependency_report.json");
+    let html_path = std::env::temp_dir().join("asset_smoke_dependency_report.html");
+    server.save_dependency_report_text(&text_path).unwrap();
+    server.save_dependency_report_dot(&dot_path).unwrap();
+    server.save_dependency_report_json(&json_path).unwrap();
+    server.save_dependency_report_html(&html_path).unwrap();
+    assert_eq!(std::fs::read_to_string(text_path).unwrap(), text);
+    assert_eq!(std::fs::read_to_string(dot_path).unwrap(), dot);
+    assert_eq!(std::fs::read_to_string(json_path).unwrap(), json);
+    assert_eq!(std::fs::read_to_string(html_path).unwrap(), html);
+
     let order = server
         .dependency_graph()
         .topological_order(material.id())
