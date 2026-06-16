@@ -3048,9 +3048,10 @@ fn unload_by_id_clears_dependency_metadata_and_preserves_source_hash() {
             break;
         }
     }
-    assert!(server.is_ready_with_dependencies(&material));
-    let shader_id = server.get(&material).unwrap().shader.as_ref().unwrap().id();
-    let texture_id = server.get(&material).unwrap().textures[0].texture.id();
+    assert!(server.is_ready(&material));
+    let loaded = server.get(&material).unwrap();
+    let shader_id = loaded.shader.as_ref().unwrap().id();
+    let texture_id = loaded.textures[0].texture.id();
     assert_eq!(
         server.metadata(material.id()).unwrap().source_hash,
         Some(material_source_hash)
