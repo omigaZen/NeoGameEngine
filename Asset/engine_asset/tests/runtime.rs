@@ -3244,6 +3244,59 @@ fn load_by_id_with_priority_preserves_registry_source_hash_and_emits_ready_event
         .any(|event| matches!(event, AssetEvent::Ready { id } if *id == loaded.id())));
 }
 
+#[test]
+fn load_untyped_and_load_untyped_by_id_preserve_registry_source_hash_and_emits_ready_events() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/untyped.texture", texture_bytes(1, 1, 67));
+    let path = AssetPath::parse("textures/untyped.texture");
+    let source_hash = io_source_hash(&io, path.path());
+    let mut server = server_with_io(io);
+
+    let seed = server.load_untyped(path.clone());
+    assert_eq!(seed.asset_type(), Texture::TYPE_ID);
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert_eq!(server.state_by_id(seed.id()), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == seed.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == seed.id())));
+
+    server.unload_by_id(seed.id()).unwrap();
+    assert_eq!(server.state_by_id(seed.id()), AssetLoadState::Unloaded);
+
+    let reloaded = server.load_untyped_by_id(seed.id(), Texture::TYPE_ID);
+    assert_eq!(reloaded.id(), seed.id());
+    assert_eq!(reloaded.asset_type(), Texture::TYPE_ID);
+    assert_eq!(server.state_by_id(seed.id()), AssetLoadState::Queued);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert_eq!(server.state_by_id(seed.id()), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+    assert_eq!(server.path_from_id(seed.id()), Some(&path));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == seed.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == seed.id())));
+}
+
 #[cfg(feature = "streaming")]
 #[test]
 fn preload_streaming_region_preserves_registry_source_hashes_and_emits_ready_events() {
