@@ -194,6 +194,7 @@ fn hot_reload_async_watch_backend_queues_notified_paths_without_polling() {
     server.update_loading();
     finish_uploads(&mut server, 1);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
 
     server
         .watch_hot_reload_path_with_backend(path.clone(), HotReloadWatchBackend::AsyncNotification)
@@ -252,6 +253,11 @@ fn hot_reload_async_watch_backend_queues_notified_paths_without_polling() {
     finish_uploads(&mut server, 30);
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 2);
+    assert!(server.metadata(texture.id()).unwrap().source_hash.is_some());
+    assert_ne!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
 }
 
 #[test]
