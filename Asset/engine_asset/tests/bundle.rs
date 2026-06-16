@@ -3123,7 +3123,12 @@ fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
         "packages/patch_runtime.nga_bundle",
         vec![("textures/runtime.texture", texture_bytes(1, 1, 9))],
     );
-
+    let entry_hash = BundleReader::from_bytes(&base_bundle)
+        .unwrap()
+        .manifest()
+        .entry(base_ids[0])
+        .unwrap()
+        .content_hash;
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
     server.register_builtin_loaders();
@@ -3142,6 +3147,10 @@ fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
     let handle = Handle::<Texture>::strong(base_ids[0]);
     assert!(server.is_ready(&handle));
     assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(entry_hash)
+    );
 
     let registry = AssetPackageRegistry::new(vec![patch.clone(), base.clone()]).unwrap();
     let mounted = server.restore_asset_package_registry(registry).unwrap();
@@ -3151,6 +3160,10 @@ fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
     assert!(server.mounted_bundle(base.bundle_id).is_some());
     assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
     assert_eq!(server.get(&handle).unwrap().width, 1);
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(entry_hash)
+    );
 
     let mut disabled_patch = patch.clone();
     disabled_patch.enabled = false;
@@ -3160,6 +3173,10 @@ fn asset_server_restores_package_registry_without_disrupting_ready_assets() {
     assert!(server.mounted_bundle(patch.bundle_id).is_none());
     assert!(server.mounted_bundle(base.bundle_id).is_some());
     assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(entry_hash)
+    );
 }
 
 #[test]
@@ -3296,6 +3313,12 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         "unused/zstd_base.bundle",
         vec![("textures/zstd_react.texture", texture_bytes(1, 1, 35))],
     );
+    let base_entry_hash = BundleReader::from_bytes(&base_bundle)
+        .unwrap()
+        .manifest()
+        .entry(base_ids[0])
+        .unwrap()
+        .content_hash;
     let zstd_bundle = BundleWriter::build_bytes_with_options(
         "artifact_zstd_patch",
         BundleBuildOptions::new(CompressionKind::Zstd)
@@ -3318,6 +3341,13 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         ],
     )
     .unwrap();
+    let zstd_entry_hash = BundleReader::from_bytes(&zstd_bundle)
+        .unwrap()
+        .manifest()
+        .entries
+        .first()
+        .unwrap()
+        .content_hash;
 
     let _base_install = store
         .install_package_bytes(
@@ -3413,6 +3443,10 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         server.metadata(base_ids[0]).unwrap().path,
         Some(AssetPath::parse("textures/zstd_react.texture"))
     );
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(base_entry_hash)
+    );
     let zstd_handle = server
         .asset_package_registry()
         .packages()
@@ -3423,6 +3457,10 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         .unwrap();
     assert!(server.is_ready(&zstd_handle));
     assert_eq!(server.state_by_id(zstd_handle.id()), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(zstd_handle.id()).unwrap().source_hash,
+        Some(zstd_entry_hash)
+    );
 
     let removed = store
         .remove_package(&mut registry, "artifact_zstd_patch", true)
@@ -3439,6 +3477,10 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     assert!(server.mounted_bundle(base_record_seed.bundle_id).is_some());
     assert!(server.mounted_bundle(BundleId(83)).is_none());
     assert!(server.is_ready(&base_handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(base_entry_hash)
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }
