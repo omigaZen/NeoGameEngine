@@ -3026,6 +3026,59 @@ fn insert_loaded_by_id_preserves_registry_source_hash_and_emits_ready_events() {
 }
 
 #[test]
+fn insert_loaded_preserves_registry_source_hash_and_emits_ready_events() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/manual.texture", texture_bytes(1, 1, 19));
+    let path = AssetPath::parse("textures/manual.texture");
+    let source_hash = io_source_hash(&io, path.path());
+    let mut server = server_with_io(io);
+
+    let seed: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert!(server.is_ready(&seed));
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+
+    server.unload_by_id(seed.id()).unwrap();
+    assert_eq!(server.state(&seed), AssetLoadState::Unloaded);
+
+    let replacement = Texture {
+        width: 1,
+        height: 1,
+        format: TextureFormat::Rgba8UnormSrgb,
+        mip_count: 1,
+        data: vec![5, 6, 7, 8],
+        gpu: None,
+    };
+    let handle = server
+        .insert_loaded(path.clone(), replacement.clone())
+        .unwrap();
+
+    assert_eq!(handle.id(), seed.id());
+    assert!(server.is_ready(&handle));
+    assert_eq!(server.state(&handle), AssetLoadState::Ready);
+    assert_eq!(server.id_from_path(&path), Some(seed.id()));
+    assert_eq!(server.path_from_id(seed.id()), Some(&path));
+    assert_eq!(server.get(&handle), Some(&replacement));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let stored = server.metadata(seed.id()).unwrap();
+    assert_eq!(stored.path.as_ref(), Some(&path));
+    assert_eq!(stored.asset_type, Texture::TYPE_ID);
+    assert_eq!(stored.source_hash, Some(source_hash));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == handle.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == handle.id())));
+}
+
+#[test]
 fn event_cursor_only_returns_new_events() {
     let io = MemoryAssetIo::new().with_file("textures/checker.texture", texture_bytes(1, 1, 1));
     let mut server = server_with_io(io);
