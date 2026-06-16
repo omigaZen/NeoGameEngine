@@ -3646,7 +3646,7 @@ fn mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount() {
 fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bundles() {
     let path = temp_file("asset_server_package_registry", "txt");
     let _ = std::fs::remove_file(&path);
-    let (base, _, _) = texture_package(
+    let (base, base_bundle, base_ids) = texture_package(
         "server_base",
         AssetIoLayerKind::BaseBundle,
         0,
@@ -3654,7 +3654,7 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
         "packages/server_base.nga_bundle",
         vec![("textures/server_base.texture", texture_bytes(1, 1, 11))],
     );
-    let (patch, _, _) = texture_package(
+    let (patch, patch_bundle, patch_ids) = texture_package(
         "server_patch",
         AssetIoLayerKind::Patch,
         1,
@@ -3662,6 +3662,12 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
         "packages/server_patch.nga_bundle",
         vec![("textures/server_patch.texture", texture_bytes(1, 1, 22))],
     );
+    let base_entry_hash = BundleReader::from_bytes(&base_bundle)
+        .unwrap()
+        .manifest()
+        .entry(base_ids[0])
+        .unwrap()
+        .content_hash;
     let registry = AssetPackageRegistry::new(vec![base.clone(), patch.clone()]).unwrap();
     let mut server = AssetServer::new(AssetServerConfig::default());
     let mounted = server
@@ -3686,6 +3692,31 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .unwrap()
             .name,
         "server_patch"
+    );
+    assert_eq!(
+        restored_server
+            .mounted_bundle(base.bundle_id)
+            .unwrap()
+            .manifest
+            .entry(base_ids[0])
+            .unwrap()
+            .content_hash,
+        base_entry_hash
+    );
+    assert_eq!(
+        restored_server
+            .mounted_bundle(patch.bundle_id)
+            .unwrap()
+            .manifest
+            .entry(patch_ids[0])
+            .unwrap()
+            .content_hash,
+        BundleReader::from_bytes(&patch_bundle)
+            .unwrap()
+            .manifest()
+            .entry(patch_ids[0])
+            .unwrap()
+            .content_hash
     );
 
     let missing_path = temp_file("asset_server_missing_package_registry", "txt");
