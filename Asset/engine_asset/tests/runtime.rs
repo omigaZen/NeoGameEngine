@@ -3026,6 +3026,77 @@ fn insert_loaded_by_id_preserves_registry_source_hash_and_emits_ready_events() {
 }
 
 #[test]
+fn unload_by_id_clears_dependency_metadata_and_preserves_source_hash() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    let material_path = AssetPath::parse("materials/hero.material");
+    let material_source_hash = io_source_hash(&io, "materials/hero.material");
+    let texture_source_hash = io_source_hash(&io, "textures/albedo.texture");
+    let shader_source_hash = io_source_hash(&io, "shaders/pbr.wgsl");
+    let mut server = server_with_io(io);
+
+    let material: Handle<Material> = server.load(material_path.clone());
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready(&material) {
+            break;
+        }
+    }
+    assert!(server.is_ready_with_dependencies(&material));
+    let shader_id = server.get(&material).unwrap().shader.as_ref().unwrap().id();
+    let texture_id = server.get(&material).unwrap().textures[0].texture.id();
+    assert_eq!(
+        server.metadata(material.id()).unwrap().source_hash,
+        Some(material_source_hash)
+    );
+    assert_eq!(
+        server.metadata(shader_id).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
+    assert_eq!(
+        server.metadata(texture_id).unwrap().source_hash,
+        Some(texture_source_hash)
+    );
+
+    server.unload_by_id(material.id()).unwrap();
+    assert_eq!(server.state(&material), AssetLoadState::Unloaded);
+    assert!(server.get(&material).is_none());
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Unloaded { id } if *id == material.id())));
+    assert_eq!(
+        server.metadata(material.id()).unwrap().source_hash,
+        Some(material_source_hash)
+    );
+    assert!(server
+        .metadata(material.id())
+        .unwrap()
+        .dependencies
+        .is_empty());
+    assert!(server
+        .dependency_graph()
+        .direct_dependencies(material.id())
+        .is_empty());
+    assert_eq!(server.id_from_path(&material_path), Some(material.id()));
+    assert_eq!(server.path_from_id(material.id()), Some(&material_path));
+    assert_eq!(
+        server.metadata(shader_id).unwrap().source_hash,
+        Some(shader_source_hash)
+    );
+    assert_eq!(
+        server.metadata(texture_id).unwrap().source_hash,
+        Some(texture_source_hash)
+    );
+}
+
+#[test]
 fn insert_loaded_preserves_registry_source_hash_and_emits_ready_events() {
     let mut io = MemoryAssetIo::new();
     io.insert("textures/manual.texture", texture_bytes(1, 1, 19));
