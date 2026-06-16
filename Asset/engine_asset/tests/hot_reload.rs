@@ -112,6 +112,7 @@ fn hot_reload_watcher_debounces_duplicate_pending_path_changes() {
     let texture: Handle<Texture> = server.load(path.clone());
     server.update_loading();
     finish_uploads(&mut server, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
     server.watch_hot_reload_path(path.clone()).unwrap();
 
     server.set_io(MemoryAssetIo::new().with_file(path.path(), texture_bytes(2, 1, 20)));
@@ -127,6 +128,11 @@ fn hot_reload_watcher_debounces_duplicate_pending_path_changes() {
 
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 2);
+    assert!(server.metadata(texture.id()).unwrap().source_hash.is_some());
+    assert_ne!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
 }
 
 #[test]
@@ -454,6 +460,7 @@ fn hot_reload_decode_failure_rolls_back_to_previous_ready_asset() {
     let texture: Handle<Texture> = server.load(path.clone());
     server.update_loading();
     finish_uploads(&mut server, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
 
     server.set_io(MemoryAssetIo::new().with_file(path.path(), vec![1, 2, 3]));
     server.queue_hot_reload_path(path);
@@ -463,6 +470,10 @@ fn hot_reload_decode_failure_rolls_back_to_previous_ready_asset() {
 
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
     assert!(matches!(
         server.error_by_id(texture.id()),
         Some(AssetError::Decode { .. })

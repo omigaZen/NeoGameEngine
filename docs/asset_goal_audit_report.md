@@ -2408,7 +2408,7 @@ Passed:
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test hot_reload reload_by_path_clears_failure_diagnostic_by_later_successful_reload
 ```
 
-Result: hot-reload recovery now also pins source-hash metadata. `reload_by_id` and `reload_by_path` failures leave the prior ready asset metadata stable, and the later successful reload updates the ready asset while keeping its metadata path intact and switching to the new source hash rather than only preserving the prior width/state.
+Result: hot-reload recovery now also pins source-hash metadata. `reload_by_id` and `reload_by_path` failures leave the prior ready asset metadata stable, duplicate pending-path debounce keeps the ready asset on the latest source hash, and decode rollback preserves the prior source hash until a later successful reload updates it; the later successful reload keeps the metadata path intact and switches to the new source hash rather than only preserving the prior width/state.
 
 Passed:
 
