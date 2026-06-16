@@ -179,3 +179,65 @@ fn release_group_drops_tracking_without_cancelling_queued_loads() {
         Some(b_source_hash)
     );
 }
+
+#[test]
+fn load_group_by_ids_preserves_source_hashes_after_reload() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/a.texture", texture_bytes(1, 1, 8));
+    io.insert("textures/b.texture", texture_bytes(1, 1, 9));
+    let a_source_hash = io_source_hash(&io, "textures/a.texture");
+    let b_source_hash = io_source_hash(&io, "textures/b.texture");
+    let mut server = AssetServer::new(AssetServerConfig {
+        max_io_jobs_per_frame: 1,
+        ..AssetServerConfig::default()
+    });
+    server.set_io(io);
+    server.register_builtin_loaders();
+
+    let a: Handle<Texture> = server.load("textures/a.texture");
+    let b: Handle<Texture> = server.load("textures/b.texture");
+    server.update_loading();
+    finish_uploads(&mut server);
+    server.update_loading();
+    finish_uploads(&mut server);
+
+    assert!(server.is_ready(&a));
+    assert!(server.is_ready(&b));
+    assert_eq!(
+        server.metadata(a.id()).unwrap().source_hash,
+        Some(a_source_hash)
+    );
+    assert_eq!(
+        server.metadata(b.id()).unwrap().source_hash,
+        Some(b_source_hash)
+    );
+
+    server.unload_by_id(a.id()).unwrap();
+    server.unload_by_id(b.id()).unwrap();
+    assert_eq!(server.state(&a), AssetLoadState::Unloaded);
+    assert_eq!(server.state(&b), AssetLoadState::Unloaded);
+
+    let group = server.load_group_by_ids(&[(a.id(), Texture::TYPE_ID), (b.id(), Texture::TYPE_ID)]);
+
+    let queued = server.group_progress(&group);
+    assert_eq!(queued.total_assets, 2);
+    assert_eq!(queued.queued_assets, 2);
+    assert_eq!(queued.bytes_loaded, 0);
+    assert_eq!(queued.bytes_total, 0);
+
+    server.update_loading();
+    finish_uploads(&mut server);
+    server.update_loading();
+    finish_uploads(&mut server);
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(server.group_progress(&group).ready_assets, 2);
+    assert_eq!(
+        server.metadata(group.assets[0].id()).unwrap().source_hash,
+        Some(a_source_hash)
+    );
+    assert_eq!(
+        server.metadata(group.assets[1].id()).unwrap().source_hash,
+        Some(b_source_hash)
+    );
+}
