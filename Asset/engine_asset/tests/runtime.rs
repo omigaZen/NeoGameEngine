@@ -2932,6 +2932,47 @@ fn unload_by_id_removes_ready_asset_and_emits_event() {
 }
 
 #[test]
+fn insert_loaded_with_metadata_preserves_source_hash_and_emits_ready_events() {
+    let mut server = server_with_io(MemoryAssetIo::new());
+    let path = AssetPath::parse("textures/manual.texture");
+    let id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0042);
+    let source_hash = ContentHash(0xfeed_face_cafe_babe);
+    let mut metadata = AssetMetadata::runtime(id, path.clone(), Texture::TYPE_ID);
+    metadata.source_hash = Some(source_hash);
+    let texture = Texture {
+        width: 1,
+        height: 1,
+        format: TextureFormat::Rgba8UnormSrgb,
+        mip_count: 1,
+        data: vec![7, 8, 9, 10],
+        gpu: None,
+    };
+
+    let handle = server
+        .insert_loaded_with_metadata(metadata, texture.clone())
+        .unwrap();
+
+    assert_eq!(handle.id(), id);
+    assert!(server.is_ready(&handle));
+    assert_eq!(server.state(&handle), AssetLoadState::Ready);
+    assert_eq!(server.id_from_path(&path), Some(id));
+    assert_eq!(server.get(&handle), Some(&texture));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let stored = server.metadata(id).unwrap();
+    assert_eq!(stored.path.as_ref(), Some(&path));
+    assert_eq!(stored.asset_type, Texture::TYPE_ID);
+    assert_eq!(stored.source_hash, Some(source_hash));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == handle.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == handle.id())));
+}
+
+#[test]
 fn event_cursor_only_returns_new_events() {
     let io = MemoryAssetIo::new().with_file("textures/checker.texture", texture_bytes(1, 1, 1));
     let mut server = server_with_io(io);
