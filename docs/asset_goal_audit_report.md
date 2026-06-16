@@ -580,8 +580,8 @@ Result: 3 smoke integration tests passed, covering non-owning renderer/audio/phy
 - `AssetServer::verify_asset_package_artifacts` and `AssetServer::activate_asset_package_registry_from_artifacts` covering missing-artifact and mismatched-manifest diagnostics before runtime activation, with loaded asset state preserved when activation fails.
 - Invalid package registry metadata diagnostics for malformed headers, truncated manifests, duplicate package names, duplicate bundle ids, duplicate priorities, empty fields, and duplicate manifest paths.
 - `AssetServer::restore_asset_package_registry` preserving already-ready asset state while replacing package-managed mounted bundle manifests and honoring disabled package records on reload.
-- `AssetServer` loading a texture through `BundleAssetIo`.
-- `AssetServer` mounting bundle bytes, preloading manifest entries into a load group, finishing GPU upload, unmounting the bundle, and reporting invalid mount/unmount errors.
+- `AssetServer` loading a texture through `BundleAssetIo` and preserving bundle-entry source hashes on the ready asset.
+- `AssetServer` mounting bundle bytes, preloading manifest entries into a load group, finishing GPU upload, unmounting the bundle, and reporting invalid mount/unmount errors while preserving the ready asset's bundle-entry source hash.
 - `BundleWriter::write_file` writing bundle bytes to disk and returning a manifest that preserves dependency metadata.
 - `MountedBundleRegistry` save/load round trip plus remounting persisted bundle metadata into a fresh `AssetServer` to drive real preload/readiness.
 

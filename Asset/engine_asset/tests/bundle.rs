@@ -3447,6 +3447,7 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
 fn asset_server_loads_texture_from_bundle_io() {
     let (id, bundle) = texture_bundle("textures/albedo.texture", texture_bytes(2, 1, 5));
     let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    let entry_hash = bundle_io.manifest().entry(id).unwrap().content_hash;
     assert_eq!(
         bundle_io
             .manifest()
@@ -3471,12 +3472,17 @@ fn asset_server_loads_texture_from_bundle_io() {
 
     assert!(server.is_ready(&texture));
     assert_eq!(server.get(&texture).unwrap().width, 2);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        Some(entry_hash)
+    );
 }
 
 #[test]
 fn asset_server_mounts_preloads_and_unmounts_bundle_manifest() {
     let (id, bundle) = texture_bundle("textures/preload.texture", texture_bytes(1, 2, 8));
     let bundle_io = BundleAssetIo::from_bytes(&bundle).unwrap();
+    let entry_hash = bundle_io.manifest().entry(id).unwrap().content_hash;
 
     let mut server = AssetServer::new(AssetServerConfig::default());
     server.set_io(bundle_io);
@@ -3501,11 +3507,13 @@ fn asset_server_mounts_preloads_and_unmounts_bundle_manifest() {
             .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(11))),
     );
     assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(server.metadata(id).unwrap().source_hash, Some(entry_hash));
 
     let removed = server.unmount_bundle(mounted.id).unwrap();
     assert_eq!(removed.id, mounted.id);
     assert!(server.mounted_bundle(mounted.id).is_none());
     assert_eq!(server.state_by_id(id), AssetLoadState::Ready);
+    assert_eq!(server.metadata(id).unwrap().source_hash, Some(entry_hash));
 }
 
 #[test]
