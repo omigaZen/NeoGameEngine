@@ -26,6 +26,10 @@ use engine_renderer::prelude::{
     VertexLayout, VertexSemantic, VertexStepMode, VertexStreamLayout,
 };
 
+fn io_source_hash(io: &MemoryAssetIo, path: &str) -> ContentHash {
+    io.metadata(path).unwrap().hash.unwrap()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmokeReport {
     pub render_ready: bool,
@@ -176,6 +180,17 @@ pub fn run_smoke() -> SmokeReport {
     io.insert("skeletons/hero.skeleton", skeleton_bytes());
     io.insert("animations/idle.animation", animation_bytes());
     io.insert("physics/hero.physics", physics_mesh_bytes());
+    let mesh_source_hash = io_source_hash(&io, "meshes/tri.mesh");
+    let texture_source_hash = io_source_hash(&io, "textures/checker.texture");
+    let material_source_hash = io_source_hash(&io, "materials/hero.material");
+    let normal_material_source_hash = io_source_hash(&io, "materials/hero_normal.material");
+    let scene_source_hash = io_source_hash(&io, "scenes/hero.scene");
+    let prefab_source_hash = io_source_hash(&io, "prefabs/hero.prefab");
+    let audio_source_hash = io_source_hash(&io, "audio/click.audio");
+    let audio_alt_source_hash = io_source_hash(&io, "audio/click_alt.audio");
+    let skeleton_source_hash = io_source_hash(&io, "skeletons/hero.skeleton");
+    let animation_source_hash = io_source_hash(&io, "animations/idle.animation");
+    let physics_source_hash = io_source_hash(&io, "physics/hero.physics");
 
     let mut assets = AssetServer::new(AssetServerConfig::default());
     assets.set_io(io);
@@ -275,6 +290,9 @@ pub fn run_smoke() -> SmokeReport {
         loaded: true,
     }
     .instantiate(&assets, &mut prefab_sink));
+    let loaded_material_texture_id = assets.get(&renderer.material).unwrap().textures[0]
+        .texture
+        .id();
     let normal_material_asset = assets.get(&normal_material).unwrap();
     assert_eq!(normal_material_asset.textures.len(), 1);
     assert_eq!(normal_material_asset.textures[0].name, "normal");
@@ -308,6 +326,53 @@ pub fn run_smoke() -> SmokeReport {
     let render_bridge = drive_render_scene_from_assets(&assets, &renderer);
     let renderer_resource_bridge = drive_headless_renderer_from_assets(&assets, &renderer);
     let group_progress = assets.group_progress(&group);
+    assert_eq!(
+        assets.metadata(renderer.mesh.id()).unwrap().source_hash,
+        Some(mesh_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(renderer.material.id()).unwrap().source_hash,
+        Some(material_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(normal_material.id()).unwrap().source_hash,
+        Some(normal_material_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(audio.clip.id()).unwrap().source_hash,
+        Some(audio_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(audio_alt.clip.id()).unwrap().source_hash,
+        Some(audio_alt_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(skeleton.id()).unwrap().source_hash,
+        Some(skeleton_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(animation.id()).unwrap().source_hash,
+        Some(animation_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(physics.mesh.id()).unwrap().source_hash,
+        Some(physics_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(scene.scene.id()).unwrap().source_hash,
+        Some(scene_source_hash)
+    );
+    assert_eq!(
+        assets.metadata(prefab.prefab.id()).unwrap().source_hash,
+        Some(prefab_source_hash)
+    );
+    assert_eq!(
+        assets
+            .metadata(loaded_material_texture_id)
+            .unwrap()
+            .source_hash,
+        Some(texture_source_hash)
+    );
     SmokeReport {
         render_ready: renderer.is_ready(&assets),
         audio_ready: audio.is_ready(&assets),
