@@ -2139,6 +2139,12 @@ fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payload
         "patches/runtime_patch.bundle",
         vec![("textures/runtime_artifact.texture", texture_bytes(1, 1, 8))],
     );
+    let entry_hash = BundleReader::from_bytes(&base_bundle)
+        .unwrap()
+        .manifest()
+        .entry(base_ids[0])
+        .unwrap()
+        .content_hash;
     let base_install = store
         .install_package_bytes(
             &mut registry,
@@ -2185,6 +2191,10 @@ fn asset_server_activation_from_artifacts_reports_missing_and_mismatched_payload
     assert_eq!(
         server.metadata(base_ids[0]).unwrap().path,
         Some(AssetPath::parse("textures/runtime_artifact.texture"))
+    );
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        Some(entry_hash)
     );
 
     let missing_patch = AssetPackageRecord::new(
@@ -3576,6 +3586,8 @@ fn mounted_bundle_registry_round_trip_preserves_metadata_and_can_remount() {
             .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(21))),
     );
     assert_eq!(restored_server.group_state(&group), AssetLoadState::Ready);
+    let ready_metadata = restored_server.metadata(texture_id).unwrap();
+    assert_eq!(ready_metadata.source_hash, Some(entry_hash));
 
     let _ = std::fs::remove_file(&path);
 }

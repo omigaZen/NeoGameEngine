@@ -2424,6 +2424,8 @@ Result: direct runtime loads now also pin source-hash metadata on representative
 
 Result: `load_group()` now also has explicit source-hash coverage. The group-progress tests confirm that each grouped texture asset reaches ready state with its own stable source hash still available through `AssetServer::metadata()`, and the new `load_group_by_ids()` regression proves the same source hashes survive a reload-by-id group path. The new `preload_by_id()` and `load_by_id_with_priority()` regressions show that id-based loading paths also preserve registry source hashes and emit the expected ready events, so load-group and id-based loading paths are no longer only exercised as state/progress counters.
 
+Result: `preload_bundle()` now also has explicit bundle-entry source-hash coverage. The artifact-backed bundle activation test and the mounted-bundle registry remount test now verify that ready bundle-loaded assets keep the bundle entry hash in `AssetServer::metadata().source_hash` after `preload_bundle()`, so bundle/runtime bridge coverage now includes source-hash preservation instead of only path and cooked-hash checks.
+
 Passed:
 
 ```text
