@@ -530,6 +530,48 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
             ],
         ))
         .unwrap();
+    let bundle_manifest = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    let bundle_manifest = bundle_manifest.manifest();
+    let texture_bundle_hash = bundle_manifest
+        .entry_by_path(&texture_path)
+        .unwrap()
+        .content_hash;
+    let mesh_bundle_hash = bundle_manifest
+        .entry_by_path(&mesh_path)
+        .unwrap()
+        .content_hash;
+    let material_bundle_hash = bundle_manifest
+        .entry_by_path(&material_path)
+        .unwrap()
+        .content_hash;
+    let audio_bundle_hash = bundle_manifest
+        .entry_by_path(&audio_path)
+        .unwrap()
+        .content_hash;
+    let audio_alt_bundle_hash = bundle_manifest
+        .entry_by_path(&audio_alt_path)
+        .unwrap()
+        .content_hash;
+    let skeleton_bundle_hash = bundle_manifest
+        .entry_by_path(&skeleton_path)
+        .unwrap()
+        .content_hash;
+    let animation_bundle_hash = bundle_manifest
+        .entry_by_path(&animation_path)
+        .unwrap()
+        .content_hash;
+    let physics_bundle_hash = bundle_manifest
+        .entry_by_path(&physics_path)
+        .unwrap()
+        .content_hash;
+    let scene_bundle_hash = bundle_manifest
+        .entry_by_path(&scene_path)
+        .unwrap()
+        .content_hash;
+    let prefab_bundle_hash = bundle_manifest
+        .entry_by_path(&prefab_path)
+        .unwrap()
+        .content_hash;
 
     let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
     let mut assets = AssetServer::new(AssetServerConfig::default());
@@ -609,6 +651,51 @@ pub fn run_editor_smoke() -> EditorSmokeReport {
     assert_eq!(
         material_asset.textures[0].options.transform.turbulence,
         [0.01, 0.02, 0.03]
+    );
+    let material_texture_id = material_asset.textures[0].texture.id();
+    assert_eq!(
+        assets.metadata(texture_id).unwrap().source_hash,
+        Some(texture_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(mesh_id).unwrap().source_hash,
+        Some(mesh_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(material.id()).unwrap().source_hash,
+        Some(material_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(material_texture_id).unwrap().source_hash,
+        Some(texture_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(audio.id()).unwrap().source_hash,
+        Some(audio_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(audio_alt.id()).unwrap().source_hash,
+        Some(audio_alt_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(skeleton.id()).unwrap().source_hash,
+        Some(skeleton_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(animation.id()).unwrap().source_hash,
+        Some(animation_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(physics.id()).unwrap().source_hash,
+        Some(physics_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(scene.id()).unwrap().source_hash,
+        Some(scene_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(prefab.id()).unwrap().source_hash,
+        Some(prefab_bundle_hash)
     );
     let mut scene_sink = RecordingInstantiationSink::default();
     let mut prefab_sink = RecordingInstantiationSink::default();
@@ -751,6 +838,36 @@ pub fn run_model_smoke() -> ModelSmokeReport {
             ],
         ))
         .unwrap();
+    let bundle_manifest = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    let bundle_manifest = bundle_manifest.manifest();
+    let shader_bundle_hash = bundle_manifest
+        .entry_by_path(&shader_path)
+        .unwrap()
+        .content_hash;
+    let texture_bundle_hash = bundle_manifest
+        .entry_by_path(&texture_path)
+        .unwrap()
+        .content_hash;
+    let mesh_bundle_hash = bundle_manifest
+        .entry_by_path(&mesh_path)
+        .unwrap()
+        .content_hash;
+    let material_bundle_hash = bundle_manifest
+        .entry_by_path(&material_path)
+        .unwrap()
+        .content_hash;
+    let skeleton_bundle_hash = bundle_manifest
+        .entry_by_path(&skeleton_path)
+        .unwrap()
+        .content_hash;
+    let animation_bundle_hash = bundle_manifest
+        .entry_by_path(&animation_path)
+        .unwrap()
+        .content_hash;
+    let physics_bundle_hash = bundle_manifest
+        .entry_by_path(&physics_path)
+        .unwrap()
+        .content_hash;
 
     let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
     let mut assets = AssetServer::new(AssetServerConfig::default());
@@ -778,6 +895,34 @@ pub fn run_model_smoke() -> ModelSmokeReport {
         .get_by_id::<PhysicsMesh>(physics_id)
         .map(|physics| physics.vertices.len())
         .unwrap_or_default();
+    assert_eq!(
+        assets.metadata(shader_id).unwrap().source_hash,
+        Some(shader_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(texture_id).unwrap().source_hash,
+        Some(texture_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(mesh_id).unwrap().source_hash,
+        Some(mesh_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(material_id).unwrap().source_hash,
+        Some(material_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(skeleton_id).unwrap().source_hash,
+        Some(skeleton_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(animation_id).unwrap().source_hash,
+        Some(animation_bundle_hash)
+    );
+    assert_eq!(
+        assets.metadata(physics_id).unwrap().source_hash,
+        Some(physics_bundle_hash)
+    );
     let report = ModelSmokeReport {
         generated_subresources: 5,
         bundled_assets: bundle.asset_count,
