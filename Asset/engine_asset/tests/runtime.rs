@@ -3244,6 +3244,47 @@ fn load_by_id_with_priority_preserves_registry_source_hash_and_emits_ready_event
         .any(|event| matches!(event, AssetEvent::Ready { id } if *id == loaded.id())));
 }
 
+#[cfg(feature = "streaming")]
+#[test]
+fn preload_streaming_region_preserves_registry_source_hashes_and_emits_ready_events() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/stream_a.texture", texture_bytes(1, 1, 77));
+    io.insert("textures/stream_b.texture", texture_bytes(1, 1, 78));
+    let a_source_hash = io_source_hash(&io, "textures/stream_a.texture");
+    let b_source_hash = io_source_hash(&io, "textures/stream_b.texture");
+    let mut server = server_with_io(io);
+
+    let region = server
+        .register_streaming_region_paths(
+            "stream",
+            LoadPriority::High,
+            &[
+                AssetPath::parse("textures/stream_a.texture"),
+                AssetPath::parse("textures/stream_b.texture"),
+            ],
+        )
+        .unwrap();
+    let group = server.preload_streaming_region(region).unwrap();
+    assert_eq!(server.group_state(&group), AssetLoadState::LoadingBytes);
+    assert_eq!(server.group_progress(&group).queued_assets, 2);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(server.group_progress(&group).ready_assets, 2);
+    assert_eq!(
+        server.metadata(group.assets[0].id()).unwrap().source_hash,
+        Some(a_source_hash)
+    );
+    assert_eq!(
+        server.metadata(group.assets[1].id()).unwrap().source_hash,
+        Some(b_source_hash)
+    );
+}
+
 #[test]
 fn event_cursor_only_returns_new_events() {
     let io = MemoryAssetIo::new().with_file("textures/checker.texture", texture_bytes(1, 1, 1));

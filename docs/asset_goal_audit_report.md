@@ -2426,6 +2426,8 @@ Result: `load_group()` now also has explicit source-hash coverage. The group-pro
 
 Result: `preload_bundle()` now also has explicit bundle-entry source-hash coverage. The artifact-backed bundle activation test and the mounted-bundle registry remount test now verify that ready bundle-loaded assets keep the bundle entry hash in `AssetServer::metadata().source_hash` after `preload_bundle()`, so bundle/runtime bridge coverage now includes source-hash preservation instead of only path and cooked-hash checks.
 
+Result: `preload_streaming_region()` now also has explicit source-hash coverage. The streaming-region preload regression confirms that assets loaded through a registered streaming region still expose their registry source hashes after the region reaches ready state, so streaming coverage now includes source-hash preservation instead of only region state/progress checks.
+
 Passed:
 
 ```text
