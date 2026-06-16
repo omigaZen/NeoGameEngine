@@ -481,6 +481,7 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
     let texture: Handle<Texture> = server.load(path.clone());
     server.update_loading();
     finish_uploads(&mut server, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
 
     server.set_io(MemoryAssetIo::new().with_file(path.path(), vec![1, 2, 3]));
     server.reload_by_id(texture.id()).unwrap();
@@ -490,6 +491,10 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
     assert_eq!(
         server.metadata(texture.id()).unwrap().path,
         Some(path.clone())
+    );
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
     );
     assert!(matches!(
         server.error_by_id(texture.id()),
@@ -504,6 +509,11 @@ fn reload_failure_diagnostic_is_cleared_by_later_successful_reload() {
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 2);
     assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
+    assert!(server.metadata(texture.id()).unwrap().source_hash.is_some());
+    assert_ne!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
@@ -516,6 +526,7 @@ fn reload_by_id_reports_missing_asset_without_mutating_state() {
     server.update_loading();
     finish_uploads(&mut server, 1);
     assert_eq!(server.get(&texture).unwrap().width, 1);
+    let initial_source_hash = server.metadata(texture.id()).unwrap().source_hash;
 
     let missing = AssetId::new();
     let error = server.reload_by_id(missing).unwrap_err();
@@ -523,6 +534,10 @@ fn reload_by_id_reports_missing_asset_without_mutating_state() {
     assert_eq!(server.state(&texture), AssetLoadState::Ready);
     assert_eq!(server.get(&texture).unwrap().width, 1);
     assert_eq!(server.metadata(texture.id()).unwrap().path, Some(path));
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().source_hash,
+        initial_source_hash
+    );
     assert!(server.error_by_id(texture.id()).is_none());
 }
 
