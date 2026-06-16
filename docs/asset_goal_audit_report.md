@@ -582,7 +582,7 @@ Result: 3 smoke integration tests passed, covering non-owning renderer/audio/phy
 - `AssetServer::restore_asset_package_registry` preserving already-ready asset state while replacing package-managed mounted bundle manifests and honoring disabled package records on reload.
 - `AssetServer` loading a texture through `BundleAssetIo` and preserving bundle-entry source hashes on the ready asset.
 - `AssetServer` mounting bundle bytes, preloading manifest entries into a load group, finishing GPU upload, unmounting the bundle, and reporting invalid mount/unmount errors while preserving the ready asset's bundle-entry source hash.
-- `AssetServer::save_asset_package_registry` / `load_asset_package_registry` round-tripping mounted-bundle registry state with bundle manifest hashes intact after reload and preserving the original ready asset source hash across a reload-preload cycle.
+- `AssetServer::save_asset_package_registry` / `load_asset_package_registry` round-tripping mounted-bundle registry state with bundle manifest hashes intact after reload and preserving the original ready asset source hashes for both base and patch bundles across a reload-preload cycle.
 - `BundleWriter::write_file` writing bundle bytes to disk and returning a manifest that preserves dependency metadata.
 - `MountedBundleRegistry` save/load round trip plus remounting persisted bundle metadata into a fresh `AssetServer` to drive real preload/readiness.
 

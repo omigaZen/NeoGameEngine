@@ -3658,16 +3658,24 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
         "packages/server_patch.nga_bundle",
         vec![("textures/server_patch.texture", texture_bytes(1, 1, 22))],
     );
+    let base_io = BundleAssetIo::from_bytes(&base_bundle).unwrap();
+    let patch_io = BundleAssetIo::from_bytes(&patch_bundle).unwrap();
     let registry = AssetPackageRegistry::new(vec![base.clone(), patch.clone()]).unwrap();
     let mut server = AssetServer::new(AssetServerConfig::default());
     let mounted = server
         .restore_asset_package_registry(registry.clone())
         .unwrap();
 
-    server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    server.set_io(
+        CompositeAssetIo::new()
+            .with_named_layer("server_base", AssetIoLayerKind::BaseBundle, base_io)
+            .with_named_layer("server_patch", AssetIoLayerKind::Patch, patch_io),
+    );
     server.register_builtin_loaders();
-    let original_bundle = server.mounted_bundle(base.bundle_id).unwrap().clone();
-    let original_group = server.preload_bundle(&original_bundle);
+    let original_base_bundle = server.mounted_bundle(base.bundle_id).unwrap().clone();
+    let original_patch_bundle = server.mounted_bundle(patch.bundle_id).unwrap().clone();
+    let original_base_group = server.preload_bundle(&original_base_bundle);
+    let original_patch_group = server.preload_bundle(&original_patch_bundle);
     server.update_loading();
     let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
     server.finish_gpu_uploads(
@@ -3675,16 +3683,37 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .into_iter()
             .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(31))),
     );
-    assert_eq!(server.group_state(&original_group), AssetLoadState::Ready);
-    let original_ready_source_hash = server.metadata(base_ids[0]).unwrap().source_hash;
-    assert!(original_ready_source_hash.is_some());
+    assert_eq!(
+        server.group_state(&original_base_group),
+        AssetLoadState::Ready
+    );
+    assert_eq!(
+        server.group_state(&original_patch_group),
+        AssetLoadState::Ready
+    );
+    let original_base_ready_source_hash = server.metadata(base_ids[0]).unwrap().source_hash;
+    let original_patch_ready_source_hash = server.metadata(patch_ids[0]).unwrap().source_hash;
+    assert!(original_base_ready_source_hash.is_some());
+    assert!(original_patch_ready_source_hash.is_some());
 
     server.save_asset_package_registry(&path).unwrap();
     let saved_registry = AssetPackageRegistry::load_from_file(&path).unwrap();
     assert_eq!(saved_registry, registry);
 
     let mut restored_server = AssetServer::new(AssetServerConfig::default());
-    restored_server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    restored_server.set_io(
+        CompositeAssetIo::new()
+            .with_named_layer(
+                "server_base",
+                AssetIoLayerKind::BaseBundle,
+                BundleAssetIo::from_bytes(&base_bundle).unwrap(),
+            )
+            .with_named_layer(
+                "server_patch",
+                AssetIoLayerKind::Patch,
+                BundleAssetIo::from_bytes(&patch_bundle).unwrap(),
+            ),
+    );
     restored_server.register_builtin_loaders();
     let restored = restored_server.load_asset_package_registry(&path).unwrap();
     assert_eq!(restored, mounted);
@@ -3731,11 +3760,16 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .content_hash
     );
 
-    let restored_bundle = restored_server
+    let restored_base_bundle = restored_server
         .mounted_bundle(base.bundle_id)
         .unwrap()
         .clone();
-    let restored_group = restored_server.preload_bundle(&restored_bundle);
+    let restored_patch_bundle = restored_server
+        .mounted_bundle(patch.bundle_id)
+        .unwrap()
+        .clone();
+    let restored_base_group = restored_server.preload_bundle(&restored_base_bundle);
+    let restored_patch_group = restored_server.preload_bundle(&restored_patch_bundle);
     restored_server.update_loading();
     let uploads = restored_server.drain_gpu_uploads().collect::<Vec<_>>();
     restored_server.finish_gpu_uploads(
@@ -3744,12 +3778,20 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(33))),
     );
     assert_eq!(
-        restored_server.group_state(&restored_group),
+        restored_server.group_state(&restored_base_group),
+        AssetLoadState::Ready
+    );
+    assert_eq!(
+        restored_server.group_state(&restored_patch_group),
         AssetLoadState::Ready
     );
     assert_eq!(
         restored_server.metadata(base_ids[0]).unwrap().source_hash,
-        original_ready_source_hash
+        original_base_ready_source_hash
+    );
+    assert_eq!(
+        restored_server.metadata(patch_ids[0]).unwrap().source_hash,
+        original_patch_ready_source_hash
     );
 
     let missing_path = temp_file("asset_server_missing_package_registry", "txt");
