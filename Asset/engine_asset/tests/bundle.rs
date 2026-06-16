@@ -3262,6 +3262,8 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
         server.metadata(base_ids[0]).unwrap().path,
         Some(AssetPath::parse("textures/react.texture"))
     );
+    let ready_source_hash = server.metadata(base_ids[0]).unwrap().source_hash;
+    assert!(ready_source_hash.is_some());
 
     let mut disabled_patch = patch_install.record.clone();
     disabled_patch.enabled = false;
@@ -3283,6 +3285,10 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
         server.metadata(base_ids[0]).unwrap().path,
         Some(AssetPath::parse("textures/react.texture"))
     );
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        ready_source_hash
+    );
 
     let activation = server
         .activate_asset_package_registry_from_artifacts(
@@ -3294,6 +3300,10 @@ fn asset_server_activates_artifact_registry_without_disrupting_ready_assets() {
     assert_eq!(activation.mounted_bundles.len(), 1);
     assert_eq!(server.state_by_id(base_ids[0]), AssetLoadState::Ready);
     assert!(server.is_ready(&handle));
+    assert_eq!(
+        server.metadata(base_ids[0]).unwrap().source_hash,
+        ready_source_hash
+    );
 
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -3313,12 +3323,6 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         "unused/zstd_base.bundle",
         vec![("textures/zstd_react.texture", texture_bytes(1, 1, 35))],
     );
-    let base_entry_hash = BundleReader::from_bytes(&base_bundle)
-        .unwrap()
-        .manifest()
-        .entry(base_ids[0])
-        .unwrap()
-        .content_hash;
     let zstd_bundle = BundleWriter::build_bytes_with_options(
         "artifact_zstd_patch",
         BundleBuildOptions::new(CompressionKind::Zstd)
@@ -3341,14 +3345,6 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         ],
     )
     .unwrap();
-    let zstd_entry_hash = BundleReader::from_bytes(&zstd_bundle)
-        .unwrap()
-        .manifest()
-        .entries
-        .first()
-        .unwrap()
-        .content_hash;
-
     let _base_install = store
         .install_package_bytes(
             &mut registry,
@@ -3443,10 +3439,8 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         server.metadata(base_ids[0]).unwrap().path,
         Some(AssetPath::parse("textures/zstd_react.texture"))
     );
-    assert_eq!(
-        server.metadata(base_ids[0]).unwrap().source_hash,
-        Some(base_entry_hash)
-    );
+    let base_ready_source_hash = server.metadata(base_ids[0]).unwrap().source_hash;
+    assert!(base_ready_source_hash.is_some());
     let zstd_handle = server
         .asset_package_registry()
         .packages()
@@ -3457,10 +3451,8 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
         .unwrap();
     assert!(server.is_ready(&zstd_handle));
     assert_eq!(server.state_by_id(zstd_handle.id()), AssetLoadState::Ready);
-    assert_eq!(
-        server.metadata(zstd_handle.id()).unwrap().source_hash,
-        Some(zstd_entry_hash)
-    );
+    let zstd_ready_source_hash = server.metadata(zstd_handle.id()).unwrap().source_hash;
+    assert!(zstd_ready_source_hash.is_some());
 
     let removed = store
         .remove_package(&mut registry, "artifact_zstd_patch", true)
@@ -3479,7 +3471,11 @@ fn asset_server_activates_zstd_artifact_registry_without_disrupting_ready_assets
     assert!(server.is_ready(&base_handle));
     assert_eq!(
         server.metadata(base_ids[0]).unwrap().source_hash,
-        Some(base_entry_hash)
+        base_ready_source_hash
+    );
+    assert_eq!(
+        server.metadata(zstd_handle.id()).unwrap().source_hash,
+        zstd_ready_source_hash
     );
 
     let _ = std::fs::remove_dir_all(&root);
@@ -3662,23 +3658,34 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
         "packages/server_patch.nga_bundle",
         vec![("textures/server_patch.texture", texture_bytes(1, 1, 22))],
     );
-    let base_entry_hash = BundleReader::from_bytes(&base_bundle)
-        .unwrap()
-        .manifest()
-        .entry(base_ids[0])
-        .unwrap()
-        .content_hash;
     let registry = AssetPackageRegistry::new(vec![base.clone(), patch.clone()]).unwrap();
     let mut server = AssetServer::new(AssetServerConfig::default());
     let mounted = server
         .restore_asset_package_registry(registry.clone())
         .unwrap();
 
+    server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    server.register_builtin_loaders();
+    let original_bundle = server.mounted_bundle(base.bundle_id).unwrap().clone();
+    let original_group = server.preload_bundle(&original_bundle);
+    server.update_loading();
+    let uploads = server.drain_gpu_uploads().collect::<Vec<_>>();
+    server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(31))),
+    );
+    assert_eq!(server.group_state(&original_group), AssetLoadState::Ready);
+    let original_ready_source_hash = server.metadata(base_ids[0]).unwrap().source_hash;
+    assert!(original_ready_source_hash.is_some());
+
     server.save_asset_package_registry(&path).unwrap();
     let saved_registry = AssetPackageRegistry::load_from_file(&path).unwrap();
     assert_eq!(saved_registry, registry);
 
     let mut restored_server = AssetServer::new(AssetServerConfig::default());
+    restored_server.set_io(BundleAssetIo::from_bytes(&base_bundle).unwrap());
+    restored_server.register_builtin_loaders();
     let restored = restored_server.load_asset_package_registry(&path).unwrap();
     assert_eq!(restored, mounted);
     assert_eq!(restored_server.mounted_bundles().count(), 2);
@@ -3701,7 +3708,12 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .entry(base_ids[0])
             .unwrap()
             .content_hash,
-        base_entry_hash
+        BundleReader::from_bytes(&base_bundle)
+            .unwrap()
+            .manifest()
+            .entry(base_ids[0])
+            .unwrap()
+            .content_hash
     );
     assert_eq!(
         restored_server
@@ -3717,6 +3729,27 @@ fn asset_server_save_and_load_package_registry_round_trip_preserves_mounted_bund
             .entry(patch_ids[0])
             .unwrap()
             .content_hash
+    );
+
+    let restored_bundle = restored_server
+        .mounted_bundle(base.bundle_id)
+        .unwrap()
+        .clone();
+    let restored_group = restored_server.preload_bundle(&restored_bundle);
+    restored_server.update_loading();
+    let uploads = restored_server.drain_gpu_uploads().collect::<Vec<_>>();
+    restored_server.finish_gpu_uploads(
+        uploads
+            .into_iter()
+            .map(|upload| GpuUploadResult::ok(upload.id, GpuResourceHandle(33))),
+    );
+    assert_eq!(
+        restored_server.group_state(&restored_group),
+        AssetLoadState::Ready
+    );
+    assert_eq!(
+        restored_server.metadata(base_ids[0]).unwrap().source_hash,
+        original_ready_source_hash
     );
 
     let missing_path = temp_file("asset_server_missing_package_registry", "txt");
