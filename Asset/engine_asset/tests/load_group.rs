@@ -8,6 +8,10 @@ fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     bytes
 }
 
+fn io_source_hash(io: &MemoryAssetIo, path: &str) -> ContentHash {
+    io.metadata(path).unwrap().hash.unwrap()
+}
+
 fn server_with_textures(paths: &[(&str, u8)]) -> AssetServer {
     let mut io = MemoryAssetIo::new();
     for (path, value) in paths {
@@ -76,7 +80,18 @@ fn group_progress_reports_mixed_ready_failed_cancelled_and_queued_states() {
 
 #[test]
 fn group_progress_tracks_loading_and_ready_memory_bytes() {
-    let mut server = server_with_textures(&[("textures/a.texture", 4), ("textures/b.texture", 5)]);
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/a.texture", texture_bytes(1, 1, 4));
+    io.insert("textures/b.texture", texture_bytes(1, 1, 5));
+    let a_source_hash = io_source_hash(&io, "textures/a.texture");
+    let b_source_hash = io_source_hash(&io, "textures/b.texture");
+    let mut server = AssetServer::new(AssetServerConfig {
+        max_io_jobs_per_frame: 1,
+        ..AssetServerConfig::default()
+    });
+    server.set_io(io);
+    server.register_builtin_loaders();
+
     let group = server.load_group(&[
         AssetPath::parse("textures/a.texture"),
         AssetPath::parse("textures/b.texture"),
@@ -108,11 +123,30 @@ fn group_progress_tracks_loading_and_ready_memory_bytes() {
     assert_eq!(all_ready.bytes_loaded, 16);
     assert_eq!(all_ready.bytes_total, 16);
     assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(group.assets[0].id()).unwrap().source_hash,
+        Some(a_source_hash)
+    );
+    assert_eq!(
+        server.metadata(group.assets[1].id()).unwrap().source_hash,
+        Some(b_source_hash)
+    );
 }
 
 #[test]
 fn release_group_drops_tracking_without_cancelling_queued_loads() {
-    let mut server = server_with_textures(&[("textures/a.texture", 6), ("textures/b.texture", 7)]);
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/a.texture", texture_bytes(1, 1, 6));
+    io.insert("textures/b.texture", texture_bytes(1, 1, 7));
+    let a_source_hash = io_source_hash(&io, "textures/a.texture");
+    let b_source_hash = io_source_hash(&io, "textures/b.texture");
+    let mut server = AssetServer::new(AssetServerConfig {
+        max_io_jobs_per_frame: 1,
+        ..AssetServerConfig::default()
+    });
+    server.set_io(io);
+    server.register_builtin_loaders();
+
     let group = server.load_group(&[
         AssetPath::parse("textures/a.texture"),
         AssetPath::parse("textures/b.texture"),
@@ -130,4 +164,18 @@ fn release_group_drops_tracking_without_cancelling_queued_loads() {
 
     assert_eq!(server.group_state(&released), AssetLoadState::Ready);
     assert_eq!(server.group_progress(&released).ready_assets, 2);
+    assert_eq!(
+        server
+            .metadata(released.assets[0].id())
+            .unwrap()
+            .source_hash,
+        Some(a_source_hash)
+    );
+    assert_eq!(
+        server
+            .metadata(released.assets[1].id())
+            .unwrap()
+            .source_hash,
+        Some(b_source_hash)
+    );
 }
