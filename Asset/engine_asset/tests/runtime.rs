@@ -3151,6 +3151,53 @@ fn insert_loaded_preserves_registry_source_hash_and_emits_ready_events() {
 }
 
 #[test]
+fn preload_by_id_preserves_registry_source_hash_and_emits_ready_events() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/preload.texture", texture_bytes(1, 1, 55));
+    let path = AssetPath::parse("textures/preload.texture");
+    let source_hash = io_source_hash(&io, path.path());
+    let mut server = server_with_io(io);
+
+    let seed: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert!(server.is_ready(&seed));
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+
+    server.unload_by_id(seed.id()).unwrap();
+    assert_eq!(server.state(&seed), AssetLoadState::Unloaded);
+
+    let preloaded = server.preload_by_id::<Texture>(seed.id());
+    assert_eq!(preloaded.id(), seed.id());
+    assert_eq!(server.state(&preloaded), AssetLoadState::Queued);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready(&preloaded));
+    assert_eq!(server.state(&preloaded), AssetLoadState::Ready);
+    assert_eq!(server.id_from_path(&path), Some(seed.id()));
+    assert_eq!(server.path_from_id(seed.id()), Some(&path));
+    assert!(server.get(&preloaded).is_some());
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let stored = server.metadata(seed.id()).unwrap();
+    assert_eq!(stored.path.as_ref(), Some(&path));
+    assert_eq!(stored.asset_type, Texture::TYPE_ID);
+    assert_eq!(stored.source_hash, Some(source_hash));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == preloaded.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == preloaded.id())));
+}
+
+#[test]
 fn event_cursor_only_returns_new_events() {
     let io = MemoryAssetIo::new().with_file("textures/checker.texture", texture_bytes(1, 1, 1));
     let mut server = server_with_io(io);
