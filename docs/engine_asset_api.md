@@ -4490,6 +4490,61 @@ pub enum FontData {
     OpenType(Vec<u8>),
     Bitmap(BitmapFont),
 }
+
+#[derive(Clone, Debug)]
+pub struct BitmapFont {
+    pub glyphs: Vec<BitmapGlyph>,
+    pub kerning_pairs: Vec<BitmapKerningPair>,
+    pub line_height: u32,
+    pub atlas_width: u32,
+    pub atlas_height: u32,
+    pub atlas_bitmap: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct BitmapKerningPair {
+    pub left: char,
+    pub right: char,
+    pub adjustment: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct BitmapTextLayout {
+    pub glyphs: Vec<PositionedBitmapGlyph>,
+    pub advance_width: i32,
+    pub height: u32,
+    pub line_count: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PositionedBitmapGlyph {
+    pub codepoint: char,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub atlas_x: u32,
+    pub atlas_y: u32,
+}
+
+impl BitmapFont {
+    pub fn glyph(&self, codepoint: char) -> Option<&BitmapGlyph>;
+    pub fn kerning_adjustment(&self, left: char, right: char) -> i32;
+    pub fn layout_text(&self, text: &str) -> Result<BitmapTextLayout, AssetError>;
+}
+
+#[derive(Clone, Debug)]
+pub struct BitmapGlyph {
+    pub codepoint: char,
+    pub width: u32,
+    pub height: u32,
+    pub advance_x: i32,
+    pub bearing_x: i32,
+    pub bearing_y: i32,
+    pub atlas_x: u32,
+    pub atlas_y: u32,
+    pub bitmap: Vec<u8>,
+}
 ```
 
 `FontLoader` 支持一个最小 bitmap 文本 payload：
@@ -4497,14 +4552,35 @@ pub enum FontData {
 ```text
 NGA_FONT_V1
 family=Debug Sans
-glyph=char=A;size=2x1;bitmap=0,255
+line_height=8
+glyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0,255
+glyph=char=V;size=1x1;bitmap=255
+kerning=left=A;right=V;adjust=-1
 ```
 
 第一行必须是 `NGA_FONT_V1`。`family` 必填，至少需要一个 `glyph`。`glyph` 字段使用
-`char=<单字符>;size=<width>x<height>;bitmap=<u8,u8,...>`，bitmap 字节数必须等于
-`width * height`。无效 header、缺失 family、缺失 glyph、非法 size、非法 bitmap 值、
-bitmap 长度不匹配或未知字段都会返回 `AssetError::Decode`。`.font` 文本生成
-`FontData::Bitmap`，不会产生 GPU upload command。`FontLoader` 也支持 `.ttf` 和 `.otf`
+`char=<单字符>;size=<width>x<height>;bitmap=<u8,u8,...>`，可选
+`advance=<i32>`、`bearing=<i32>,<i32>`、`bearing_x=<i32>`、`bearing_y=<i32>`。
+顶层可选 `line_height=<u32>`，必须非零；缺省时使用最大 glyph 高度，glyph
+缺省 advance 使用 glyph 宽度，bearing 缺省为 0。bitmap 字节数必须等于
+`width * height`。无效 header、缺失 family、缺失 glyph、非法 size、非法 metric、非法 bitmap 值、
+bitmap 长度不匹配或未知字段都会返回 `AssetError::Decode`。可选
+`kerning=left=<单字符>;right=<单字符>;adjust=<i32>`（也接受 `kern`、`first`/`second`
+和 `amount` 等别名）会生成 `BitmapKerningPair`；左右 glyph 必须已声明，同一 pair 不可重复。
+`.font` 文本生成
+`FontData::Bitmap`，并把 glyph bitmap 按文档顺序水平打包到确定性的 CPU atlas：
+`atlas_width` 是 glyph 宽度之和，`atlas_height` 是最大 glyph 高度，`atlas_bitmap`
+包含 atlas 像素，每个 `BitmapGlyph` 暴露 `atlas_x`/`atlas_y`。该 atlas 仍是 CPU 数据，
+不会产生 GPU upload command。
+
+`BitmapFont::layout_text` 提供基础 CPU bitmap 文本布局：kerning adjustment 在右侧 glyph
+之前应用，glyph 坐标是当前 pen/line 坐标加 bearing，advance 推进 pen；`\n` 按
+`line_height` 换行并清除跨行 kerning，`\r` 被忽略。结果包含 positioned glyph 的 atlas
+坐标、最大行 advance、总高度和行数。空文本返回零行/零尺寸；缺失 glyph 或坐标/尺寸溢出
+返回 `AssetError::Decode`。该 API 只负责简单 codepoint 布局，不执行 Unicode shaping、
+双向文本、fallback font 或 GPU upload。
+
+`FontLoader` 也支持 `.ttf` 和 `.otf`
 二进制字体：`.ttf` 会校验 TrueType sfnt signature（`0x00010000`/`true`/`typ1`），`.otf`
 会校验 OpenType CFF signature（`OTTO`），至少需要 12 字节 sfnt header；加载后分别生成
 `FontData::TrueType` 或 `FontData::OpenType`，二进制 bytes 原样保留，`family_name` 当前使用
@@ -4520,6 +4596,7 @@ pub struct PhysicsMesh {
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<[u32; 3]>,
     pub kind: PhysicsMeshKind,
+    pub height_field: Option<PhysicsHeightField>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4527,6 +4604,14 @@ pub enum PhysicsMeshKind {
     TriMesh,
     ConvexHull,
     HeightField,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicsHeightField {
+    pub heights: Vec<f32>,
+    pub rows: u32,
+    pub cols: u32,
+    pub scale: [f32; 3],
 }
 ```
 
@@ -4543,9 +4628,30 @@ i 0 1 2
 
 第一行必须是 `NGA_PHYSICS_MESH_V1`。`kind` 可为 `trimesh`/`tri_mesh`、
 `convex`/`convex_hull`、`heightfield`/`height_field`。`v` 行声明三维顶点，`i` 行声明
-三个 `u32` 索引。loader 会校验 kind、参数数量、数字解析、至少一个顶点、非 convex
-mesh 至少一个 triangle，以及索引不能越过顶点数量；无效输入返回 `AssetError::Decode`。
+三个 `u32` 索引。trimesh/convex loader 会校验参数数量、数字解析、至少一个顶点、
+trimesh 至少一个 triangle，以及索引不能越过顶点数量；无效输入返回 `AssetError::Decode`。
 当前为 CPU-only 资源，不会产生 GPU upload command。
+
+`heightfield` 使用独立 grid payload，不使用 `v`/`i`：
+
+```text
+NGA_PHYSICS_MESH_V1
+kind=heightfield
+rows=2
+cols=3
+scale=1,2,0.5
+heights=0,1,2,3,4,5
+```
+
+`rows`/`cols` 必须至少为 2，`scale` 三个分量必须是有限正数，`heights` 必须是有限 f32，
+且数量严格等于 `rows * cols`。heightfield 出现 vertex/triangle，或非-heightfield
+出现 grid metadata，都会返回 `AssetError::Decode`。加载后 `vertices`/`indices` 为空，
+grid 数据位于 `PhysicsMesh::height_field`，字段与 `engine_physics::HeightFieldDesc`
+的 `heights`/`rows`/`cols`/`scale` 一一对应。
+
+`examples/asset_smoke` 也覆盖 heightfield 消费桥接：把 ready asset 的 grid 字段转换为
+`engine_physics::HeightFieldDesc`，创建 `PhysicsWorld` heightfield mesh/collider，并用
+ray query 验证 collider 可见。
 
 `examples/asset_smoke` 会把 ready 的 `Handle<PhysicsMesh>` 通过 `AssetServer::get` 取出，
 把 `vertices`/`indices` 转成 `engine_physics::TriMeshDesc`，创建 `PhysicsWorld`
@@ -5145,8 +5251,9 @@ Ready 后才会进入 Ready。Prefab 当前是 CPU-only 资源，不会产生 GP
 它们会把 `NGA_SCENE_V1` / `NGA_PREFAB_V1` 源文档导入成 runtime 资源，并把显式依赖路径与
 已知组件 asset 字段都写入 metadata dependencies。
 `AssetDatabase::register_builtin_cookers()` 默认也会注册 `SceneCooker` 与 `PrefabCooker`，
-它们会把 scene/prefab runtime 文档写入 cooked bundle，供 `SceneLoader` / `PrefabLoader`
-在运行时直接加载。
+它们会先按 `SceneLoader` / `PrefabLoader` 兼容的结构规则校验 scene/prefab runtime 文档，
+再把通过校验的文档写入 cooked bundle，供运行时直接加载；无实体组件、无 root 子节点等结构错误会以
+`Cook` 诊断在编辑器烘焙阶段暴露，而不是进入 cooked artifact。
 
 ---
 
@@ -5650,8 +5757,10 @@ source 以 `NGA_FONT_SOURCE_V1` 开头，则会验证并规范化为 `FontLoader
 ```text
 NGA_FONT_SOURCE_V1
 family = Debug Sans
-glyph = char=B; size=1x1; bitmap=128
-glyph=char=A;size=2x1;bitmap=0, 255
+Line Height = 8
+glyph = char=B; size=1x1; Advance X=2; Offset Y=-1; bitmap=128
+Kern = First=A; Second=B; Amount=-1
+glyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0, 255
 ```
 
 会输出稳定排序和修剪后的 runtime payload：
@@ -5659,12 +5768,15 @@ glyph=char=A;size=2x1;bitmap=0, 255
 ```text
 NGA_FONT_V1
 family=Debug Sans
-glyph=char=A;size=2x1;bitmap=0,255
-glyph=char=B;size=1x1;bitmap=128
+line_height=8
+glyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0,255
+glyph=char=B;size=1x1;advance=2;bearing=0,-1;bitmap=128
+kerning=left=A;right=B;adjust=-1
 ```
 
 Importer 会验证 `family`、至少一个 glyph、单字符 `char`、非零 `size`、bitmap 字节值和
-`width * height` 字节数，并拒绝重复 family 或重复 glyph；二进制字体会校验 `.ttf`/`.otf`
+`width * height` 字节数、可选 line-height/advance/bearing metrics 和 kerning pair 引用，
+并拒绝重复 family、glyph 或 kerning pair；二进制字体会校验 `.ttf`/`.otf`
 sfnt signature 和最小 header 长度。导入错误会包含
 `FontImporter`、source path 和 settings 上下文。转换后的 bytes 会写入 imported root，
 后续 `cook_asset`、bundle 和 runtime load 都使用该规范化 payload。
@@ -5707,10 +5819,15 @@ i 0 1 2
 
 Importer 会规范化 `kind`（`tri_mesh` -> `trimesh`、`convex_hull` -> `convex`、
 `height_field` -> `heightfield`），接受 `vertex=`/`triangle=` 或 `v`/`i` directive，
-验证有限 f32 顶点、u32 三角索引、非空顶点，以及非 convex mesh 的非空三角形。索引越界、
+验证有限 f32 顶点、u32 三角索引、非空顶点，以及 trimesh 的非空三角形。heightfield source
+接受 separator-insensitive `rows`/`cols`/`scale`/`heights` aliases，规范化为 runtime
+grid payload，并执行与 loader 相同的维度、sample 数量、finite/positive scale 和混合几何校验。索引越界、
 未知字段或格式错误会通过 `AssetError::Import` 返回，并带有 `PhysicsMeshImporter`、
 source path 和 settings 上下文。转换后的 bytes 会写入 imported root，后续 `cook_asset`、
 bundle 和 runtime load 都使用该规范化 payload。
+
+当前 `PhysicsMeshImporter::version()` 为 `3`；`PhysicsMeshCooker` 验证 trimesh/convex/heightfield
+runtime bytes 并使用 `VersionHash(2)`。
 
 ---
 

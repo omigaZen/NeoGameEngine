@@ -5,6 +5,8 @@ use crate::{
     loader::{AssetLoader, LoadContext, LoadedAsset, LoaderSettings},
 };
 
+const QUATERNION_LENGTH_EPSILON: f32 = 0.001;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnimationClip {
     pub duration: f32,
@@ -118,12 +120,12 @@ pub(crate) fn parse_animation_clip(bytes: &[u8]) -> Result<AnimationClip, AssetE
         };
         let key = key.trim();
         let value = value.trim();
-        match key {
-            "duration" => duration = Some(parse_f32(value, key, line_number)?),
-            "ticks_per_second" => {
+        match animation_document_key(key).as_str() {
+            "duration" | "length" => duration = Some(parse_f32(value, key, line_number)?),
+            "tickspersecond" | "tps" | "framerate" | "fps" => {
                 ticks_per_second = Some(parse_f32(value, key, line_number)?);
             }
-            "track" => {
+            "track" | "channel" => {
                 tracks.push(AnimationTrack {
                     target: parse_animation_target(value, line_number)?,
                     translations: Vec::new(),
@@ -132,27 +134,27 @@ pub(crate) fn parse_animation_clip(bytes: &[u8]) -> Result<AnimationClip, AssetE
                 });
                 current_track = Some(tracks.len() - 1);
             }
-            "translation" => {
+            "translation" | "position" | "location" => {
                 let index = current_track_index(current_track, key, line_number)?;
                 tracks[index]
                     .translations
                     .push(parse_keyframe_vec3(value, key, line_number)?);
             }
-            "rotation" => {
+            "rotation" | "quaternion" => {
                 let index = current_track_index(current_track, key, line_number)?;
                 tracks[index]
                     .rotations
                     .push(parse_keyframe_vec4(value, key, line_number)?);
             }
-            "scale" => {
+            "scale" | "scaling" => {
                 let index = current_track_index(current_track, key, line_number)?;
                 tracks[index]
                     .scales
                     .push(parse_keyframe_vec3(value, key, line_number)?);
             }
-            other => {
+            _ => {
                 return Err(AssetError::Decode {
-                    message: format!("unknown animation key `{other}` on line {line_number}"),
+                    message: format!("unknown animation key `{key}` on line {line_number}"),
                 })
             }
         }
@@ -166,6 +168,7 @@ pub(crate) fn parse_animation_clip(bytes: &[u8]) -> Result<AnimationClip, AssetE
         });
     }
     validate_animation_tracks(&tracks)?;
+    validate_animation_rotation_quaternions(&tracks)?;
     validate_animation_keyframe_times(&tracks, duration)?;
     Ok(AnimationClip {
         duration,
@@ -186,19 +189,29 @@ fn parse_animation_target(value: &str, line_number: usize) -> Result<AnimationTa
             message: format!("animation track target is empty on line {line_number}"),
         });
     }
-    match kind.trim() {
+    let kind = kind.trim();
+    match animation_document_key(kind).as_str() {
         "node" => Ok(AnimationTarget::NodeName(target.to_owned())),
         "bone" => Ok(AnimationTarget::BoneName(target.to_owned())),
-        "node_index" => target
+        "nodeindex" => target
             .parse()
             .map(AnimationTarget::NodeIndex)
             .map_err(|error| AssetError::Decode {
                 message: format!("invalid animation node_index on line {line_number}: {error}"),
             }),
-        other => Err(AssetError::Decode {
-            message: format!("unknown animation track target `{other}` on line {line_number}"),
+        _ => Err(AssetError::Decode {
+            message: format!("unknown animation track target `{kind}` on line {line_number}"),
         }),
     }
+}
+
+fn animation_document_key(key: &str) -> String {
+    key.chars()
+        .filter(|character| {
+            !character.is_ascii_whitespace() && *character != '_' && *character != '-'
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn current_track_index(
@@ -296,6 +309,30 @@ fn validate_animation_keyframe_times(
         validate_keyframe_times(track_index, "translation", &track.translations, duration)?;
         validate_keyframe_times(track_index, "rotation", &track.rotations, duration)?;
         validate_keyframe_times(track_index, "scale", &track.scales, duration)?;
+    }
+    Ok(())
+}
+
+fn validate_animation_rotation_quaternions(tracks: &[AnimationTrack]) -> Result<(), AssetError> {
+    for (track_index, track) in tracks.iter().enumerate() {
+        for (keyframe_index, keyframe) in track.rotations.iter().enumerate() {
+            let [x, y, z, w] = keyframe.value;
+            let length_squared = x * x + y * y + z * z + w * w;
+            if length_squared <= f32::EPSILON {
+                return Err(AssetError::Decode {
+                    message: format!(
+                        "animation rotation keyframe {keyframe_index} in track {track_index} has zero-length quaternion"
+                    ),
+                });
+            }
+            if (length_squared - 1.0).abs() > QUATERNION_LENGTH_EPSILON {
+                return Err(AssetError::Decode {
+                    message: format!(
+                        "animation rotation keyframe {keyframe_index} in track {track_index} quaternion length must be normalized"
+                    ),
+                });
+            }
+        }
     }
     Ok(())
 }

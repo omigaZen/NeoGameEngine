@@ -96,8 +96,9 @@ pub(crate) fn parse_skeleton(bytes: &[u8]) -> Result<Skeleton, AssetError> {
                 message: format!("invalid skeleton line {line_number}"),
             });
         };
-        match key.trim() {
-            "bone" => {
+        let key = key.trim();
+        match skeleton_document_key(key).as_str() {
+            "bone" | "joint" => {
                 let (bone, inverse_bind_pose, explicit_inverse_bind_line) =
                     parse_bone(value.trim(), line_number, bones.len())?;
                 if bones
@@ -115,9 +116,9 @@ pub(crate) fn parse_skeleton(bytes: &[u8]) -> Result<Skeleton, AssetError> {
                 inverse_bind_poses.push(inverse_bind_pose);
                 explicit_inverse_bind_lines.push(explicit_inverse_bind_line);
             }
-            other => {
+            _ => {
                 return Err(AssetError::Decode {
-                    message: format!("unknown skeleton key `{other}` on line {line_number}"),
+                    message: format!("unknown skeleton key `{key}` on line {line_number}"),
                 })
             }
         }
@@ -160,8 +161,10 @@ fn parse_bone(
                 message: format!("invalid skeleton bone field on line {line_number}"),
             });
         };
-        match (key.trim(), value.trim()) {
-            ("parent", value) => {
+        let key = key.trim();
+        let value = value.trim();
+        match skeleton_document_key(key).as_str() {
+            "parent" | "parentindex" | "parentbone" | "parentjoint" => {
                 let parent_index = value.parse::<u32>().map_err(|error| AssetError::Decode {
                     message: format!("invalid skeleton bone parent on line {line_number}: {error}"),
                 })?;
@@ -174,16 +177,16 @@ fn parse_bone(
                 }
                 parent = Some(parent_index);
             }
-            ("bind" | "local_bind", value) => {
+            "bind" | "localbind" | "localbindtransform" | "bindpose" => {
                 local_bind_transform = parse_mat4_field(value, "bind", line_number)?;
             }
-            ("inverse_bind" | "inverse_bind_pose", value) => {
+            "inversebind" | "inversebindpose" | "invbind" => {
                 inverse_bind_pose = parse_mat4_field(value, "inverse_bind", line_number)?;
                 explicit_inverse_bind_line = Some(line_number);
             }
-            (other, _) => {
+            _ => {
                 return Err(AssetError::Decode {
-                    message: format!("unknown skeleton bone field `{other}` on line {line_number}"),
+                    message: format!("unknown skeleton bone field `{key}` on line {line_number}"),
                 })
             }
         }
@@ -197,6 +200,15 @@ fn parse_bone(
         inverse_bind_pose,
         explicit_inverse_bind_line,
     ))
+}
+
+fn skeleton_document_key(key: &str) -> String {
+    key.chars()
+        .filter(|character| {
+            !character.is_ascii_whitespace() && *character != '_' && *character != '-'
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn validate_explicit_inverse_bind_poses(

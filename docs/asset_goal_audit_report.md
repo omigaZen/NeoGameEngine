@@ -49,6 +49,7 @@ Runtime MVP slice now exists in `engine_asset`:
 - ECS helper baseline through documented system order descriptors, stage ordering helpers, component handle exposure, readiness helpers, non-mutating scene/prefab instantiation plans, stable command exports, scene/prefab component `instantiate` helpers that directly emit instantiation commands to an `InstantiationSink`, public component-schema asset-reference export for known serialized scene/prefab component fields, generic `HostInstantiationSink` host mapping that creates host entity handles, resolves serialized parent indexes to host parents, reports created roots/entities/component counts, marks scene/prefab instance components loaded only after successful host instantiation, leaves failed parent mapping as a visible `HostInstantiationError`, and `TypedHostInstantiationSink` / `EcsComponentInstance` materialization that converts known serialized components into handle-owning `MeshRendererComponent`, `SkinnedMeshRendererComponent`, `AudioSourceComponent`, `PhysicsColliderComponent`, `SceneInstanceComponent`, and `PrefabInstanceComponent` values while passing unknown components through unchanged. Typed host instantiation now validates parent indexes and materializes all components before calling host spawn/attach, so component materialization failures do not leave partially spawned host entities or mark the instance loaded; the explicit scene/prefab typed-host parent-failure, sink-error, and generic host sink-error regressions now pin that preflight behavior.
 - Workspace smoke baseline through `examples/asset_smoke`, which exercises renderer/audio/physics-facing component readiness from `AssetServer` handles without owning the loaded resources, converts loaded `Mesh`/`Material`/`Texture` assets into `engine_render::Mesh`/`Texture`/`Material`, builds an `engine_render::RenderScene` and `RenderQueue` with observable scene and queue statistics, creates headless `engine_renderer` mesh/texture/material resources from the same ready assets with observable `resource_status`, `mesh_info`, `texture_info`, and resident memory stats, converts a loaded `PhysicsMesh` into `engine_physics::TriMeshDesc`, creates a real `PhysicsWorld` mesh/collider and ray-query-visible physics shape, scene/prefab instantiation command export, raw sink application and observable traces, typed host scene/prefab instantiation with host entity parent mapping, `EcsComponentInstance` materialization, typed host error-path propagation, unknown component passthrough, loaded-state lifecycle checks, material dependency readiness, load-group progress/state, event cursor observation, an editor-to-runtime database scan/import/cook/bundle/mount/load flow for texture/mesh/material/audio/physics/skeleton/animation/scene/prefab assets with scene/prefab component-field dependencies and cooked audio/physics source assets that are loaded back into `AssetServer`/`PhysicsWorld`, and now `AudioSourceComponent` bridges over two loaded audio clips plus standalone `Skeleton`/`AnimationClip` readiness, `SkinnedMeshRendererComponent` scene/prefab runtime coverage, editor smoke evidence that `PhysicsColliderComponent`, `SceneInstanceComponent`, and `PrefabInstanceComponent` are ready and expose their asset handles, and the corresponding model-generated mesh/material/skeleton/animation/physics_mesh subresources loaded from a built bundle.
 - Built-in importer coverage: `TextureImporter` pass-throughs binary runtime texture payloads and converts documented `NGA_TEXTURE_SOURCE_V1` text sources into runtime texture bytes while preserving source-hash metadata; `AudioImporter` pass-throughs runtime audio/WAV payloads, converts documented `NGA_AUDIO_SOURCE_V1` text sources into canonical runtime audio bytes, and applies `force_mono` then `normalize` importer settings with persisted settings metadata, source-hash metadata, and invalid boolean diagnostics; `AudioCooker` canonicalizes runtime audio/WAV payloads into normalized `NGA_AUDIO_V1` cooked bytes; `SkeletonCooker` and `AnimationCooker` canonicalize runtime or documented `NGA_SKELETON_SOURCE_V1` / `NGA_ANIMATION_SOURCE_V1` payloads into validated runtime skeleton/animation cooked bytes with `VersionHash(2)`; `FontImporter` pass-throughs runtime bitmap font payloads and converts documented `NGA_FONT_SOURCE_V1` text sources into deterministic runtime font bytes while preserving source-hash metadata; `PhysicsMeshImporter` pass-throughs runtime physics-mesh payloads and converts documented `NGA_PHYSICS_MESH_SOURCE_V1` text sources into deterministic runtime physics-mesh bytes while preserving source-hash metadata; `MeshImporter` pass-throughs runtime mesh payloads, validates/pass-throughs documented `NGA_MESH_BINARY_V1` binary mesh payloads with skin-weight validation and optional `u16` index blocks, and converts documented `NGA_MESH_SOURCE_V1` text sources into deterministic runtime mesh bytes with optional normals/UVs/secondary UV sets/tangents/four-influence skin joints and positive normalized weights while preserving source-hash metadata; runtime mesh loading packs text and binary mesh payloads into deterministic interleaved binary vertex buffers, rejects zero or unnormalized skin weights, and exposes renderer-facing `GpuUploadMetadata::Mesh`, preserving decoded `u16` binary mesh index format through upload metadata, upload bytes, and GPU byte accounting; `MeshCooker` now decodes imported text or binary mesh payloads and writes deterministic `NGA_MESH_BINARY_V1` cooked bytes for database bundles and runtime loading with mobile/web exact vertex compaction and `u16` index blocks for `Android`/`Ios`/`Web` targets when possible; `ShaderImporter` pass-throughs runtime shader source and converts documented `NGA_SHADER_SOURCE_V1` documents into validated runtime WGSL, GLSL, or SPIR-V with `stage` and `entry` metadata validation, including case-insensitive `ENTRY` and `entry` matching against `fn`/`void` function definitions while preserving source-hash metadata; plus includes WGSL parse-location plus source diagnostics on compile errors; `MaterialImporter` validates/canonicalizes runtime material text and parses `shader` and texture asset references into registry-backed dependency metadata without treating sampler/transform/bump/color/channel/boost/blend/color-space/projection/resolution metadata or material state fields or typed custom properties as assets, and preserves typed custom values and alpha texture source-channel metadata in canonical runtime bytes; `SceneImporter` and `PrefabImporter` parse documented runtime scene/prefab documents and register explicit dependency paths plus known component asset-reference fields into metadata while preserving source-hash metadata; `ModelImporter` parses inline and multiline-block `NGA_MODEL_V1` manifests plus `.obj`/`NGA_MODEL_OBJ_V1` OBJ subset sources into generated mesh/material/skeleton/animation/physics_mesh metadata, runtime-loadable mesh/material/physics_mesh bytes with settings-controlled generated kind filters including `import_physics_meshes`, finite positive mesh/physics-mesh scale, OBJ tangent generation, generated mesh optimization with degenerate-triangle culling, deterministic generated LOD meshes with degenerate-triangle culling, and expanded OBJ `(position, uv, normal)` tuples, homogeneous OBJ vertex coordinates, parameter-space OBJ vertices, validated/ignored OBJ point/line elements, validated/ignored OBJ free-form curve/surface/connection attributes, validated/ignored OBJ display/render, texture-map library/use-map, render-object, approximation-technique, and merging-group attributes, positive and relative OBJ face indices, non-zero OBJ `vt` w diagnostics, trailing `#` inline comment stripping, OBJ/MTL backslash line continuation parsing, external material dependencies, standalone generated material/skeleton/animation payload diagnostics, local generated `depends=` dependencies with generated dependency list syntax diagnostics including typed dependency syntax and empty comma-entry diagnostics plus typed `mesh:`/`material:`/`skeleton:`/`animation:`/`physics_mesh:` target validation, material block generated mesh target metadata with unknown-label/non-mesh/repeated-field diagnostics, manifest generated mesh-to-material dependencies with unknown-label/type diagnostics, mesh block generated physics_mesh dependencies with unknown-label/non-physics-mesh diagnostics, generated mesh-to-skeleton skin dependencies with skeleton decode validation, duplicate-bone and explicit inverse-bind diagnostics, required skin joint/weight attributes, joint-range validation, declared skin joint and influence limit validation, duplicate active skin-joint validation, multi-root skin skeleton root-scope validation, skin root-bone subtree validation, and positive normalized skin-weight validation, typed generated dependency metadata, generated animation explicit skeleton target metadata, and track-shape/keyframe timing validation, generated path collision diagnostics, generated dependency id remapping across reimport, OBJ generated mesh-to-material dependencies, per-material mesh splitting for multi-material OBJ objects, loaded-MTL `usemtl` validation, OBJ UV/normal face tuple validation, `mtllib` provenance comments, resolved sidecar case-insensitive MTL base color/emissive/alpha/metallic/roughness properties including transparent `d`/`Tr` alpha-to-blend material state, `map_d`/`map_Tr`/`map_opacity`/`map_alpha`/`map_transparency` alpha texture-to-`alpha_mode=blend` material state, `d -halo` option case-insensitive dissolve-halo alpha/custom material state mapping, `sharpness` custom material property, `map_bump`/`map_Kn`/`map_normal` normal map alias mapping, `map_aat` texture antialias custom bool preservation with case-insensitive bool values, MTL `-colorspace` texture color-space metadata preservation, MTL `-imfchan` source-channel case-insensitive canonicalization including `a`/`alpha`, MTL `-type` projection case-insensitive canonicalization, and `map_Tf`/`map_Ni` transmission/IOR texture dependency mapping, plus `map_Ks -imfchan blue` specular source-channel preservation and `map_Ns -imfchan green` roughness source-channel preservation, Exocortex PBR scalar/texture material extension mapping, `map_RMA`/`map_ORM` packed PBR texture channel preservation, `map_MR`/`map_metallicroughness`/`map_metallic_roughness`/`map_roughnessmetallic`/`map_roughness_metallic`/`map_MRA`/`map_ARM` packed PBR texture alias preservation, `map_AO`/`map_Occlusion`/`map_ambient_occlusion` ambient-occlusion texture alias preservation, `Pr`/`roughness`, plus `Ka`/`Ks`/`Tf`/`Ni`/`illum` typed custom material properties, duplicate MTL material-name diagnostics, registry-backed case-insensitive common alpha/opacity texture aliases (`map_opacity`/`map_alpha`/`map_transparency`), descriptive PBR texture aliases (`map_diffuse`/`map_albedo`/`map_basecolor`/`map_base_color`/`map_specular`/`map_emissive`/`map_emission`/`map_roughness`/`map_metallic`/`map_metalness`/`map_normalgl`/`map_normaldx`), descriptive PBR scalar/color aliases (`diffuse`/`albedo`/`basecolor`/`base_color`/`ambient`/`ambient_color`/`specular`/`specular_color`/`emissive`/`emission`/`emissive_color`/`emission_color`/`opacity`/`alpha`/`transparency`/`transmission_filter`/`transmission_color`/`metalness`/`clear_coat`/`clearcoatroughness`/`clear_coat_roughness`/`anisotropyrotation`), packed PBR long-name texture aliases (`map_occlusionroughnessmetallic`/`map_occlusion_roughness_metallic`/`map_metallic_roughness`/`map_roughnessmetallic`/`map_roughness_metallic`), plus common and legacy MTL texture map dependencies including `map_Ns` roughness maps and `disp`/`decal`/`refl` displacement/decal/reflection maps with deterministic case-insensitive map option parsing/path extraction plus `-clamp` sampler-address with case-insensitive bool values, `-o`/`-s`/`t`/`-bm` transform/bump payload preservation, `-mm`/`-imfchan`/`-boost` color-remap/channel/boost payload preservation with case-insensitive source-channel values, and `-blendu`/`-blendv`/`-cc` case-insensitive bool payload preservation plus `-colorspace`/`-type`/`-texres` color-space/projection/resolution payload preservation with case-insensitive texture-map directive matching, texture option names, and projection values, and root-to-generated subresource dependency edges.
+- OBJ material binding now has focused `g`-group + `call` boundary coverage (`database_model_importer_preserves_obj_usemtl_across_group_call_boundaries`) asserting shared `usemtl` state remains active through an `NGA` include boundary so pre-call, included, and post-call meshes all retain the same generated material dependency and import metadata wiring.
 - ModelImporter animation dependency coverage records explicit `skeleton=`/`target_skeleton=` metadata and validates skeleton-dependent `track=bone:<BoneName>`, `track=node:<NodeName>`, and `track=node_index:<u32>` targets against generated skeleton bones plus generated animation track shape and keyframe times, with missing-bone/node, out-of-range node index, empty-track, duplicate-target, non-finite/negative/out-of-duration keyframe, unsorted keyframe, and standalone generated animation payload diagnostics at import time.
 - Feature flag baseline through explicit feature status/require helpers, default feature groups for filesystem/serde/bundle/hot-reload/streaming/editor/importers/cookers/zstd, cfg-gated serde derives for serialization-facing ids/paths/references/metadata, cfg-gated concrete built-in importer/cooker implementations and registration paths, cfg-gated zstd bundle codec support with visible disabled-codec diagnostics, cfg-pruned database bundle-build internals with a public `Unsupported` stub when `bundle` is disabled, cfg-pruned `AssetServer` bundle registry/reader state, hot-reload queue/watch state, and streaming region/residency state, visible disabled-feature errors for filesystem-backed IO, disabled bundle mount/registry operations, database bundle build, hot-reload queue/watch/poll/dependency planning, and streaming registration/lifecycle/progress entry points, and gate-aware feature tests for individual filesystem/bundle/hot-reload/streaming/editor/importer/cooker builds.
 - Loading feature policy and reusable async worker-pool baseline through `AssetLoadingPolicyReport`, `AssetAsyncWorkerPoolReport`, `validate_loading_policy`, fallible async/parallel config setters, disabled-feature `Unsupported` diagnostics for requested async/parallel capabilities, `WorkerAsync` mode reporting when `async_loading` is enabled, effective async worker counts from `parallel` worker settings, an `update_loading` dispatch budget that uses the stricter of IO and CPU per-frame limits, long-lived background worker IO/decode dispatch, result collection on later updates, worker reuse, idempotent explicit shutdown, in-flight cancellation, dependency/subresource metadata merge, and preserved GPU handoff/event semantics.
@@ -317,6 +318,14 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test error_model
 ```
 
 Result: 5 error-model tests passed, including `insert_loaded*` ready-state insertion, metadata/events/memory observability, unload-then-reinsert behavior, queued-state replacement rejection, `NotLoaded`, bundle parse/compression diagnostics, and displayable/comparable `AlreadyLoaded`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_face_outline_aliases_case_insensitively
+```
+
+Result: `Fo` face-outline alias parsing is now explicitly accepted as case-insensitive on `.obj` import. The generated outline mesh is persisted to sidecar, cooked into bundle output with manifest dependency-free behavior, mounted/preloaded from that bundle, and materialized through `AssetServer` runtime with expected vertex/index payload.
 
 Passed:
 
@@ -1267,6 +1276,14 @@ git diff --check
 ```
 
 Result: formatting passed; OBJ MTL `d`/`opacity`/`alpha` and `Tr`/`transparency` now reject non-finite or out-of-range alpha/transparency values outside `0..=1` instead of silently clamping them into a material state. The focused invalid-property database test covers both `d -halo 1.25` and `Tr -0.1` visible `ModelImporter` diagnostics with OBJ source path, MTL library/path, line number, and accepted range while preserving the existing valid alpha-to-`alpha_mode=blend` behavior. `ModelImporter::version()` is now 95. Full database passed 190 tests; full engine_asset default suite passed 376 tests across emitted test binaries; model_importer-only no-default check and feature-gate tests passed with one existing unused shader helper warning; whitespace check passed with only CRLF conversion warnings.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_library_property
+```
+
+Result: the same invalid material-library test now also proves case-insensitive `D -HALO` dissolution diagnostics. A `D -HALO 1.25` value now fails with the expected `d value` range diagnostic and the same line/path context handling as lowercase `d`, so case-only option-token changes are now explicitly covered.
 
 Passed:
 
@@ -2224,6 +2241,14 @@ Result: OBJ reflection texture projection coverage now includes the positive `re
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_reflection_projection_option_case
+```
+
+Result: `OBJ material library` reflection projection token handling now also has case-insensitive option-name evidence through `-TYPE`. Supplying `refl -TYPE cylinder ...` now reaches the same visible import diagnostic path as `-type`, reporting `refl option -TYPE value \`cylinder\`` with OBJ source-path context.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_reports_invalid_obj_material_texture_remap
 ```
 
@@ -2252,6 +2277,30 @@ C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_m
 ```
 
 Result: OBJ material texture antialiasing now has a stable positive regression for `map_aat ON`. A valid import keeps `custom.texture_antialias.bool=true`, preserves the resolved dependency path, and loads back as a runtime `Material` whose custom property is visible after bundle mount and runtime load.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_true_value
+```
+
+Result: OBJ material texture antialiasing now has stable case-insensitive bool-token coverage for `map_aAT TRUE`, preserving `custom.texture_antialias.bool=true` and the resolved dependency through bundle mount and runtime load.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_false_value
+```
+
+Result: OBJ material texture antialiasing now has stable case-insensitive bool-token coverage for `MAP_AAT false`, preserving `custom.texture_antialias.bool=false` and the resolved dependency through bundle mount and runtime load.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_preserves_obj_usemtl_across_group_call_boundaries -- --nocapture
+```
+
+Result: OBJ model-import coverage now proves `usemtl` state persists across a `g` group boundary and an intervening `call` include boundary, with pre-call, included, and post-call generated meshes retaining the same material dependency and bundle-readback wiring.
 
 Passed:
 
@@ -2512,7 +2561,261 @@ Result: the OBJ face-outline alias now has a positive regression. `Fo` face line
 Passed:
 
 ```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_face_outline_aliases_case_insensitively
+```
+
+Result: OBJ face-outline alias parsing now also accepts mixed-case `Fo` syntax as a case-insensitive `fo` alias, producing identical mesh payloads, dependency wiring, and cook/bundle/runtime behavior as the lower-case alias path.
+
+Passed:
+
+```text
 C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_accepts_obj_render_object_off_attributes
 ```
 
 Result: OBJ render-object off-state coverage now has a positive regression. `shadow_obj off` and `trace_obj off` are accepted as ignored render-object directives, including in nested `call` include sources, while `off extra` still trips the same arity diagnostics as other invalid values; the generated mesh still imports/cooks/bundles/preloads correctly so render-object handling is no longer only exercised through path-based validation cases.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_maps_obj_transparency_alias_to_alpha_mode -- --exact
+```
+
+Result: OBJ material alias `transparency` now has explicit alpha-mode equivalence coverage. A `newmtl Glass` entry with `transparency 0.4` in `OBJ` MTL is converted to `alpha_mode=blend` and preserves runtime `base_color` alpha as `0.6` in sidecar material text, bundle manifest bytes, and runtime-loaded `Material`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_maps_obj_alpha_alias_to_alpha_mode -- --exact
+```
+
+Result: OBJ material alias `alpha` continues to be covered in the same path; a `newmtl Glass` entry with `ALPHA 0.4` maps to `alpha_mode=blend` and preserved runtime `base_color` alpha `0.4` through sidecar conversion, bundle manifest, and runtime-loaded `Material`.
+
+Passed:
+
+```text
+C:\Users\JM\.cargo\bin\cargo.exe test -p engine_asset --test database database_model_importer_maps_obj_transparency_alias_case_insensitive -- --exact
+```
+
+Result: OBJ material alias `TRANSPARENCY` is now also covered as case-insensitive. A `newmtl Glass` entry with uppercase `TRANSPARENCY 0.4` maps to `alpha_mode=blend` and preserves runtime `base_color` alpha `0.6` through sidecar material text, bundle manifest bytes, and runtime-loaded `Material`.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset scene_document_accepts_structural_key_and_component_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset prefab_document_accepts_structural_key_and_component_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_scene_and_prefab_importers_preserve_runtime_documents_and_dependencies -- --exact
+```
+
+Result: Scene/Prefab runtime and editor-import document parsing now accepts production-style structural aliases while preserving original serialized component bytes and dependency wiring. Scene documents accept separator/case-insensitive keys such as `Scene Name`, `Game Object`, and `Cmp`, dependency aliases such as `References`, entity parent aliases such as `Parent Index`, component type aliases such as `Mesh Renderer` and `Physics Collider`, and asset-field aliases such as `physics-mesh`. Prefab documents accept matching `Root Entity`, `Child-Entity`, dependency, component, parent, skinned-renderer, and `collision-mesh` aliases. The database importer regression now uses the same alias forms, proving `SceneImporter` and `PrefabImporter` validate and register dependencies consistently with runtime loaders.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset accepts_structural_key_channel_and_target_aliases
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset skeleton_load_accepts_structural_key_and_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_animation_and_skeleton_importers_accept_document_aliases -- --exact
+```
+
+Result: Animation and skeleton document parsing now accepts production-style aliases through runtime loaders, editor importers, and cookers. Animation documents accept separator/case-insensitive keys such as `Length`, `Frame Rate`, `Channel`, `Position`, `Quaternion`, `Scaling`, `Location`, and `node-index` targets. Skeleton documents accept `Joint`, `Parent Index`, `Bind Pose`, `Local Bind Transform`, `Inverse Bind Pose`, and `Inv-Bind`. The database regression proves `AnimationImporter`/`SkeletonImporter` and `AnimationCooker`/`SkeletonCooker` validate those alias-bearing source documents, preserve original source payload bytes after source-header conversion, and produce runtime-loadable cooked outputs.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset physics_mesh_load_accepts_document_key_and_directive_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and_metadata -- --exact
+```
+
+Result: PhysicsMesh runtime parsing and source canonicalization now share production-style alias semantics. Runtime documents accept separator/case-insensitive keys and directives such as `Mesh Kind`, `triangle-mesh`, `Vertex`, `Position`, `point`, and `Face`; both key/value and directive runtime forms now accept comma- or whitespace-separated vertex/index triplets, matching importer/source conversion. Importer/source conversion accepts the same alias-bearing source bytes and canonicalizes them to deterministic runtime `kind=trimesh`, `v`, and `i` lines while preserving the existing metadata checks.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_accepts_document_key_and_glyph_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_canonicalizes_source_to_runtime_font_bytes -- --exact
+```
+
+Result: Font runtime parsing and source canonicalization now share production-style alias semantics. Runtime bitmap font documents accept separator/case-insensitive family/glyph keys and glyph field aliases such as `Family Name`, `Character`, `Code Point`, `Dimensions`, `Pixels`, and `Alpha`, with bitmap byte lists split by commas or whitespace. The database importer regression proves `FontImporter` canonicalizes alias-bearing `NGA_FONT_SOURCE_V1` bytes to stable `NGA_FONT_V1` output, cooks those bytes unchanged, and runtime-loads the resulting bitmap glyphs.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset invalid_font_payload_fails_with_decode_error_and_event -- --exact
+```
+
+Result: Runtime bitmap font validation now matches importer/source validation for duplicate authoring data. Repeated family declarations, including alias keys such as `Family Name`, fail with a visible decode error and failed event, and duplicate glyph codepoints across canonical or alias glyph declarations now fail instead of being silently accepted by runtime loading.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset invalid_physics_mesh_payload_fails_with_decode_error_and_event -- --exact
+```
+
+Result: Runtime PhysicsMesh loading now matches source-import validation for finite vertex values. Non-finite runtime vertex components such as `NaN` fail with a visible decode error and failed event instead of producing a ready physics mesh with invalid coordinates.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_physics_mesh_importer_reports_invalid_runtime_payload -- --exact
+```
+
+Result: `PhysicsMeshImporter` now validates runtime `NGA_PHYSICS_MESH_V1` pass-through bytes before generating imported output. Invalid runtime payloads, including non-finite vertex components, now fail during editor import with `PhysicsMeshImporter` and source-path context instead of being copied into imported artifacts for a later runtime failure.
+
+Passed:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_physics_mesh_cooker_reports_invalid_runtime_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_and_physics_mesh_cookers_pass_through_runtime_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_scene_prefab_and_physics_mesh_cookers_pass_through_runtime_and_source_bytes -- --exact
+```
+
+Result: `PhysicsMeshCooker` now validates runtime physics-mesh bytes before writing cooked output while preserving `VersionHash(1)` pass-through behavior for valid payloads. Invalid runtime bytes such as non-finite vertices now fail during cooking with a `PhysicsMeshCooker` validation diagnostic instead of being emitted as cooked artifacts.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_scene_and_prefab_cookers_report_invalid_runtime_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_scene_and_prefab_cookers_pass_through_runtime_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p engine_asset --no-default-features --features cookers
+
+Result: `SceneCooker` and `PrefabCooker` now validate runtime scene/prefab documents before writing cooked pass-through output while preserving `VersionHash(1)` behavior for valid payloads. Invalid scene component placement and prefab child-before-root payloads now fail during cooking with cooker-specific validation diagnostics instead of being emitted as cooked artifacts. The standalone `cookers` feature path still compiles without relying on importer-only validation helpers.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset cooker_feature_gates_match_registration_paths -- --exact
+
+Result: The enabled `cookers` feature smoke now covers scene/prefab validation failures through the public `AssetDatabase::cook_asset` path after built-in cooker registration. Invalid scene component placement and prefab child-before-root payloads fail with database-wrapped `SceneCooker` / `PrefabCooker` cook diagnostics, keeping feature-gate coverage aligned with the direct cooker regressions.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p engine_asset --no-default-features --features cookers
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_shader_importer_validates_entry_presence -- --exact
+
+Result: The shader source entry-definition helper is now cfg-pruned behind `shader_importer`, matching its only caller. The `--no-default-features --features cookers` build is warning-clean, while the focused shader importer entry-presence regression still proves the helper is compiled and exercised when `shader_importer` is enabled.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_preserves_obj_pbr_material_extension_long_aliases -- --exact
+
+Result: OBJ material texture-map directive matching now normalizes hyphens to underscores for known texture aliases, so `map_clear-coat-roughness` and `map_metallic-roughness` import through the same generated material, bundle, and runtime paths as underscore aliases.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_maps_obj_common_pbr_scalar_aliases -- --exact
+
+Result: OBJ/MTL directive matching now normalizes hyphens to underscores before scalar/color material dispatch. Hyphen-separated authoring aliases such as `base-color`, `ambient-color`, `specular-color`, `emissive-color`, `transmittance-color`, `clear-coat`, `clear-coat-roughness`, and `anisotropy-rotation` canonicalize to the same generated material text and runtime `Material` properties as their underscore aliases.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_parses_obj_roughness_extensions -- --exact
+
+Result: OBJ material texture-map option matching now ignores hyphen and underscore separators in option names while preserving original option text for diagnostics. The roughness extension regression now proves `-imf-chan` and `-color-space` canonicalize to the same source-channel and color-space metadata as `-imfchan` and `-colorspace` through generated material bytes, bundle readback, and runtime `Material` loading.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_parses_obj_roughness_extensions -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_preserves_obj_sharpness_and_bump_alias -- --exact
+
+Result: OBJ material texture-map option matching now accepts readable aliases for existing metadata fields: `-source-channel` maps to the `-imfchan` source-channel path, `-bump-scale` maps to the `-bm` bump-scale path, and the same parser also recognizes readable texture-resolution and color-remap aliases. Focused regressions prove the generated material text, bundle manifests/readback, runtime dependency graph, and runtime `Material` texture options preserve those aliases as canonical metadata.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_preserves_obj_material_texture_remap -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_preserves_obj_material_texture_resolution -- --exact
+
+Result: The readable OBJ material texture-map aliases now have dedicated bundle/runtime evidence for the remaining parser aliases: `-color-remap` preserves canonical `texture.<name>.color_remap` metadata, and `-texture-resolution` preserves canonical `texture.<name>.texture_resolution` metadata through generated material bytes, bundle readback, and runtime `Material` loading.
+
+Passed:
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_parses_obj_inline_comments -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_reports_invalid_obj_material_library_property -- --exact
+
+Result: OBJ material `Kd` / base-color parsing now accepts an optional fourth alpha component and validates it as a unit scalar. The inline-comment bundle/runtime regression proves `Kd 0.2 0.3 0.4 0.65` generates canonical `base_color=0.2,0.3,0.4,0.65` plus `alpha_mode=blend`, survives bundle readback, and runtime-loads into a transparent `Material`; the material-property diagnostic regression proves out-of-range Kd alpha fails with source-path and MTL context.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_converts_obj_xyz_material_colors -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_reports_invalid_obj_material_library_property -- --exact
+
+Result: The optional OBJ material `Kd` alpha path now also applies to supported `Kd xyz` color conversion. The XYZ material regression proves `Kd xyz 0.95047 1.0 1.08883 0.5` converts to canonical linear-sRGB `base_color=1.0000025,1.000076,0.99983454,0.5`, emits `alpha_mode=blend`, survives bundle readback, and runtime-loads as a transparent `Material`; the existing invalid-property regression remains green for the shared alpha diagnostic path.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_generates_obj_smoothing_group_normals -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_treats_obj_smoothing_off_case_insensitively -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_reports_invalid_obj_display_attributes -- --exact
+
+Result: OBJ smoothing-group parsing now requires positive numeric group labels or `off`/`0`. The smoothing success regressions still prove numeric `S 1` generates shared smoothing normals through import/cook/bundle/runtime and uppercase `S OFF` keeps flat normals; the display-attribute diagnostic table now also proves `s smooth` reports an invalid smoothing-group number and `s -1` reports a positive-or-off range error with model import context.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_reports_text_source_compression_requires_ogg_payload -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_allows_ogg_vorbis_compression_for_binary_source -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_allows_ogg_opus_compression_for_binary_source -- --exact
+
+Result: Audio importer compression diagnostics now distinguish binary Ogg preservation from unsupported text-source transcoding. Requesting `compression=vorbis` or `compression=opus` for `NGA_AUDIO_SOURCE_V1` now reports that a supported binary Ogg payload is required and text-source transcoding is not implemented, while the focused Vorbis and Opus binary-Ogg regressions still preserve imported and cooked codec bytes with `VersionHash(8)`.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_rejects_ogg_compression_codec_mismatch -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_allows_ogg_vorbis_compression_for_binary_source -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_importer_allows_ogg_opus_compression_for_binary_source -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset vorbis_ogg_audio_load_reaches_ready_as_streaming -- --exact
+
+Result: Binary Ogg compression imports now validate codec intent instead of only accepting any decodable Ogg container. The new mismatch regression rejects `compression=vorbis` on Opus payloads and `compression=opus` on Vorbis payloads with visible `AudioImporter` diagnostics naming both codecs, while the positive Vorbis/Opus import tests still preserve imported/cooked bytes with `VersionHash(8)` and the runtime Vorbis Ogg parser smoke still reaches ready streaming audio after the shared codec-detector refactor.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset invalid_animation_payload_fails_with_decode_error_and_event -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_model_importer_validates_animation_skeleton_targets -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_animation_and_skeleton_cookers_canonicalize_source_documents -- --exact
+
+Result: Animation runtime/source parsing now validates rotation keyframes as non-zero normalized quaternions. Runtime decode coverage rejects both zero-length and unnormalized quaternions with visible `AnimationLoader` decode events, generated model animation validation rejects an unnormalized rotation payload through `ModelImporter`, and `AnimationCooker` source-document validation now reports the same invariant before writing cooked bytes while the valid animation/skeleton import/cook/load path remains green.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_reaches_ready_without_renderer_upload -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_accepts_document_key_and_glyph_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_canonicalizes_source_to_runtime_font_bytes -- --exact
+
+Result: Bitmap font runtime loading now derives a deterministic CPU atlas from validated glyph bitmaps. Runtime regressions pin atlas dimensions, atlas pixels, and per-glyph atlas coordinates for both canonical and alias-bearing font documents while still producing no GPU upload commands, and the database importer/cooker regression proves alias-bearing `NGA_FONT_SOURCE_V1` bytes canonicalize to stable runtime bytes whose cooked/runtime-loaded `FontData::Bitmap` exposes the same atlas layout.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_reaches_ready_without_renderer_upload -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_accepts_document_key_and_glyph_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and_metadata -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_canonicalizes_source_to_runtime_font_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_builtin_font_import_cook_and_runtime_load_preserves_payload -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_builtin_binary_font_import_cook_and_runtime_loads -- --exact
+
+Result: Bitmap font documents now carry basic layout metrics in addition to atlas pixels. Runtime parsing accepts optional non-zero `line_height` plus per-glyph `advance` and `bearing` aliases, defaults legacy documents to max glyph height / glyph width / zero bearings, and exposes those values on `BitmapFont`/`BitmapGlyph` without adding GPU upload commands. `FontImporter` version is now 4 and canonicalizes metric-bearing `NGA_FONT_SOURCE_V1` documents to stable `NGA_FONT_V1` bytes while existing runtime/binary font pass-through import/cook/runtime-load paths remain green.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_accepts_document_key_and_glyph_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset invalid_font_payload_fails_with_decode_error_and_event -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_canonicalizes_source_to_runtime_font_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_reports_invalid_source_kerning -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and_metadata -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_builtin_font_import_cook_and_runtime_load_preserves_payload -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_builtin_binary_font_import_cook_and_runtime_loads -- --exact
+
+Result: Bitmap fonts now expose validated `BitmapKerningPair` data. Runtime documents accept separator/case-insensitive `kerning`/`kern` keys and left/right/adjustment aliases, reject missing-glyph references and duplicate pairs with visible loader failures, and preserve pair adjustments alongside atlas and glyph metrics. `FontImporter` version is now 5, sorts source kerning pairs deterministically, emits canonical runtime kerning lines, and reports the same missing-reference/duplicate-pair invariants before writing imported bytes while bitmap and binary pass-through import/cook/runtime-load paths remain green.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_load_accepts_document_key_and_glyph_field_aliases -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_font_importer_canonicalizes_source_to_runtime_font_bytes -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset font_
+
+Result: Bitmap font layout metadata now has a public execution path through `BitmapFont::layout_text`. Runtime-loaded and importer/cooker/runtime-loaded fonts both lay out `AB\nA` using glyph bearings, advances, the `AB` kerning adjustment, line height, and atlas coordinates, returning deterministic positioned glyphs plus advance width, total height, and line count. Missing codepoints return visible `AssetError::Decode` diagnostics, newline resets cross-line kerning, carriage returns are ignored for CRLF compatibility, and checked arithmetic reports layout overflow instead of wrapping. The broader `font_` filter passed 10 database tests and 5 runtime tests.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset heightfield_physics_mesh_load_reaches_ready_with_validated_grid_data -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset invalid_physics_mesh_payload_fails_with_decode_error_and_event -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_physics_mesh_importer_canonicalizes_heightfield_source -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset database_physics_mesh_importer_reports_invalid_heightfield_source -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset physics_mesh_
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke heightfield_asset_bridges_into_engine_physics
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke
+
+Result: PhysicsMesh heightfields now use explicit validated grid data instead of being treated as triangle meshes. Runtime and source documents accept rows/columns, scale, and one or more height sample lists; require backend-compatible minimum 2x2 dimensions, finite positive scale, finite heights, and exactly `rows * cols` samples; and reject vertex/triangle mixing or heightfield metadata on other mesh kinds. `PhysicsMeshImporter` version is now 3, canonicalizes aliases to stable heightfield runtime bytes, and `PhysicsMeshCooker` version 2 validates the cooked pass-through payload. The broader `physics_mesh_` filter passed 14 database tests and 4 runtime tests, including existing trimesh and model-generated physics mesh paths. `asset_smoke` converts the loaded grid to `engine_physics::HeightFieldDesc`, creates a real heightfield collider, verifies a ray hit, and passes all 5 workspace smoke tests.

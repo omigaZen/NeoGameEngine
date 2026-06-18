@@ -740,6 +740,7 @@ fn is_shader_identifier_char(character: char) -> bool {
     character == '_' || character.is_ascii_alphanumeric()
 }
 
+#[cfg(feature = "shader_importer")]
 fn shader_source_has_entry_definition(source: &str, entry: &str) -> bool {
     let lines = match shader_source_lines_without_comments(source) {
         Ok(lines) => lines,

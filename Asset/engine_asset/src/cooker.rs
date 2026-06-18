@@ -84,65 +84,6 @@ impl CookerRegistry {
     }
 }
 
-#[cfg(any(
-    feature = "texture_cooker",
-    feature = "model_cooker",
-    feature = "material_cooker",
-    feature = "audio_cooker",
-    feature = "shader_cooker",
-    feature = "cookers"
-))]
-macro_rules! define_passthrough_cooker {
-    ($name:ident, $asset:ty, $version:expr) => {
-        pub struct $name;
-
-        impl $name {
-            pub fn new() -> Self {
-                Self
-            }
-        }
-
-        impl Default for $name {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-
-        impl AssetCooker for $name {
-            fn name(&self) -> &'static str {
-                stringify!($name)
-            }
-
-            fn version(&self) -> u32 {
-                $version
-            }
-
-            fn asset_type(&self) -> AssetTypeId {
-                <$asset>::TYPE_ID
-            }
-
-            fn cook(
-                &self,
-                ctx: &CookContext,
-                metadata: &AssetMetadata,
-            ) -> Result<CookOutput, CookError> {
-                if ctx.source_bytes.is_empty() {
-                    return Err(CookError::Cook {
-                        message: format!("{} requires source bytes", self.name()),
-                    });
-                }
-                Ok(CookOutput {
-                    id: metadata.id,
-                    bytes: ctx.source_bytes.clone(),
-                    content_hash: ContentHash(crate::io::stable_hash(&ctx.source_bytes)),
-                    version_hash: VersionHash(self.version() as u64),
-                    metadata: metadata.clone(),
-                })
-            }
-        }
-    };
-}
-
 #[cfg(feature = "texture_cooker")]
 pub struct TextureCooker;
 
@@ -695,9 +636,321 @@ fn canonical_animation_cook_bytes(bytes: &[u8]) -> Result<Vec<u8>, CookError> {
 }
 
 #[cfg(feature = "cookers")]
-define_passthrough_cooker!(SceneCooker, SceneAsset, 1);
+pub struct SceneCooker;
+
 #[cfg(feature = "cookers")]
-define_passthrough_cooker!(PrefabCooker, Prefab, 1);
+impl SceneCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl Default for SceneCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl AssetCooker for SceneCooker {
+    fn name(&self) -> &'static str {
+        "SceneCooker"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        SceneAsset::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "SceneCooker requires source bytes".to_owned(),
+            });
+        }
+        validate_scene_cook_bytes(&ctx.source_bytes).map_err(|error| CookError::Cook {
+            message: format!("SceneCooker failed to validate scene source: {error}"),
+        })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: ctx.source_bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&ctx.source_bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
+
+#[cfg(feature = "cookers")]
+pub struct PrefabCooker;
+
+#[cfg(feature = "cookers")]
+impl PrefabCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl Default for PrefabCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl AssetCooker for PrefabCooker {
+    fn name(&self) -> &'static str {
+        "PrefabCooker"
+    }
+
+    fn version(&self) -> u32 {
+        1
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        Prefab::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "PrefabCooker requires source bytes".to_owned(),
+            });
+        }
+        validate_prefab_cook_bytes(&ctx.source_bytes).map_err(|error| CookError::Cook {
+            message: format!("PrefabCooker failed to validate prefab source: {error}"),
+        })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: ctx.source_bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&ctx.source_bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}
+
+#[cfg(feature = "cookers")]
+fn validate_scene_cook_bytes(bytes: &[u8]) -> Result<(), CookError> {
+    let source = std::str::from_utf8(bytes).map_err(|error| CookError::Decode {
+        message: format!("scene source must be UTF-8: {error}"),
+    })?;
+    let mut lines = source.lines();
+    let header = lines.next().unwrap_or("").trim();
+    if header != "NGA_SCENE_V1" {
+        return Err(CookError::Decode {
+            message: "scene source must start with NGA_SCENE_V1".to_owned(),
+        });
+    }
+
+    let mut name = None;
+    let mut entities = Vec::new();
+    let mut dependency_keys = Vec::new();
+    let mut current_entity = None;
+
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(CookError::Decode {
+                message: format!("invalid scene line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match crate::assets::scene::scene_prefab_document_key(key).as_str() {
+            "name" | "scenename" => {
+                if value.is_empty() {
+                    return Err(CookError::Decode {
+                        message: format!("scene name is empty on line {line_number}"),
+                    });
+                }
+                name = Some(value.to_owned());
+            }
+            key if crate::assets::scene::is_scene_prefab_dependency_key(key) => {
+                let path = AssetPath::parse(value);
+                let asset_type =
+                    crate::assets::scene::dependency_type_for_path(&path, line_number, "scene")?;
+                register_scene_prefab_cook_dependency(&mut dependency_keys, path, asset_type);
+            }
+            "entity" | "node" | "gameobject" => {
+                let entity =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "scene")?;
+                entities.push(entity);
+                current_entity = Some(entities.len() - 1);
+            }
+            "component" | "cmp" => {
+                let Some(entity_index) = current_entity else {
+                    return Err(CookError::Decode {
+                        message: format!("scene component on line {line_number} has no entity"),
+                    });
+                };
+                let component =
+                    crate::assets::scene::parse_serialized_component(value, line_number, "scene")?;
+                for (path, asset_type) in
+                    crate::assets::scene::serialized_component_asset_dependencies(
+                        &component,
+                        line_number,
+                        "scene",
+                    )?
+                {
+                    register_scene_prefab_cook_dependency(&mut dependency_keys, path, asset_type);
+                }
+                entities[entity_index].components.push(component);
+            }
+            _ => {
+                return Err(CookError::Decode {
+                    message: format!("unknown scene key `{key}` on line {line_number}"),
+                });
+            }
+        }
+    }
+
+    name.ok_or_else(|| CookError::Decode {
+        message: "scene source missing name".to_owned(),
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "cookers")]
+fn validate_prefab_cook_bytes(bytes: &[u8]) -> Result<(), CookError> {
+    let source = std::str::from_utf8(bytes).map_err(|error| CookError::Decode {
+        message: format!("prefab source must be UTF-8: {error}"),
+    })?;
+    let mut lines = source.lines();
+    let header = lines.next().unwrap_or("").trim();
+    if header != "NGA_PREFAB_V1" {
+        return Err(CookError::Decode {
+            message: "prefab source must start with NGA_PREFAB_V1".to_owned(),
+        });
+    }
+
+    #[derive(Clone, Copy)]
+    enum PrefabEntityTarget {
+        Root,
+        Child(usize),
+    }
+
+    let mut root = None;
+    let mut children = Vec::new();
+    let mut dependency_keys = Vec::new();
+    let mut current_entity = None;
+
+    for (line_index, line) in lines.enumerate() {
+        let line_number = line_index + 2;
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(CookError::Decode {
+                message: format!("invalid prefab line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match crate::assets::scene::scene_prefab_document_key(key).as_str() {
+            key if crate::assets::scene::is_scene_prefab_dependency_key(key) => {
+                let path = AssetPath::parse(value);
+                let asset_type =
+                    crate::assets::scene::dependency_type_for_path(&path, line_number, "prefab")?;
+                register_scene_prefab_cook_dependency(&mut dependency_keys, path, asset_type);
+            }
+            "root" | "rootentity" | "rootnode" => {
+                if root.is_some() {
+                    return Err(CookError::Decode {
+                        message: format!("duplicate prefab root on line {line_number}"),
+                    });
+                }
+                let root_entity =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "prefab")?;
+                if root_entity.parent.is_some() {
+                    return Err(CookError::Decode {
+                        message: format!("prefab root cannot have parent on line {line_number}"),
+                    });
+                }
+                root = Some(root_entity);
+                current_entity = Some(PrefabEntityTarget::Root);
+            }
+            "child" | "childentity" | "childnode" => {
+                if root.is_none() {
+                    return Err(CookError::Decode {
+                        message: format!("prefab child on line {line_number} has no root"),
+                    });
+                }
+                let child =
+                    crate::assets::scene::parse_serialized_entity(value, line_number, "prefab")?;
+                children.push(child);
+                current_entity = Some(PrefabEntityTarget::Child(children.len() - 1));
+            }
+            "component" | "cmp" => {
+                let component =
+                    crate::assets::scene::parse_serialized_component(value, line_number, "prefab")?;
+                for (path, asset_type) in
+                    crate::assets::scene::serialized_component_asset_dependencies(
+                        &component,
+                        line_number,
+                        "prefab",
+                    )?
+                {
+                    register_scene_prefab_cook_dependency(&mut dependency_keys, path, asset_type);
+                }
+                match current_entity {
+                    Some(PrefabEntityTarget::Root) => {
+                        if let Some(root) = root.as_mut() {
+                            root.components.push(component);
+                        }
+                    }
+                    Some(PrefabEntityTarget::Child(index)) => {
+                        children[index].components.push(component);
+                    }
+                    None => {
+                        return Err(CookError::Decode {
+                            message: format!(
+                                "prefab component on line {line_number} has no entity"
+                            ),
+                        });
+                    }
+                }
+            }
+            _ => {
+                return Err(CookError::Decode {
+                    message: format!("unknown prefab key `{key}` on line {line_number}"),
+                });
+            }
+        }
+    }
+
+    root.ok_or_else(|| CookError::Decode {
+        message: "prefab source missing root".to_owned(),
+    })?;
+    Ok(())
+}
+
+#[cfg(feature = "cookers")]
+fn register_scene_prefab_cook_dependency(
+    dependency_keys: &mut Vec<(AssetPath, AssetTypeId)>,
+    path: AssetPath,
+    asset_type: AssetTypeId,
+) {
+    if dependency_keys
+        .iter()
+        .any(|(existing_path, existing_type)| {
+            existing_path == &path && *existing_type == asset_type
+        })
+    {
+        return;
+    }
+    dependency_keys.push((path, asset_type));
+}
 #[cfg(feature = "cookers")]
 pub struct FontCooker;
 
@@ -759,4 +1012,55 @@ impl AssetCooker for FontCooker {
 }
 
 #[cfg(feature = "cookers")]
-define_passthrough_cooker!(PhysicsMeshCooker, PhysicsMesh, 1);
+pub struct PhysicsMeshCooker;
+
+#[cfg(feature = "cookers")]
+impl PhysicsMeshCooker {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl Default for PhysicsMeshCooker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "cookers")]
+impl AssetCooker for PhysicsMeshCooker {
+    fn name(&self) -> &'static str {
+        "PhysicsMeshCooker"
+    }
+
+    fn version(&self) -> u32 {
+        2
+    }
+
+    fn asset_type(&self) -> AssetTypeId {
+        PhysicsMesh::TYPE_ID
+    }
+
+    fn cook(&self, ctx: &CookContext, metadata: &AssetMetadata) -> Result<CookOutput, CookError> {
+        if ctx.source_bytes.is_empty() {
+            return Err(CookError::Cook {
+                message: "PhysicsMeshCooker requires source bytes".to_owned(),
+            });
+        }
+        crate::assets::physics_mesh::parse_physics_mesh(&ctx.source_bytes).map_err(|error| {
+            CookError::Cook {
+                message: format!(
+                    "PhysicsMeshCooker failed to validate physics mesh source: {error}"
+                ),
+            }
+        })?;
+        Ok(CookOutput {
+            id: metadata.id,
+            bytes: ctx.source_bytes.clone(),
+            content_hash: ContentHash(crate::io::stable_hash(&ctx.source_bytes)),
+            version_hash: VersionHash(self.version() as u64),
+            metadata: metadata.clone(),
+        })
+    }
+}

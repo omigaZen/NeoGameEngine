@@ -1110,7 +1110,7 @@ impl AssetImporter for FontImporter {
     }
 
     fn version(&self) -> u32 {
-        3
+        5
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -1174,7 +1174,18 @@ struct CanonicalFontGlyph {
     codepoint: char,
     width: u32,
     height: u32,
+    advance_x: Option<i32>,
+    bearing_x: Option<i32>,
+    bearing_y: Option<i32>,
     bitmap: Vec<u8>,
+}
+
+#[cfg(feature = "importers")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CanonicalFontKerningPair {
+    left: char,
+    right: char,
+    adjustment: i32,
 }
 
 #[cfg(feature = "importers")]
@@ -1186,7 +1197,9 @@ fn canonical_font_source(source_text: &str) -> Result<String, ImportError> {
         });
     }
     let mut family_name = None;
+    let mut line_height = None;
     let mut glyphs = Vec::new();
+    let mut kerning_pairs = Vec::new();
     for (line_index, line) in lines.enumerate() {
         let line_number = line_index + 2;
         let line = line.trim();
@@ -1198,8 +1211,9 @@ fn canonical_font_source(source_text: &str) -> Result<String, ImportError> {
                 message: format!("invalid font source line {line_number}"),
             });
         };
-        match key.trim() {
-            "family" => {
+        let key = key.trim();
+        match crate::assets::font::font_document_key(key).as_str() {
+            "family" | "familyname" | "fontfamily" | "name" => {
                 if family_name.is_some() {
                     return Err(AssetError::Import {
                         message: format!("font source repeats family on line {line_number}"),
@@ -1213,10 +1227,27 @@ fn canonical_font_source(source_text: &str) -> Result<String, ImportError> {
                 }
                 family_name = Some(value.to_owned());
             }
-            "glyph" => glyphs.push(parse_font_source_glyph(value.trim(), line_number)?),
-            other => {
+            "lineheight" | "height" => {
+                if line_height.is_some() {
+                    return Err(AssetError::Import {
+                        message: format!("font source repeats line height on line {line_number}"),
+                    });
+                }
+                line_height = Some(parse_font_source_positive_u32(
+                    value.trim(),
+                    line_number,
+                    "font source line height",
+                )?);
+            }
+            "glyph" | "character" | "char" => {
+                glyphs.push(parse_font_source_glyph(value.trim(), line_number)?)
+            }
+            "kerning" | "kern" | "kerningpair" => {
+                kerning_pairs.push(parse_font_source_kerning(value.trim(), line_number)?)
+            }
+            _ => {
                 return Err(AssetError::Import {
-                    message: format!("unknown font source key `{other}` on line {line_number}"),
+                    message: format!("unknown font source key `{key}` on line {line_number}"),
                 })
             }
         }
@@ -1237,8 +1268,41 @@ fn canonical_font_source(source_text: &str) -> Result<String, ImportError> {
             });
         }
     }
+    kerning_pairs.sort_by_key(|pair| (pair.left, pair.right));
+    for (pair_index, pair) in kerning_pairs.iter().enumerate() {
+        if !glyphs.iter().any(|glyph| glyph.codepoint == pair.left) {
+            return Err(AssetError::Import {
+                message: format!(
+                    "font source kerning pair {} references missing left glyph `{}`",
+                    pair_index, pair.left
+                ),
+            });
+        }
+        if !glyphs.iter().any(|glyph| glyph.codepoint == pair.right) {
+            return Err(AssetError::Import {
+                message: format!(
+                    "font source kerning pair {} references missing right glyph `{}`",
+                    pair_index, pair.right
+                ),
+            });
+        }
+        if pair_index > 0
+            && kerning_pairs[pair_index - 1].left == pair.left
+            && kerning_pairs[pair_index - 1].right == pair.right
+        {
+            return Err(AssetError::Import {
+                message: format!(
+                    "font source repeats kerning pair `{}{}`",
+                    pair.left, pair.right
+                ),
+            });
+        }
+    }
 
     let mut canonical = format!("NGA_FONT_V1\nfamily={family_name}\n");
+    if let Some(line_height) = line_height {
+        canonical.push_str(&format!("line_height={line_height}\n"));
+    }
     for glyph in glyphs {
         let bitmap = glyph
             .bitmap
@@ -1246,9 +1310,27 @@ fn canonical_font_source(source_text: &str) -> Result<String, ImportError> {
             .map(u8::to_string)
             .collect::<Vec<_>>()
             .join(",");
-        canonical.push_str(&format!(
-            "glyph=char={};size={}x{};bitmap={bitmap}\n",
+        let mut fields = format!(
+            "char={};size={}x{}",
             glyph.codepoint, glyph.width, glyph.height
+        );
+        if let Some(advance_x) = glyph.advance_x {
+            fields.push_str(&format!(";advance={advance_x}"));
+        }
+        if glyph.bearing_x.is_some() || glyph.bearing_y.is_some() {
+            fields.push_str(&format!(
+                ";bearing={},{}",
+                glyph.bearing_x.unwrap_or(0),
+                glyph.bearing_y.unwrap_or(0)
+            ));
+        }
+        fields.push_str(&format!(";bitmap={bitmap}"));
+        canonical.push_str(&format!("glyph={fields}\n"));
+    }
+    for pair in kerning_pairs {
+        canonical.push_str(&format!(
+            "kerning=left={};right={};adjust={}\n",
+            pair.left, pair.right, pair.adjustment
         ));
     }
     Ok(canonical)
@@ -1262,6 +1344,9 @@ fn parse_font_source_glyph(
     let mut codepoint = None;
     let mut size = None;
     let mut bitmap = None;
+    let mut advance_x = None;
+    let mut bearing_x = None;
+    let mut bearing_y = None;
     for part in value
         .split(';')
         .map(str::trim)
@@ -1272,31 +1357,53 @@ fn parse_font_source_glyph(
                 message: format!("invalid font source glyph field on line {line_number}"),
             });
         };
-        match (key.trim(), value.trim()) {
-            ("char", value) => {
-                let mut chars = value.chars();
-                let Some(character) = chars.next() else {
-                    return Err(AssetError::Import {
-                        message: format!("font source glyph char is empty on line {line_number}"),
-                    });
-                };
-                if chars.next().is_some() {
-                    return Err(AssetError::Import {
-                        message: format!(
-                            "font source glyph char must be one scalar on line {line_number}"
-                        ),
-                    });
-                }
-                codepoint = Some(character);
+        let key = key.trim();
+        let value = value.trim();
+        match crate::assets::font::font_document_key(key).as_str() {
+            "char" | "character" | "codepoint" | "code" => {
+                codepoint = Some(parse_font_source_scalar(
+                    value,
+                    line_number,
+                    "font source glyph char",
+                )?);
             }
-            ("size", value) => size = Some(parse_font_source_glyph_size(value, line_number)?),
-            ("bitmap", value) => {
+            "size" | "dimensions" | "dim" => {
+                size = Some(parse_font_source_glyph_size(value, line_number)?)
+            }
+            "bitmap" | "pixels" | "alpha" => {
                 bitmap = Some(parse_font_source_bitmap(value, line_number)?);
             }
-            (other, _) => {
+            "advance" | "advancex" => {
+                advance_x = Some(parse_font_source_i32(
+                    value,
+                    line_number,
+                    "font source glyph advance",
+                )?)
+            }
+            "bearing" | "offset" => {
+                let (x, y) =
+                    parse_font_source_i32_pair(value, line_number, "font source glyph bearing")?;
+                bearing_x = Some(x);
+                bearing_y = Some(y);
+            }
+            "bearingx" | "offsetx" => {
+                bearing_x = Some(parse_font_source_i32(
+                    value,
+                    line_number,
+                    "font source glyph bearing x",
+                )?)
+            }
+            "bearingy" | "offsety" => {
+                bearing_y = Some(parse_font_source_i32(
+                    value,
+                    line_number,
+                    "font source glyph bearing y",
+                )?)
+            }
+            _ => {
                 return Err(AssetError::Import {
                     message: format!(
-                        "unknown font source glyph field `{other}` on line {line_number}"
+                        "unknown font source glyph field `{key}` on line {line_number}"
                     ),
                 })
             }
@@ -1328,8 +1435,112 @@ fn parse_font_source_glyph(
         codepoint,
         width,
         height,
+        advance_x,
+        bearing_x,
+        bearing_y,
         bitmap,
     })
+}
+
+#[cfg(feature = "importers")]
+fn parse_font_source_kerning(
+    value: &str,
+    line_number: usize,
+) -> Result<CanonicalFontKerningPair, ImportError> {
+    let mut left = None;
+    let mut right = None;
+    let mut adjustment = None;
+    for part in value
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let Some((key, value)) = part.split_once('=') else {
+            return Err(AssetError::Import {
+                message: format!("invalid font source kerning field on line {line_number}"),
+            });
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match crate::assets::font::font_document_key(key).as_str() {
+            "left" | "first" => {
+                left = Some(parse_font_source_scalar(
+                    value,
+                    line_number,
+                    "font source kerning left glyph",
+                )?)
+            }
+            "right" | "second" => {
+                right = Some(parse_font_source_scalar(
+                    value,
+                    line_number,
+                    "font source kerning right glyph",
+                )?)
+            }
+            "adjust" | "adjustment" | "amount" | "offset" => {
+                adjustment = Some(parse_font_source_i32(
+                    value,
+                    line_number,
+                    "font source kerning adjustment",
+                )?)
+            }
+            _ => {
+                return Err(AssetError::Import {
+                    message: format!(
+                        "unknown font source kerning field `{key}` on line {line_number}"
+                    ),
+                })
+            }
+        }
+    }
+    Ok(CanonicalFontKerningPair {
+        left: left.ok_or_else(|| AssetError::Import {
+            message: format!("font source kerning pair missing left glyph on line {line_number}"),
+        })?,
+        right: right.ok_or_else(|| AssetError::Import {
+            message: format!("font source kerning pair missing right glyph on line {line_number}"),
+        })?,
+        adjustment: adjustment.ok_or_else(|| AssetError::Import {
+            message: format!("font source kerning pair missing adjustment on line {line_number}"),
+        })?,
+    })
+}
+
+#[cfg(feature = "importers")]
+fn parse_font_source_scalar(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<char, ImportError> {
+    let mut chars = value.chars();
+    let Some(character) = chars.next() else {
+        return Err(AssetError::Import {
+            message: format!("{field} is empty on line {line_number}"),
+        });
+    };
+    if chars.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("{field} must be one scalar on line {line_number}"),
+        });
+    }
+    Ok(character)
+}
+
+#[cfg(feature = "importers")]
+fn parse_font_source_positive_u32(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<u32, ImportError> {
+    let parsed = value.parse::<u32>().map_err(|error| AssetError::Import {
+        message: format!("invalid {field} on line {line_number}: {error}"),
+    })?;
+    if parsed == 0 {
+        return Err(AssetError::Import {
+            message: format!("{field} must be non-zero on line {line_number}"),
+        });
+    }
+    Ok(parsed)
 }
 
 #[cfg(feature = "importers")]
@@ -1363,14 +1574,51 @@ fn parse_font_source_glyph_size(
 }
 
 #[cfg(feature = "importers")]
+fn parse_font_source_i32(value: &str, line_number: usize, field: &str) -> Result<i32, ImportError> {
+    value.parse::<i32>().map_err(|error| AssetError::Import {
+        message: format!("invalid {field} on line {line_number}: {error}"),
+    })
+}
+
+#[cfg(feature = "importers")]
+fn parse_font_source_i32_pair(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<(i32, i32), ImportError> {
+    let normalized = value.replace(',', " ");
+    let mut parts = normalized.split_whitespace();
+    let Some(x) = parts.next() else {
+        return Err(AssetError::Import {
+            message: format!("invalid {field} on line {line_number}"),
+        });
+    };
+    let Some(y) = parts.next() else {
+        return Err(AssetError::Import {
+            message: format!("invalid {field} on line {line_number}"),
+        });
+    };
+    if parts.next().is_some() {
+        return Err(AssetError::Import {
+            message: format!("invalid {field} on line {line_number}"),
+        });
+    }
+    Ok((
+        parse_font_source_i32(x, line_number, field)?,
+        parse_font_source_i32(y, line_number, field)?,
+    ))
+}
+
+#[cfg(feature = "importers")]
 fn parse_font_source_bitmap(value: &str, line_number: usize) -> Result<Vec<u8>, ImportError> {
     if value.trim().is_empty() {
         return Err(AssetError::Import {
             message: format!("font source glyph bitmap is empty on line {line_number}"),
         });
     }
-    value
-        .split(',')
+    let normalized = value.replace(',', " ");
+    normalized
+        .split_whitespace()
         .map(str::trim)
         .map(|part| {
             part.parse::<u8>().map_err(|error| AssetError::Import {
@@ -1406,7 +1654,7 @@ impl AssetImporter for PhysicsMeshImporter {
     }
 
     fn version(&self) -> u32 {
-        2
+        3
     }
 
     fn extensions(&self) -> &[&'static str] {
@@ -1451,6 +1699,11 @@ impl AssetImporter for PhysicsMeshImporter {
 #[cfg(feature = "importers")]
 fn import_physics_mesh_bytes(source: &SourceAsset) -> Result<Vec<u8>, ImportError> {
     if !source.bytes.starts_with(b"NGA_PHYSICS_MESH_SOURCE_V1") {
+        crate::assets::physics_mesh::parse_physics_mesh(&source.bytes).map_err(|error| {
+            AssetError::Import {
+                message: format!("physics mesh source is invalid: {error}"),
+            }
+        })?;
         return Ok(source.bytes.clone());
     }
     let text = std::str::from_utf8(&source.bytes).map_err(|error| AssetError::Import {
@@ -1489,6 +1742,10 @@ fn canonical_physics_mesh_source(source_text: &str) -> Result<String, ImportErro
     let mut kind = None;
     let mut vertices = Vec::new();
     let mut indices = Vec::new();
+    let mut height_rows = None;
+    let mut height_cols = None;
+    let mut height_scale = None;
+    let mut heights = Vec::new();
     for (line_index, line) in lines.enumerate() {
         let line_number = line_index + 2;
         let line = line.trim();
@@ -1496,20 +1753,49 @@ fn canonical_physics_mesh_source(source_text: &str) -> Result<String, ImportErro
             continue;
         }
         if let Some((key, value)) = line.split_once('=') {
-            match key.trim() {
-                "kind" => {
+            let key = key.trim();
+            match crate::assets::physics_mesh::physics_mesh_document_key(key).as_str() {
+                "kind" | "type" | "meshkind" | "collisionkind" => {
                     kind = Some(parse_physics_mesh_source_kind(value.trim(), line_number)?);
                 }
-                "vertex" | "v" => {
+                "vertex" | "position" | "point" | "v" => {
                     vertices.push(parse_physics_mesh_source_vertex(value.trim(), line_number)?);
                 }
-                "triangle" | "i" => {
+                "triangle" | "index" | "indices" | "face" | "i" => {
                     indices.push(parse_physics_mesh_source_index(value.trim(), line_number)?);
                 }
-                other => {
+                "rows" | "rowcount" => {
+                    height_rows = Some(parse_physics_mesh_source_heightfield_dimension(
+                        value.trim(),
+                        line_number,
+                        "rows",
+                    )?)
+                }
+                "cols" | "columns" | "columncount" => {
+                    height_cols = Some(parse_physics_mesh_source_heightfield_dimension(
+                        value.trim(),
+                        line_number,
+                        "cols",
+                    )?)
+                }
+                "scale" | "cellscale" => {
+                    height_scale = Some(parse_physics_mesh_source_positive_triplet(
+                        value.trim(),
+                        line_number,
+                        "heightfield scale",
+                    )?)
+                }
+                "heights" | "samples" | "heightvalues" => {
+                    heights.extend(parse_physics_mesh_source_f32_list(
+                        value.trim(),
+                        line_number,
+                        "heightfield height",
+                    )?)
+                }
+                _ => {
                     return Err(AssetError::Import {
                         message: format!(
-                            "unknown physics mesh source key `{other}` on line {line_number}"
+                            "unknown physics mesh source key `{key}` on line {line_number}"
                         ),
                     })
                 }
@@ -1520,13 +1806,20 @@ fn canonical_physics_mesh_source(source_text: &str) -> Result<String, ImportErro
         let mut parts = line.splitn(2, char::is_whitespace);
         let directive = parts.next().unwrap_or("");
         let value = parts.next().unwrap_or("").trim();
-        match directive {
-            "v" => vertices.push(parse_physics_mesh_source_vertex(value, line_number)?),
-            "i" => indices.push(parse_physics_mesh_source_index(value, line_number)?),
-            other => {
+        match crate::assets::physics_mesh::physics_mesh_document_key(directive).as_str() {
+            "v" | "vertex" | "position" | "point" => {
+                vertices.push(parse_physics_mesh_source_vertex(value, line_number)?)
+            }
+            "i" | "triangle" | "index" | "indices" | "face" => {
+                indices.push(parse_physics_mesh_source_index(value, line_number)?)
+            }
+            "heights" | "samples" | "heightvalues" => heights.extend(
+                parse_physics_mesh_source_f32_list(value, line_number, "heightfield height")?,
+            ),
+            _ => {
                 return Err(AssetError::Import {
                     message: format!(
-                        "unknown physics mesh source directive `{other}` on line {line_number}"
+                        "unknown physics mesh source directive `{directive}` on line {line_number}"
                     ),
                 })
             }
@@ -1535,6 +1828,65 @@ fn canonical_physics_mesh_source(source_text: &str) -> Result<String, ImportErro
     let kind = kind.ok_or_else(|| AssetError::Import {
         message: "physics mesh source missing kind".to_owned(),
     })?;
+    if kind == CanonicalPhysicsMeshKind::HeightField {
+        if !vertices.is_empty() || !indices.is_empty() {
+            return Err(AssetError::Import {
+                message: "heightfield physics mesh source cannot contain vertices or triangles"
+                    .to_owned(),
+            });
+        }
+        let rows = height_rows.ok_or_else(|| AssetError::Import {
+            message: "heightfield physics mesh source missing rows".to_owned(),
+        })?;
+        let cols = height_cols.ok_or_else(|| AssetError::Import {
+            message: "heightfield physics mesh source missing cols".to_owned(),
+        })?;
+        let scale = height_scale.ok_or_else(|| AssetError::Import {
+            message: "heightfield physics mesh source missing scale".to_owned(),
+        })?;
+        let expected =
+            (rows as usize)
+                .checked_mul(cols as usize)
+                .ok_or_else(|| AssetError::Import {
+                    message: "heightfield physics mesh source dimensions overflow".to_owned(),
+                })?;
+        if heights.len() != expected {
+            return Err(AssetError::Import {
+                message: format!(
+                    "heightfield physics mesh source has {} heights, expected {expected} for {rows}x{cols}",
+                    heights.len()
+                ),
+            });
+        }
+
+        let mut canonical = format!(
+            "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows={rows}\ncols={cols}\nscale={} {} {}\n",
+            canonical_physics_mesh_f32(scale[0]),
+            canonical_physics_mesh_f32(scale[1]),
+            canonical_physics_mesh_f32(scale[2])
+        );
+        canonical.push_str("heights=");
+        canonical.push_str(
+            &heights
+                .iter()
+                .map(|value| canonical_physics_mesh_f32(*value))
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        canonical.push('\n');
+        return Ok(canonical);
+    }
+
+    if height_rows.is_some()
+        || height_cols.is_some()
+        || height_scale.is_some()
+        || !heights.is_empty()
+    {
+        return Err(AssetError::Import {
+            message: "non-heightfield physics mesh source cannot contain heightfield metadata"
+                .to_owned(),
+        });
+    }
     if vertices.is_empty() {
         return Err(AssetError::Import {
             message: "physics mesh source must contain at least one vertex".to_owned(),
@@ -1581,12 +1933,12 @@ fn parse_physics_mesh_source_kind(
     value: &str,
     line_number: usize,
 ) -> Result<CanonicalPhysicsMeshKind, ImportError> {
-    match value {
-        "trimesh" | "tri_mesh" => Ok(CanonicalPhysicsMeshKind::TriMesh),
-        "convex" | "convex_hull" => Ok(CanonicalPhysicsMeshKind::ConvexHull),
-        "heightfield" | "height_field" => Ok(CanonicalPhysicsMeshKind::HeightField),
-        other => Err(AssetError::Import {
-            message: format!("unknown physics mesh source kind `{other}` on line {line_number}"),
+    match crate::assets::physics_mesh::physics_mesh_document_key(value).as_str() {
+        "trimesh" | "trianglemesh" => Ok(CanonicalPhysicsMeshKind::TriMesh),
+        "convex" | "convexhull" => Ok(CanonicalPhysicsMeshKind::ConvexHull),
+        "heightfield" => Ok(CanonicalPhysicsMeshKind::HeightField),
+        _ => Err(AssetError::Import {
+            message: format!("unknown physics mesh source kind `{value}` on line {line_number}"),
         }),
     }
 }
@@ -1625,6 +1977,67 @@ fn parse_physics_mesh_source_vertex(
         });
     }
     Ok(values)
+}
+
+#[cfg(feature = "importers")]
+fn parse_physics_mesh_source_positive_triplet(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<[f32; 3], ImportError> {
+    let values = parse_physics_mesh_source_vertex(value, line_number)?;
+    if values.iter().any(|value| *value <= 0.0) {
+        return Err(AssetError::Import {
+            message: format!("{field} values must be positive on line {line_number}"),
+        });
+    }
+    Ok(values)
+}
+
+#[cfg(feature = "importers")]
+fn parse_physics_mesh_source_f32_list(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<Vec<f32>, ImportError> {
+    let normalized = value.replace(',', " ");
+    let values = normalized
+        .split_whitespace()
+        .map(|part| {
+            let value = part.parse::<f32>().map_err(|error| AssetError::Import {
+                message: format!("invalid {field} value on line {line_number}: {error}"),
+            })?;
+            if !value.is_finite() {
+                return Err(AssetError::Import {
+                    message: format!("{field} value must be finite on line {line_number}"),
+                });
+            }
+            Ok(value)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if values.is_empty() {
+        return Err(AssetError::Import {
+            message: format!("{field} list is empty on line {line_number}"),
+        });
+    }
+    Ok(values)
+}
+
+#[cfg(feature = "importers")]
+fn parse_physics_mesh_source_heightfield_dimension(
+    value: &str,
+    line_number: usize,
+    field: &str,
+) -> Result<u32, ImportError> {
+    let value = value.parse::<u32>().map_err(|error| AssetError::Import {
+        message: format!("invalid heightfield {field} on line {line_number}: {error}"),
+    })?;
+    if value < 2 {
+        return Err(AssetError::Import {
+            message: format!("heightfield {field} must be at least 2 on line {line_number}"),
+        });
+    }
+    Ok(value)
 }
 
 #[cfg(feature = "importers")]
@@ -1823,13 +2236,14 @@ fn import_audio_bytes(
         match options.compression {
             Some(AudioCompression::None) | None => {}
             Some(AudioCompression::Vorbis) | Some(AudioCompression::Opus) => {
+                let compression = options
+                    .compression
+                    .expect("compression already validated as vorbis/opus");
                 if !source.bytes.starts_with(b"OggS") {
                     return Err(AssetError::Import {
                         message: format!(
                             "audio source is not a supported Ogg payload for `compression`={:?}",
-                            options
-                                .compression
-                                .expect("compression already validated as vorbis/opus"),
+                            compression,
                         ),
                     });
                 }
@@ -1837,12 +2251,35 @@ fn import_audio_bytes(
                     |error| AssetError::Import {
                         message: format!(
                             "audio source is not a supported Ogg payload for `compression`={:?}: {error}",
-                            options
-                                .compression
-                                .expect("compression already validated as vorbis/opus"),
+                            compression,
                         ),
                     },
                 )?;
+                let codec =
+                    crate::assets::audio::ogg_audio_codec(&source.bytes).map_err(|error| {
+                        AssetError::Import {
+                            message: format!(
+                                "audio source is not a supported Ogg payload for `compression`={:?}: {error}",
+                                compression
+                            ),
+                        }
+                    })?;
+                let expected_codec = match compression {
+                    AudioCompression::Vorbis => crate::assets::audio::OggAudioCodec::Vorbis,
+                    AudioCompression::Opus => crate::assets::audio::OggAudioCodec::Opus,
+                    AudioCompression::None => {
+                        unreachable!("compression already matched as vorbis/opus")
+                    }
+                };
+                if codec != expected_codec {
+                    return Err(AssetError::Import {
+                        message: format!(
+                            "audio Ogg payload codec `{}` does not match import compression `{}`",
+                            ogg_audio_codec_name(codec),
+                            audio_compression_name(compression)
+                        ),
+                    });
+                }
             }
         }
         return Ok(source.bytes.clone());
@@ -1851,6 +2288,23 @@ fn import_audio_bytes(
         message: format!("audio source must be UTF-8: {error}"),
     })?;
     canonical_audio_source(text, options).map(String::into_bytes)
+}
+
+#[cfg(feature = "audio_importer")]
+fn audio_compression_name(compression: AudioCompression) -> &'static str {
+    match compression {
+        AudioCompression::None => "none",
+        AudioCompression::Vorbis => "vorbis",
+        AudioCompression::Opus => "opus",
+    }
+}
+
+#[cfg(feature = "audio_importer")]
+fn ogg_audio_codec_name(codec: crate::assets::audio::OggAudioCodec) -> &'static str {
+    match codec {
+        crate::assets::audio::OggAudioCodec::Vorbis => "vorbis",
+        crate::assets::audio::OggAudioCodec::Opus => "opus",
+    }
 }
 
 #[cfg(feature = "audio_importer")]
@@ -1916,13 +2370,12 @@ fn canonical_audio_source(
         AudioCompression::None => {}
         AudioCompression::Vorbis => {
             return Err(AssetError::Import {
-                message: "unsupported audio import compression `vorbis`; expected `none`"
-                    .to_owned(),
+                message: "audio import compression `vorbis` requires a supported binary Ogg payload; text-source transcoding is not implemented".to_owned(),
             })
         }
         AudioCompression::Opus => {
             return Err(AssetError::Import {
-                message: "unsupported audio import compression `opus`; expected `none`".to_owned(),
+                message: "audio import compression `opus` requires a supported binary Ogg payload; text-source transcoding is not implemented".to_owned(),
             })
         }
     }
@@ -2504,8 +2957,8 @@ where
         };
         let key = key.trim();
         let value = value.trim();
-        match key {
-            "name" => {
+        match crate::assets::scene::scene_prefab_document_key(key).as_str() {
+            "name" | "scenename" => {
                 if value.is_empty() {
                     return Err(AssetError::Import {
                         message: format!("scene name is empty on line {line_number}"),
@@ -2513,7 +2966,7 @@ where
                 }
                 name = Some(value.to_owned());
             }
-            "dependency" => {
+            key if crate::assets::scene::is_scene_prefab_dependency_key(key) => {
                 let path = AssetPath::parse(value);
                 let asset_type =
                     crate::assets::scene::dependency_type_for_path(&path, line_number, "scene")?;
@@ -2524,13 +2977,13 @@ where
                     &mut on_dependency,
                 )?;
             }
-            "entity" => {
+            "entity" | "node" | "gameobject" => {
                 let entity =
                     crate::assets::scene::parse_serialized_entity(value, line_number, "scene")?;
                 entities.push(entity);
                 current_entity = Some(entities.len() - 1);
             }
-            "component" => {
+            "component" | "cmp" => {
                 let Some(entity_index) = current_entity else {
                     return Err(AssetError::Import {
                         message: format!("scene component on line {line_number} has no entity"),
@@ -2554,9 +3007,9 @@ where
                 }
                 entities[entity_index].components.push(component);
             }
-            other => {
+            _ => {
                 return Err(AssetError::Import {
-                    message: format!("unknown scene key `{other}` on line {line_number}"),
+                    message: format!("unknown scene key `{key}` on line {line_number}"),
                 });
             }
         }
@@ -2611,8 +3064,8 @@ where
         };
         let key = key.trim();
         let value = value.trim();
-        match key {
-            "dependency" => {
+        match crate::assets::scene::scene_prefab_document_key(key).as_str() {
+            key if crate::assets::scene::is_scene_prefab_dependency_key(key) => {
                 let path = AssetPath::parse(value);
                 let asset_type =
                     crate::assets::scene::dependency_type_for_path(&path, line_number, "prefab")?;
@@ -2623,7 +3076,7 @@ where
                     &mut on_dependency,
                 )?;
             }
-            "root" => {
+            "root" | "rootentity" | "rootnode" => {
                 if root.is_some() {
                     return Err(AssetError::Import {
                         message: format!("duplicate prefab root on line {line_number}"),
@@ -2639,7 +3092,7 @@ where
                 root = Some(root_entity);
                 current_entity = Some(PrefabEntityTarget::Root);
             }
-            "child" => {
+            "child" | "childentity" | "childnode" => {
                 if root.is_none() {
                     return Err(AssetError::Import {
                         message: format!("prefab child on line {line_number} has no root"),
@@ -2650,7 +3103,7 @@ where
                 children.push(child);
                 current_entity = Some(PrefabEntityTarget::Child(children.len() - 1));
             }
-            "component" => {
+            "component" | "cmp" => {
                 let component =
                     crate::assets::scene::parse_serialized_component(value, line_number, "prefab")?;
                 for (path, asset_type) in
@@ -2685,9 +3138,9 @@ where
                     }
                 }
             }
-            other => {
+            _ => {
                 return Err(AssetError::Import {
-                    message: format!("unknown prefab key `{other}` on line {line_number}"),
+                    message: format!("unknown prefab key `{key}` on line {line_number}"),
                 });
             }
         }
@@ -5595,7 +6048,7 @@ fn parse_obj_texture_coord<'a>(
             message: format!("missing OBJ texture coordinate value on line {line_number}"),
         });
     }
-    if count == 3 && values[2].abs() > f32::EPSILON {
+    if count == 3 && values[2] != 0.0 {
         return Err(AssetError::Import {
             message: format!(
                 "OBJ texture coordinate w component is unsupported because runtime mesh UVs are 2D on line {line_number}"
@@ -5687,10 +6140,22 @@ fn parse_obj_smoothing_group<'a>(
         });
     }
     let normalized = value.to_ascii_lowercase();
-    Ok(match normalized.as_str() {
-        "off" | "0" => ObjSmoothingGroup::Off,
-        _ => ObjSmoothingGroup::Group(value.to_owned()),
-    })
+    if matches!(normalized.as_str(), "off" | "0") {
+        return Ok(ObjSmoothingGroup::Off);
+    }
+    let group = value.parse::<i64>().map_err(|error| AssetError::Import {
+        message: format!(
+            "invalid OBJ smoothing group number `{value}` on line {line_number}: {error}"
+        ),
+    })?;
+    if group <= 0 {
+        return Err(AssetError::Import {
+            message: format!(
+                "OBJ smoothing group number on line {line_number} must be positive or `off`"
+            ),
+        });
+    }
+    Ok(ObjSmoothingGroup::Group(value.to_owned()))
 }
 
 #[cfg(feature = "model_importer")]
@@ -7076,7 +7541,7 @@ fn parse_obj_material_library_text(
         }
         let tokens = obj_material_line_tokens(line, library, path, line_number)?;
         let directive = tokens.first().map(String::as_str).unwrap_or("");
-        let directive_key = directive.to_ascii_lowercase();
+        let directive_key = directive.to_ascii_lowercase().replace('-', "_");
         let parts = tokens.iter().skip(1).map(String::as_str);
         match directive_key.as_str() {
             "newmtl" => {
@@ -7122,11 +7587,22 @@ fn parse_obj_material_library_text(
             }
             "kd" | "diffuse" | "albedo" | "basecolor" | "base_color" => {
                 require_obj_material_current(&current_name, directive, library, path, line_number)?;
-                let color = parse_obj_material_rgb(parts, directive, library, path, line_number)?;
-                let alpha = current_properties
-                    .base_color
-                    .map(|base_color| base_color[3])
-                    .unwrap_or(1.0);
+                let (color, parsed_alpha) = parse_obj_material_rgb_with_optional_alpha(
+                    parts,
+                    directive,
+                    library,
+                    path,
+                    line_number,
+                )?;
+                let alpha = parsed_alpha.unwrap_or_else(|| {
+                    current_properties
+                        .base_color
+                        .map(|base_color| base_color[3])
+                        .unwrap_or(1.0)
+                });
+                if parsed_alpha.is_some() {
+                    set_obj_material_alpha(&mut current_properties, alpha);
+                }
                 current_properties.base_color = Some([color[0], color[1], color[2], alpha]);
             }
             "ka" | "ambient" | "ambient_color" => {
@@ -7400,6 +7876,46 @@ fn parse_obj_material_rgb<'a>(
 }
 
 #[cfg(feature = "model_importer")]
+fn parse_obj_material_rgb_with_optional_alpha<'a>(
+    parts: impl Iterator<Item = &'a str>,
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<([f32; 3], Option<f32>), ImportError> {
+    let parts = parts.collect::<Vec<_>>();
+    let Some(first) = parts.first().copied() else {
+        return Err(AssetError::Import {
+            message: format!(
+                "missing OBJ material library `{}` at `{}` {directive} value on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        });
+    };
+    match first.to_ascii_lowercase().as_str() {
+        "xyz" => {
+            let (values, alpha) = parse_obj_material_rgb_alpha_components(
+                &parts[1..],
+                directive,
+                library,
+                path,
+                line_number,
+            )?;
+            Ok((obj_material_xyz_to_linear_srgb(values), alpha))
+        }
+        "spectral" => Err(AssetError::Import {
+            message: format!(
+                "unsupported OBJ material library `{}` at `{}` {directive} spectral color on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        }),
+        _ => parse_obj_material_rgb_alpha_components(&parts, directive, library, path, line_number),
+    }
+}
+
+#[cfg(feature = "model_importer")]
 fn parse_obj_material_rgb_components(
     parts: &[&str],
     directive: &str,
@@ -7433,6 +7949,48 @@ fn parse_obj_material_rgb_components(
         });
     }
     Ok(values)
+}
+
+#[cfg(feature = "model_importer")]
+fn parse_obj_material_rgb_alpha_components(
+    parts: &[&str],
+    directive: &str,
+    library: &ObjMaterialLibraryRef,
+    path: &AssetPath,
+    line_number: usize,
+) -> Result<([f32; 3], Option<f32>), ImportError> {
+    let color = parse_obj_material_rgb_components(
+        parts.get(..3).unwrap_or(parts),
+        directive,
+        library,
+        path,
+        line_number,
+    )?;
+    let alpha = if let Some(value) = parts.get(3).copied() {
+        let alpha = parse_obj_material_f32(value, directive, library, path, line_number)?;
+        if !(0.0..=1.0).contains(&alpha) {
+            return Err(AssetError::Import {
+                message: format!(
+                    "OBJ material library `{}` at `{}` {directive} alpha value `{value}` on line {line_number} must be between 0 and 1",
+                    library.name,
+                    path.display_string()
+                ),
+            });
+        }
+        Some(alpha)
+    } else {
+        None
+    };
+    if parts.len() > 4 {
+        return Err(AssetError::Import {
+            message: format!(
+                "too many OBJ material library `{}` at `{}` {directive} values on line {line_number}",
+                library.name,
+                path.display_string()
+            ),
+        });
+    }
+    Ok((color, alpha))
 }
 
 #[cfg(feature = "model_importer")]
@@ -7858,9 +8416,9 @@ fn parse_obj_material_texture_option(
     line_number: usize,
 ) -> Result<ObjMaterialTextureOption, ImportError> {
     let option = parts[index];
-    let option_key = option.to_ascii_lowercase();
+    let option_key = obj_material_texture_option_key(option);
     match option_key.as_str() {
-        "-blendu" | "-blendv" | "-cc" => {
+        "blendu" | "blendv" | "cc" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -7880,9 +8438,9 @@ fn parse_obj_material_texture_option(
                 line_number,
             )?;
             match option_key.as_str() {
-                "-blendu" => options.blend_u = Some(value),
-                "-blendv" => options.blend_v = Some(value),
-                "-cc" => options.color_correction = Some(value),
+                "blendu" => options.blend_u = Some(value),
+                "blendv" => options.blend_v = Some(value),
+                "cc" => options.color_correction = Some(value),
                 _ => unreachable!("matched texture boolean option"),
             }
             Ok(ObjMaterialTextureOption {
@@ -7890,7 +8448,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-type" => {
+        "type" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -7914,7 +8472,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-imfchan" => {
+        "imfchan" | "sourcechannel" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -7938,7 +8496,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-clamp" => {
+        "clamp" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -7962,7 +8520,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-texres" => {
+        "texres" | "textureresolution" | "resolution" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -7986,7 +8544,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-boost" => {
+        "boost" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -8010,7 +8568,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-colorspace" => {
+        "colorspace" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -8034,7 +8592,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-bm" => {
+        "bm" | "bumpscale" => {
             let value = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -8058,7 +8616,7 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-mm" => {
+        "mm" | "colorremap" | "colorrange" => {
             let first = require_obj_material_texture_option_arg(
                 parts,
                 index,
@@ -8110,8 +8668,8 @@ fn parse_obj_material_texture_option(
                 options,
             })
         }
-        "-o" | "-s" | "-t" => {
-            let default = if option_key == "-s" { 1.0 } else { 0.0 };
+        "o" | "s" | "t" => {
+            let default = if option_key == "s" { 1.0 } else { 0.0 };
             let (next_index, value) = parse_obj_material_texture_option_vec3(
                 parts,
                 index,
@@ -8124,9 +8682,9 @@ fn parse_obj_material_texture_option(
             )?;
             let mut options = ObjMaterialTextureOptions::default();
             match option_key.as_str() {
-                "-o" => options.transform_offset = Some(value),
-                "-s" => options.transform_scale = Some(value),
-                "-t" => options.transform_turbulence = Some(value),
+                "o" => options.transform_offset = Some(value),
+                "s" => options.transform_scale = Some(value),
+                "t" => options.transform_turbulence = Some(value),
                 _ => unreachable!("matched texture transform option"),
             }
             Ok(ObjMaterialTextureOption {
@@ -8142,6 +8700,16 @@ fn parse_obj_material_texture_option(
             ),
         }),
     }
+}
+
+#[cfg(feature = "model_importer")]
+fn obj_material_texture_option_key(option: &str) -> String {
+    option
+        .trim_start_matches('-')
+        .chars()
+        .filter(|character| *character != '-' && *character != '_')
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 #[cfg(feature = "model_importer")]
@@ -8408,7 +8976,8 @@ fn is_obj_material_texture_option_number(value: &str) -> bool {
 
 #[cfg(feature = "model_importer")]
 fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
-    match directive.to_ascii_lowercase().as_str() {
+    let directive = directive.to_ascii_lowercase().replace('-', "_");
+    match directive.as_str() {
         "map_kd" | "map_diffuse" | "map_albedo" | "map_basecolor" | "map_base_color" => {
             Some("albedo")
         }

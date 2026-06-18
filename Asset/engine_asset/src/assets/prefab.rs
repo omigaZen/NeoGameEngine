@@ -8,8 +8,9 @@ use crate::{
 };
 
 use super::scene::{
-    dependency_type_for_path, parse_serialized_component, parse_serialized_entity,
-    serialized_component_asset_dependencies, SerializedEntity,
+    dependency_type_for_path, is_scene_prefab_dependency_key, parse_serialized_component,
+    parse_serialized_entity, scene_prefab_document_key, serialized_component_asset_dependencies,
+    SerializedEntity,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -112,8 +113,8 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
         };
         let key = key.trim();
         let value = value.trim();
-        match key {
-            "dependency" => {
+        match scene_prefab_document_key(key).as_str() {
+            key if is_scene_prefab_dependency_key(key) => {
                 let path = AssetPath::parse(value);
                 let asset_type = dependency_type_for_path(&path, line_number, "prefab")?;
                 add_prefab_dependency(
@@ -124,7 +125,7 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
                     asset_type,
                 );
             }
-            "root" => {
+            "root" | "rootentity" | "rootnode" => {
                 if root.is_some() {
                     return Err(AssetError::Decode {
                         message: format!("duplicate prefab root on line {line_number}"),
@@ -139,7 +140,7 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
                 root = Some(root_entity);
                 current_entity = Some(PrefabEntityTarget::Root);
             }
-            "child" => {
+            "child" | "childentity" | "childnode" => {
                 if root.is_none() {
                     return Err(AssetError::Decode {
                         message: format!("prefab child on line {line_number} has no root"),
@@ -149,7 +150,7 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
                 children.push(child);
                 current_entity = Some(PrefabEntityTarget::Child(children.len() - 1));
             }
-            "component" => {
+            "component" | "cmp" => {
                 let component = parse_serialized_component(value, line_number, "prefab")?;
                 for (path, asset_type) in
                     serialized_component_asset_dependencies(&component, line_number, "prefab")?
@@ -180,9 +181,9 @@ fn parse_prefab(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<Prefab, Asset
                     }
                 }
             }
-            other => {
+            _ => {
                 return Err(AssetError::Decode {
-                    message: format!("unknown prefab key `{other}` on line {line_number}"),
+                    message: format!("unknown prefab key `{key}` on line {line_number}"),
                 })
             }
         }

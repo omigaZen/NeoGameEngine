@@ -35,8 +35,8 @@ fn bundle_compression_and_parse_errors_are_stable() {
     #[cfg(feature = "zstd")]
     {
         assert!(BundleCompressionCodecReport::for_compression(CompressionKind::Zstd).supported);
-        let bytes = BundleWriter::build_bytes("zstd_empty", CompressionKind::Zstd, Vec::new())
-            .unwrap();
+        let bytes =
+            BundleWriter::build_bytes("zstd_empty", CompressionKind::Zstd, Vec::new()).unwrap();
         let reader = BundleReader::from_bytes(&bytes).unwrap();
         assert_eq!(reader.manifest().name, "zstd_empty");
         assert!(reader.manifest().entries.is_empty());

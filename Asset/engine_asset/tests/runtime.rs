@@ -241,6 +241,10 @@ fn wav_extensible_bytes_with_format_field(
 }
 
 fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    make_ogg_page(ogg_vorbis_audio_packet(sample_rate, channels))
+}
+
+fn ogg_vorbis_audio_packet(sample_rate: u32, channels: u16) -> Vec<u8> {
     let mut packet = Vec::new();
     packet.push(0x01);
     packet.extend_from_slice(b"vorbis");
@@ -250,10 +254,25 @@ fn ogg_vorbis_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
     packet.extend_from_slice(&0u32.to_le_bytes());
     packet.extend_from_slice(&0u32.to_le_bytes());
     packet.extend_from_slice(&0u32.to_le_bytes());
-    make_ogg_page(packet)
+    packet
+}
+
+fn ogg_vorbis_audio_bytes_with_granule(
+    sample_rate: u32,
+    channels: u16,
+    granule_position: u64,
+) -> Vec<u8> {
+    make_ogg_page_with_granule(
+        ogg_vorbis_audio_packet(sample_rate, channels),
+        granule_position,
+    )
 }
 
 fn ogg_opus_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
+    make_ogg_page(ogg_opus_audio_packet(sample_rate, channels))
+}
+
+fn ogg_opus_audio_packet(sample_rate: u32, channels: u16) -> Vec<u8> {
     let mut packet = Vec::new();
     packet.extend_from_slice(b"OpusHead");
     packet.push(1);
@@ -262,20 +281,19 @@ fn ogg_opus_audio_bytes(sample_rate: u32, channels: u16) -> Vec<u8> {
     packet.extend_from_slice(&sample_rate.to_le_bytes());
     packet.extend_from_slice(&0i16.to_le_bytes());
     packet.push(0);
-    make_ogg_page(packet)
+    packet
 }
 
 fn ogg_unknown_codec_audio_bytes() -> Vec<u8> {
-    let packet = vec![b'U', b'n', b'k', b'n', b'o', b'w', b'n'];
-    make_ogg_page(packet)
+    make_ogg_page(vec![b'U', b'n', b'k', b'n', b'o', b'w', b'n'])
 }
 
-fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
+fn make_ogg_page_with_granule(packet: Vec<u8>, granule_position: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"OggS");
     bytes.push(0x00);
     bytes.push(0x00);
-    bytes.extend_from_slice(&0u64.to_le_bytes());
+    bytes.extend_from_slice(&granule_position.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&0u32.to_le_bytes());
@@ -283,6 +301,10 @@ fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
     bytes.push(u8::try_from(packet.len()).expect("ogg test packet must be single-segment"));
     bytes.extend_from_slice(&packet);
     bytes
+}
+
+fn make_ogg_page(packet: Vec<u8>) -> Vec<u8> {
+    make_ogg_page_with_granule(packet, 0)
 }
 
 fn animation_bytes() -> Vec<u8> {
@@ -1566,6 +1588,41 @@ fn opus_ogg_audio_load_reaches_ready_as_streaming() {
 }
 
 #[test]
+fn opus_ogg_audio_load_reaches_ready_with_default_sample_rate_when_input_rate_is_zero() {
+    let io = MemoryAssetIo::new().with_file("audio/legacy_opus.ogg", ogg_opus_audio_bytes(0, 2));
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/legacy_opus.ogg");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 48_000);
+    assert_eq!(loaded.channels, 2);
+    assert_eq!(loaded.duration_seconds, 0.0);
+    assert!(loaded.streaming);
+    assert!(matches!(loaded.samples, AudioSamples::Streaming(_)));
+}
+
+#[test]
+fn ogg_audio_duration_seconds_is_parsed_from_granule_position() {
+    let io = MemoryAssetIo::new().with_file(
+        "audio/timed_voice.ogg",
+        ogg_vorbis_audio_bytes_with_granule(48_000, 1, 96_000),
+    );
+    let mut server = server_with_io(io);
+
+    let audio: Handle<AudioClip> = server.load("audio/timed_voice.ogg");
+    server.update_loading();
+
+    assert!(server.is_ready(&audio));
+    let loaded = server.get(&audio).unwrap();
+    assert_eq!(loaded.sample_rate, 48_000);
+    assert_eq!(loaded.channels, 1);
+    assert_eq!(loaded.duration_seconds, 2.0);
+}
+
+#[test]
 fn wav_audio_load_reaches_ready_without_renderer_upload() {
     let wav = wav_pcm16_bytes(44_100, 2, &[0, 1000, -1000, 500]);
     let io = MemoryAssetIo::new().with_file("audio/click.wav", wav);
@@ -2199,6 +2256,26 @@ fn skeleton_load_preserves_explicit_bind_pose_matrices() {
 }
 
 #[test]
+fn skeleton_load_accepts_structural_key_and_field_aliases() {
+    let source = b"NGA_SKELETON_V1\nJoint=Root;Bind Pose=1,0,0,2,0,1,0,0,0,0,1,0,0,0,0,1;Inverse Bind Pose=1,0,0,-2,0,1,0,0,0,0,1,0,0,0,0,1\nBone=Hand;Parent Index=0;Local Bind Transform=1,0,0,3,0,1,0,0,0,0,1,0,0,0,0,1;Inv-Bind=1,0,0,-5,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec();
+    let io = MemoryAssetIo::new().with_file("skeletons/alias.skeleton", source);
+    let mut server = server_with_io(io);
+
+    let skeleton: Handle<Skeleton> = server.load("skeletons/alias.skeleton");
+    server.update_loading();
+
+    assert!(server.is_ready(&skeleton));
+    let loaded = server.get(&skeleton).unwrap();
+    assert_eq!(loaded.bones.len(), 2);
+    assert_eq!(loaded.bones[0].name, "Root");
+    assert_eq!(loaded.bones[1].name, "Hand");
+    assert_eq!(loaded.bones[1].parent, Some(0));
+    assert_eq!(loaded.bones[0].local_bind_transform[0][3], 2.0);
+    assert_eq!(loaded.bones[1].local_bind_transform[0][3], 3.0);
+    assert_eq!(loaded.inverse_bind_poses[1][0][3], -5.0);
+}
+
+#[test]
 fn invalid_skeleton_payload_fails_with_decode_error_and_event() {
     assert_skeleton_decode_error(
         "NGA_SKELETON_V1\nbone=Spine;parent=0\n",
@@ -2255,6 +2332,31 @@ fn animation_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn animation_load_accepts_structural_key_channel_and_target_aliases() {
+    let source = b"NGA_ANIMATION_V1\nLength=2\nFrame Rate=30\nChannel=node-index:3\nPosition=0:1,2,3\nQuaternion=0:0,0,0,1\nScaling=1:2,2,2\nTrack=bone:Hand\nLocation=0.5:3,2,1\n".to_vec();
+    let io = MemoryAssetIo::new().with_file("animations/alias.animation", source);
+    let mut server = server_with_io(io);
+
+    let animation: Handle<AnimationClip> = server.load("animations/alias.animation");
+    server.update_loading();
+
+    assert!(server.is_ready(&animation));
+    let loaded = server.get(&animation).unwrap();
+    assert_eq!(loaded.duration, 2.0);
+    assert_eq!(loaded.ticks_per_second, 30.0);
+    assert_eq!(loaded.tracks.len(), 2);
+    assert_eq!(loaded.tracks[0].target, AnimationTarget::NodeIndex(3));
+    assert_eq!(loaded.tracks[0].translations[0].value, [1.0, 2.0, 3.0]);
+    assert_eq!(loaded.tracks[0].rotations[0].value, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(loaded.tracks[0].scales[0].value, [2.0, 2.0, 2.0]);
+    assert_eq!(
+        loaded.tracks[1].target,
+        AnimationTarget::BoneName("Hand".to_owned())
+    );
+    assert_eq!(loaded.tracks[1].translations[0].time, 0.5);
+}
+
+#[test]
 fn invalid_animation_payload_fails_with_decode_error_and_event() {
     assert_animation_decode_error(
         "NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntranslation=0:0,0,0\n",
@@ -2275,6 +2377,14 @@ fn invalid_animation_payload_fails_with_decode_error_and_event() {
     assert_animation_decode_error(
         "NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntrack=bone:Root\ntranslation=0.5:0,0,0\ntranslation=0.25:1,0,0\n",
         "animation translation keyframes in track 0 must be sorted by time",
+    );
+    assert_animation_decode_error(
+        "NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntrack=bone:Root\nrotation=0:0,0,0,0\n",
+        "animation rotation keyframe 0 in track 0 has zero-length quaternion",
+    );
+    assert_animation_decode_error(
+        "NGA_ANIMATION_V1\nduration=1\nticks_per_second=60\ntrack=bone:Root\nrotation=0:0,0,0,2\n",
+        "animation rotation keyframe 0 in track 0 quaternion length must be normalized",
     );
 }
 
@@ -2306,10 +2416,19 @@ fn font_load_reaches_ready_without_renderer_upload() {
     let FontData::Bitmap(bitmap) = &loaded.data else {
         panic!("expected bitmap font");
     };
+    assert_eq!(bitmap.line_height, 1);
     assert_eq!(bitmap.glyphs.len(), 1);
     assert_eq!(bitmap.glyphs[0].codepoint, 'A');
     assert_eq!((bitmap.glyphs[0].width, bitmap.glyphs[0].height), (2, 1));
+    assert_eq!(bitmap.glyphs[0].advance_x, 2);
+    assert_eq!(
+        (bitmap.glyphs[0].bearing_x, bitmap.glyphs[0].bearing_y),
+        (0, 0)
+    );
+    assert_eq!((bitmap.glyphs[0].atlas_x, bitmap.glyphs[0].atlas_y), (0, 0));
     assert_eq!(bitmap.glyphs[0].bitmap, vec![0, 255]);
+    assert_eq!((bitmap.atlas_width, bitmap.atlas_height), (2, 1));
+    assert_eq!(bitmap.atlas_bitmap, vec![0, 255]);
     assert_eq!(
         server.metadata(font.id()).unwrap().source_hash,
         Some(font_source_hash)
@@ -2318,6 +2437,86 @@ fn font_load_reaches_ready_without_renderer_upload() {
         .events()
         .iter()
         .any(|event| matches!(event, AssetEvent::Ready { id } if *id == font.id())));
+}
+
+#[test]
+fn font_load_accepts_document_key_and_glyph_field_aliases() {
+    let source = b"NGA_FONT_V1\nFamily Name=Debug Sans\nLine Height=8\nCharacter=Code Point=A;Dimensions=2x1;Advance=3;Bearing=1,2;Pixels=0 255\nGlyph=Character=B;Size=1x1;Advance X=2;Offset Y=-1;Alpha=128\nKern=First=A;Second=B;Amount=-1\n"
+        .to_vec();
+    let io = MemoryAssetIo::new().with_file("fonts/alias.font", source);
+    let mut server = server_with_io(io);
+
+    let font: Handle<Font> = server.load("fonts/alias.font");
+    server.update_loading();
+
+    assert!(server.is_ready(&font));
+    let loaded = server.get(&font).unwrap();
+    assert_eq!(loaded.family_name, "Debug Sans");
+    let FontData::Bitmap(bitmap) = &loaded.data else {
+        panic!("expected bitmap font");
+    };
+    assert_eq!(bitmap.line_height, 8);
+    assert_eq!(bitmap.glyphs.len(), 2);
+    assert_eq!(bitmap.glyphs[0].codepoint, 'A');
+    assert_eq!((bitmap.glyphs[0].width, bitmap.glyphs[0].height), (2, 1));
+    assert_eq!(bitmap.glyphs[0].advance_x, 3);
+    assert_eq!(
+        (bitmap.glyphs[0].bearing_x, bitmap.glyphs[0].bearing_y),
+        (1, 2)
+    );
+    assert_eq!((bitmap.glyphs[0].atlas_x, bitmap.glyphs[0].atlas_y), (0, 0));
+    assert_eq!(bitmap.glyphs[0].bitmap, vec![0, 255]);
+    assert_eq!(bitmap.glyphs[1].codepoint, 'B');
+    assert_eq!(bitmap.glyphs[1].advance_x, 2);
+    assert_eq!(
+        (bitmap.glyphs[1].bearing_x, bitmap.glyphs[1].bearing_y),
+        (0, -1)
+    );
+    assert_eq!((bitmap.glyphs[1].atlas_x, bitmap.glyphs[1].atlas_y), (2, 0));
+    assert_eq!(bitmap.glyphs[1].bitmap, vec![128]);
+    assert_eq!(bitmap.kerning_pairs.len(), 1);
+    assert_eq!(bitmap.kerning_pairs[0].left, 'A');
+    assert_eq!(bitmap.kerning_pairs[0].right, 'B');
+    assert_eq!(bitmap.kerning_pairs[0].adjustment, -1);
+    assert_eq!((bitmap.atlas_width, bitmap.atlas_height), (3, 1));
+    assert_eq!(bitmap.atlas_bitmap, vec![0, 255, 128]);
+
+    let layout = bitmap.layout_text("AB\nA").unwrap();
+    assert_eq!(layout.advance_width, 4);
+    assert_eq!(layout.height, 16);
+    assert_eq!(layout.line_count, 2);
+    assert_eq!(layout.glyphs.len(), 3);
+    assert_eq!(
+        (
+            layout.glyphs[0].codepoint,
+            layout.glyphs[0].x,
+            layout.glyphs[0].y,
+            layout.glyphs[0].atlas_x,
+        ),
+        ('A', 1, 2, 0)
+    );
+    assert_eq!(
+        (
+            layout.glyphs[1].codepoint,
+            layout.glyphs[1].x,
+            layout.glyphs[1].y,
+            layout.glyphs[1].atlas_x,
+        ),
+        ('B', 2, -1, 2)
+    );
+    assert_eq!(
+        (
+            layout.glyphs[2].codepoint,
+            layout.glyphs[2].x,
+            layout.glyphs[2].y,
+        ),
+        ('A', 1, 10)
+    );
+    assert!(matches!(
+        bitmap.layout_text("AZ"),
+        Err(AssetError::Decode { message })
+            if message.contains("bitmap font text layout is missing glyph `Z`")
+    ));
 }
 
 #[test]
@@ -2366,6 +2565,22 @@ fn invalid_font_payload_fails_with_decode_error_and_event() {
         "NGA_FONT_V1\nfamily=Debug\nglyph=char=A;size=2x2;bitmap=0,255\n",
         "expected 4",
     );
+    assert_font_decode_error(
+        "NGA_FONT_V1\nfamily=Debug\nFamily Name=Debug 2\nglyph=char=A;size=1x1;bitmap=255\n",
+        "font source repeats family on line 3",
+    );
+    assert_font_decode_error(
+        "NGA_FONT_V1\nfamily=Debug\nglyph=char=A;size=1x1;bitmap=255\ncharacter=codepoint=A;dimensions=1x1;pixels=128\n",
+        "font source repeats glyph `A`",
+    );
+    assert_font_decode_error(
+        "NGA_FONT_V1\nfamily=Debug\nglyph=char=A;size=1x1;bitmap=255\nkerning=left=A;right=V;adjust=-1\n",
+        "font kerning pair 0 references missing right glyph `V`",
+    );
+    assert_font_decode_error(
+        "NGA_FONT_V1\nfamily=Debug\nglyph=char=A;size=1x1;bitmap=255\nglyph=char=V;size=1x1;bitmap=255\nkerning=left=A;right=V;adjust=-1\nkern=first=A;second=V;amount=-2\n",
+        "font source repeats kerning pair `AV`",
+    );
 }
 
 #[test]
@@ -2403,6 +2618,7 @@ fn physics_mesh_load_reaches_ready_without_renderer_upload() {
     assert_eq!(loaded.kind, PhysicsMeshKind::TriMesh);
     assert_eq!(loaded.vertices.len(), 3);
     assert_eq!(loaded.indices, vec![[0, 1, 2]]);
+    assert!(loaded.height_field.is_none());
     assert_eq!(
         server.metadata(mesh.id()).unwrap().source_hash,
         Some(physics_source_hash)
@@ -2414,10 +2630,75 @@ fn physics_mesh_load_reaches_ready_without_renderer_upload() {
 }
 
 #[test]
+fn physics_mesh_load_accepts_document_key_and_directive_aliases() {
+    let source = b"NGA_PHYSICS_MESH_V1\nMesh Kind=triangle-mesh\nVertex=0, 0, 0\nPosition=1,0,0\npoint 0, 1, 0\nFace=0, 1, 2\n".to_vec();
+    let io = MemoryAssetIo::new().with_file("physics/alias.physics", source);
+    let mut server = server_with_io(io);
+
+    let mesh: Handle<PhysicsMesh> = server.load("physics/alias.physics");
+    server.update_loading();
+
+    assert!(server.is_ready(&mesh));
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.kind, PhysicsMeshKind::TriMesh);
+    assert_eq!(
+        loaded.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(loaded.indices, vec![[0, 1, 2]]);
+}
+
+#[test]
+fn heightfield_physics_mesh_load_reaches_ready_with_validated_grid_data() {
+    let source = b"NGA_PHYSICS_MESH_V1\nMesh Kind=height-field\nRows=2\nColumns=3\nCell Scale=1,2,0.5\nSamples=0,1,2\nheights 3 4 5\n"
+        .to_vec();
+    let io = MemoryAssetIo::new().with_file("physics/terrain.physics", source);
+    let mut server = server_with_io(io);
+
+    let mesh: Handle<PhysicsMesh> = server.load("physics/terrain.physics");
+    server.update_loading();
+
+    assert!(server.is_ready(&mesh));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.kind, PhysicsMeshKind::HeightField);
+    assert!(loaded.vertices.is_empty());
+    assert!(loaded.indices.is_empty());
+    let height_field = loaded.height_field.as_ref().unwrap();
+    assert_eq!((height_field.rows, height_field.cols), (2, 3));
+    assert_eq!(height_field.scale, [1.0, 2.0, 0.5]);
+    assert_eq!(height_field.heights, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+}
+
+#[test]
 fn invalid_physics_mesh_payload_fails_with_decode_error_and_event() {
     assert_physics_mesh_decode_error(
         "NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\ni 0 1 2\n",
         "physics mesh index 1 references missing vertex",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 NaN 0\ni 0 0 0\n",
+        "physics mesh vertex value must be finite on line 3",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,1,2\n",
+        "heightfield physics mesh has 3 heights, expected 4 for 2x2",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,0,1\nheights=0,0,0,0\n",
+        "heightfield scale values must be positive on line 5",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,0,0,NaN\n",
+        "heightfield height value must be finite on line 6",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,0,0,0\nv 0 0 0\n",
+        "heightfield physics mesh cannot contain vertices or triangles",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=1\ncols=2\nscale=1,1,1\nheights=0,0\n",
+        "heightfield rows must be at least 2 on line 3",
     );
 }
 
@@ -2662,6 +2943,63 @@ fn scene_component_asset_fields_register_runtime_dependencies() {
 }
 
 #[test]
+fn scene_document_accepts_structural_key_and_component_field_aliases() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/tri.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert("audio/click.audio", audio_bytes());
+    io.insert("physics/hero.physics", physics_mesh_bytes());
+    io.insert(
+        "scenes/alias.scene",
+        b"NGA_SCENE_V1\nScene Name=level\nReferences=audio/click.audio\nGame Object=Root\nCmp=Mesh Renderer|MESH=meshes/tri.mesh;Material=materials/hero.material\nGame-Object=Collider;Parent Index=0\nComponent=Physics Collider|physics-mesh=physics/hero.physics\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let scene: Handle<SceneAsset> = server.load("scenes/alias.scene");
+    server.update_loading();
+
+    assert_eq!(server.state(&scene), AssetLoadState::WaitingForDependencies);
+    let audio_id = server
+        .id_from_path(&AssetPath::parse("audio/click.audio"))
+        .unwrap();
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/tri.mesh"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    let physics_id = server
+        .id_from_path(&AssetPath::parse("physics/hero.physics"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(scene.id()),
+        &[audio_id, mesh_id, material_id, physics_id]
+    );
+
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready_with_dependencies(&scene) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&scene));
+    let loaded = server.get(&scene).unwrap();
+    assert_eq!(loaded.name, "level");
+    assert_eq!(loaded.entities.len(), 2);
+    assert_eq!(loaded.entities[1].parent, Some(0));
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![audio_id, mesh_id, material_id, physics_id]);
+}
+
+#[test]
 fn scene_component_asset_fields_deduplicate_repeated_dependency_targets() {
     let mut io = MemoryAssetIo::new();
     io.insert("meshes/tri.mesh", mesh_bytes());
@@ -2888,6 +3226,65 @@ fn prefab_component_asset_fields_register_runtime_dependencies() {
     let mut visited = Vec::new();
     loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
     assert_eq!(visited, vec![mesh_id, skeleton_id, material_id]);
+}
+
+#[test]
+fn prefab_document_accepts_structural_key_and_component_field_aliases() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("meshes/skinned.mesh", mesh_bytes());
+    io.insert("textures/albedo.texture", texture_bytes(1, 1, 128));
+    io.insert("shaders/pbr.wgsl", "@fragment fn main() {}");
+    io.insert(
+        "materials/hero.material",
+        "name=hero\nshader=shaders/pbr.wgsl\ntexture.albedo=textures/albedo.texture\nbase_color=1,1,1,1\n",
+    );
+    io.insert("skeletons/hero.skeleton", skeleton_bytes());
+    io.insert("physics/hero.physics", physics_mesh_bytes());
+    io.insert(
+        "prefabs/alias.prefab",
+        b"NGA_PREFAB_V1\nDepends=physics/hero.physics\nRoot Entity=Hero\nCmp=Skinned Mesh Renderer|mesh=meshes/skinned.mesh;skeleton=skeletons/hero.skeleton;material=materials/hero.material\nChild-Entity=Collider;parent-id=0\nComponent=Physics Collider|collision-mesh=physics/hero.physics\n".to_vec(),
+    );
+    let mut server = server_with_io(io);
+
+    let prefab: Handle<Prefab> = server.load("prefabs/alias.prefab");
+    server.update_loading();
+
+    assert_eq!(
+        server.state(&prefab),
+        AssetLoadState::WaitingForDependencies
+    );
+    let physics_id = server
+        .id_from_path(&AssetPath::parse("physics/hero.physics"))
+        .unwrap();
+    let mesh_id = server
+        .id_from_path(&AssetPath::parse("meshes/skinned.mesh"))
+        .unwrap();
+    let skeleton_id = server
+        .id_from_path(&AssetPath::parse("skeletons/hero.skeleton"))
+        .unwrap();
+    let material_id = server
+        .id_from_path(&AssetPath::parse("materials/hero.material"))
+        .unwrap();
+    assert_eq!(
+        server.dependency_graph().direct_dependencies(prefab.id()),
+        &[physics_id, mesh_id, skeleton_id, material_id]
+    );
+
+    for _ in 0..8 {
+        server.update_loading();
+        finish_all_uploads(&mut server);
+        if server.is_ready_with_dependencies(&prefab) {
+            break;
+        }
+    }
+
+    assert!(server.is_ready_with_dependencies(&prefab));
+    let loaded = server.get(&prefab).unwrap();
+    assert_eq!(loaded.root.name.as_deref(), Some("Hero"));
+    assert_eq!(loaded.children[0].parent, Some(0));
+    let mut visited = Vec::new();
+    loaded.visit_dependencies(&mut |dependency| visited.push(dependency.id()));
+    assert_eq!(visited, vec![physics_id, mesh_id, skeleton_id, material_id]);
 }
 
 #[test]
@@ -3295,6 +3692,266 @@ fn load_untyped_and_load_untyped_by_id_preserve_registry_source_hash_and_emits_r
         .events()
         .iter()
         .any(|event| matches!(event, AssetEvent::Ready { id } if *id == seed.id())));
+}
+
+#[test]
+fn load_ref_preserves_registry_source_hash_and_emits_ready_events() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/ref.texture", texture_bytes(1, 1, 68));
+    let path = AssetPath::parse("textures/ref.texture");
+    let source_hash = io_source_hash(&io, path.path());
+    let mut server = server_with_io(io);
+
+    let seed: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert_eq!(server.state(&seed), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+
+    server.unload_by_id(seed.id()).unwrap();
+    assert_eq!(server.state(&seed), AssetLoadState::Unloaded);
+
+    let reference: AssetRef<Texture> = AssetRef::new(seed.id());
+    let reloaded: Handle<Texture> = server.load_ref(&reference);
+    assert_eq!(reloaded.id(), seed.id());
+    assert_eq!(server.state(&reloaded), AssetLoadState::Queued);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready(&reloaded));
+    assert_eq!(server.path_from_id(seed.id()), Some(&path));
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == reloaded.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == reloaded.id())));
+}
+
+#[test]
+fn load_ref_with_fallback_path_loads_by_path_when_registry_is_missing() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/ref_fallback.texture", texture_bytes(1, 1, 69));
+    let path = AssetPath::parse("textures/ref_fallback.texture");
+    let source_hash = io_source_hash(&io, path.path());
+    let mut server = server_with_io(io);
+
+    let fallback_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0050);
+    let reference: AssetRef<Texture> = AssetRef::with_fallback(fallback_id, path.clone());
+    let loaded: Handle<Texture> = server.load_ref(&reference);
+
+    assert_ne!(loaded.id(), fallback_id);
+    assert_eq!(server.path_from_id(loaded.id()), Some(&path));
+    assert_eq!(server.state(&loaded), AssetLoadState::Queued);
+    assert!(server.metadata(fallback_id).is_none());
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready(&loaded));
+    assert_eq!(
+        server.metadata(loaded.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == loaded.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == loaded.id())));
+}
+
+#[test]
+fn load_ref_with_registry_path_missing_uses_fallback_path() {
+    let mut io = MemoryAssetIo::new();
+    let fallback_path = AssetPath::parse("textures/ref_registry_fallback.texture");
+    io.insert(fallback_path.path(), texture_bytes(1, 1, 73));
+    let fallback_hash = io_source_hash(&io, fallback_path.path());
+    let mut server = server_with_io(io);
+    let fallback_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0053);
+
+    let metadata = AssetMetadata {
+        id: fallback_id,
+        path: None,
+        asset_type: AssetTypeId::NIL,
+        source_path: None,
+        cooked_path: None,
+        importer: None,
+        importer_version: 0,
+        source_hash: None,
+        settings_hash: None,
+        cooked_hash: None,
+        version_hash: None,
+        labels: Vec::new(),
+        dependencies: Vec::new(),
+        importer_settings: Vec::new(),
+    };
+    server.registry_mut().insert(metadata);
+
+    let reference: AssetRef<Texture> = AssetRef::with_fallback(fallback_id, fallback_path.clone());
+    let loaded: Handle<Texture> = server.load_ref(&reference);
+
+    assert_eq!(loaded.id(), fallback_id);
+    assert_eq!(server.state(&loaded), AssetLoadState::Queued);
+    assert_eq!(server.path_from_id(fallback_id), Some(&fallback_path));
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready(&loaded));
+    assert_eq!(server.path_from_id(fallback_id), Some(&fallback_path));
+    assert_eq!(
+        server.metadata(fallback_id).unwrap().asset_type,
+        Texture::TYPE_ID
+    );
+    assert_eq!(
+        server.metadata(fallback_id).unwrap().source_hash,
+        Some(fallback_hash)
+    );
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::LoadedCpu { id } if *id == loaded.id())));
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Ready { id } if *id == loaded.id())));
+}
+
+#[test]
+fn load_ref_with_missing_id_without_fallback_emits_visible_failure() {
+    let mut server = server_with_io(MemoryAssetIo::new());
+
+    let missing_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0051);
+    let reference: AssetRef<Texture> = AssetRef::new(missing_id);
+    let handle: Handle<Texture> = server.load_ref(&reference);
+
+    assert_eq!(handle.id(), missing_id);
+    assert_eq!(server.state(&handle), AssetLoadState::Failed);
+    match server.error_by_id(missing_id) {
+        Some(AssetError::AssetNotFound { id }) => assert_eq!(*id, missing_id),
+        other => panic!("expected missing-id error, got {other:?}"),
+    }
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == missing_id)));
+}
+
+#[test]
+fn load_ref_prefers_registry_entry_over_fallback_path() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/ref_main.texture", texture_bytes(1, 1, 70));
+    io.insert("textures/ref_fallback.texture", texture_bytes(1, 1, 71));
+    let path_main = AssetPath::parse("textures/ref_main.texture");
+    let path_fallback = AssetPath::parse("textures/ref_fallback.texture");
+    let source_hash = io_source_hash(&io, path_main.path());
+    let mut server = server_with_io(io);
+
+    let seed: Handle<Texture> = server.load(path_main.clone());
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert_eq!(server.state(&seed), AssetLoadState::Ready);
+    assert_eq!(server.path_from_id(seed.id()), Some(&path_main));
+
+    server.unload_by_id(seed.id()).unwrap();
+    assert_eq!(server.state(&seed), AssetLoadState::Unloaded);
+
+    let reference: AssetRef<Texture> = AssetRef::with_fallback(seed.id(), path_fallback);
+    let loaded: Handle<Texture> = server.load_ref(&reference);
+    assert_eq!(loaded.id(), seed.id());
+    assert_eq!(server.state(&loaded), AssetLoadState::Queued);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert!(server.is_ready(&loaded));
+    assert_eq!(server.path_from_id(seed.id()), Some(&path_main));
+    assert_eq!(
+        server.metadata(seed.id()).unwrap().source_hash,
+        Some(source_hash)
+    );
+}
+
+#[test]
+fn load_ref_with_fallback_path_unsupported_extension_emits_decode_failure() {
+    let mut io = MemoryAssetIo::new();
+    let path = AssetPath::parse("textures/ref_unknown.ext");
+    io.insert(path.path(), b"plain bytes".to_vec());
+    let mut server = server_with_io(io);
+
+    let reference: AssetRef<Texture> = AssetRef::with_fallback(
+        AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0052),
+        path.clone(),
+    );
+    let loaded: Handle<Texture> = server.load_ref(&reference);
+    assert_eq!(server.state(&loaded), AssetLoadState::Queued);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert_eq!(server.state(&loaded), AssetLoadState::Failed);
+    match server.error_by_id(loaded.id()) {
+        Some(AssetError::Decode { message }) => {
+            assert!(message.contains("texture data length"));
+        }
+        other => panic!("expected decode error, got {other:?}"),
+    }
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == loaded.id())));
+}
+
+#[test]
+fn load_ref_with_id_hit_requests_wrong_asset_type_reports_type_mismatch() {
+    let mut io = MemoryAssetIo::new();
+    io.insert("textures/ref_wrong_type.texture", texture_bytes(1, 1, 72));
+    let path = AssetPath::parse("textures/ref_wrong_type.texture");
+    let mut server = server_with_io(io);
+
+    let texture: Handle<Texture> = server.load(path.clone());
+    server.update_loading();
+    finish_all_uploads(&mut server);
+    assert_eq!(server.state(&texture), AssetLoadState::Ready);
+    assert_eq!(
+        server.metadata(texture.id()).unwrap().asset_type,
+        Texture::TYPE_ID
+    );
+
+    server.unload_by_id(texture.id()).unwrap();
+    assert_eq!(server.state(&texture), AssetLoadState::Unloaded);
+    let reference: AssetRef<Shader> = AssetRef::new(texture.id());
+    let loaded: Handle<Shader> = server.load_ref(&reference);
+    assert_eq!(server.state(&loaded), AssetLoadState::Failed);
+
+    server.update_loading();
+    finish_all_uploads(&mut server);
+
+    assert_eq!(server.state(&loaded), AssetLoadState::Failed);
+    match server.error_by_id(loaded.id()) {
+        Some(AssetError::TypeMismatch { expected, actual }) => {
+            assert_eq!(expected, Shader::TYPE_NAME);
+            assert_eq!(actual, Texture::TYPE_NAME);
+        }
+        other => panic!("expected type mismatch error, got {other:?}"),
+    }
+    assert!(server
+        .events()
+        .iter()
+        .any(|event| matches!(event, AssetEvent::Failed { id, .. } if *id == loaded.id())));
 }
 
 #[cfg(feature = "streaming")]

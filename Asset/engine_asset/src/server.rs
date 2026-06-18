@@ -528,6 +528,17 @@ impl AssetServer {
     ) -> Handle<T> {
         self.register_asset_type::<T>();
         if let Some(metadata) = self.registry.get(id) {
+            if metadata.asset_type != AssetTypeId::NIL && metadata.asset_type != T::TYPE_ID {
+                self.fail_asset(
+                    id,
+                    T::TYPE_ID,
+                    AssetError::TypeMismatch {
+                        expected: T::TYPE_NAME.to_owned(),
+                        actual: self.type_name(metadata.asset_type),
+                    },
+                );
+                return self.make_handle::<T>(id, HandleStrength::Strong);
+            }
             self.queue_request(LoadRequest {
                 id,
                 path: metadata.path.clone(),
@@ -597,9 +608,27 @@ impl AssetServer {
     }
 
     pub fn load_ref<T: Asset>(&mut self, reference: &AssetRef<T>) -> Handle<T> {
-        if self.registry.get(reference.id()).is_some() {
-            self.load_by_id(reference.id())
-        } else if let Some(path) = &reference.fallback_path {
+        if let Some(metadata) = self.registry.get(reference.id()) {
+            if metadata.path.is_some() {
+                return self.load_by_id(reference.id());
+            }
+            if let Some(path) = &reference.fallback_path {
+                let mut metadata = metadata.clone();
+                metadata.path = Some(path.clone());
+                if metadata.asset_type == AssetTypeId::NIL {
+                    metadata.asset_type = T::TYPE_ID;
+                }
+                self.registry.insert(metadata);
+                return self.load_by_id(reference.id());
+            }
+            self.fail_asset(
+                reference.id(),
+                T::TYPE_ID,
+                AssetError::AssetNotFound { id: reference.id() },
+            );
+            return self.make_handle::<T>(reference.id(), HandleStrength::Strong);
+        }
+        if let Some(path) = &reference.fallback_path {
             self.load(path.clone())
         } else {
             self.fail_asset(

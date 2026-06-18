@@ -1804,6 +1804,46 @@ fn database_scene_and_prefab_cookers_pass_through_runtime_bytes() {
 }
 
 #[test]
+fn database_scene_and_prefab_cookers_report_invalid_runtime_bytes() {
+    let scene_path = AssetPath::parse("scenes/cooked_invalid.scene");
+    let prefab_path = AssetPath::parse("prefabs/cooked_invalid.prefab");
+    let scene_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(scene_path.clone()),
+        source_bytes: b"NGA_SCENE_V1\ncomponent=MeshRenderer;mesh=meshes/cube.mesh\n".to_vec(),
+    };
+    let prefab_ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(prefab_path.clone()),
+        source_bytes: b"NGA_PREFAB_V1\nchild=Child\n".to_vec(),
+    };
+    let scene_metadata =
+        AssetMetadata::runtime(AssetId::new(), scene_path, AssetTypeId::of::<SceneAsset>());
+    let prefab_metadata =
+        AssetMetadata::runtime(AssetId::new(), prefab_path, AssetTypeId::of::<Prefab>());
+    let scene_cooker = SceneCooker::new();
+    let prefab_cooker = PrefabCooker::new();
+
+    let scene_error = scene_cooker.cook(&scene_ctx, &scene_metadata).unwrap_err();
+    let prefab_error = prefab_cooker
+        .cook(&prefab_ctx, &prefab_metadata)
+        .unwrap_err();
+
+    assert!(matches!(
+        scene_error,
+        AssetError::Cook { message }
+            if message.contains("SceneCooker failed to validate scene source")
+                && message.contains("scene component on line 2 has no entity")
+    ));
+    assert!(matches!(
+        prefab_error,
+        AssetError::Cook { message }
+            if message.contains("PrefabCooker failed to validate prefab source")
+                && message.contains("prefab child on line 2 has no root")
+    ));
+}
+
+#[test]
 fn database_font_and_physics_mesh_cookers_pass_through_runtime_bytes() {
     let font_path = AssetPath::parse("fonts/cooked.font");
     let physics_path = AssetPath::parse("physics/cooked.physics");
@@ -1838,8 +1878,30 @@ fn database_font_and_physics_mesh_cookers_pass_through_runtime_bytes() {
     assert_eq!(font_output.version_hash, VersionHash(2));
     assert_eq!(font_output.metadata, font_metadata);
     assert_eq!(physics_output.bytes, physics_source);
-    assert_eq!(physics_output.version_hash, VersionHash(1));
+    assert_eq!(physics_output.version_hash, VersionHash(2));
     assert_eq!(physics_output.metadata, physics_metadata);
+}
+
+#[test]
+fn database_physics_mesh_cooker_reports_invalid_runtime_bytes() {
+    let path = AssetPath::parse("physics/cooked_invalid.physics");
+    let source = b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 NaN 0\ni 0 0 0\n".to_vec();
+    let ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(path.clone()),
+        source_bytes: source,
+    };
+    let metadata = AssetMetadata::runtime(AssetId::new(), path, AssetTypeId::of::<PhysicsMesh>());
+    let cooker = PhysicsMeshCooker::new();
+
+    let error = cooker.cook(&ctx, &metadata).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Cook { message }
+            if message.contains("PhysicsMeshCooker failed to validate physics mesh source")
+                && message.contains("physics mesh vertex value must be finite on line 3")
+    ));
 }
 
 #[test]
@@ -1969,7 +2031,7 @@ fn database_scene_prefab_and_physics_mesh_cookers_pass_through_runtime_and_sourc
     assert_eq!(prefab_runtime_output.version_hash, VersionHash(1));
     assert_eq!(prefab_runtime_output.metadata, prefab_runtime_metadata);
     assert_eq!(physics_runtime_output.bytes, physics_runtime_bytes);
-    assert_eq!(physics_runtime_output.version_hash, VersionHash(1));
+    assert_eq!(physics_runtime_output.version_hash, VersionHash(2));
     assert_eq!(physics_runtime_output.metadata, physics_runtime_metadata);
     assert_eq!(scene_source_output.bytes, scene_runtime_bytes);
     assert_eq!(scene_source_output.version_hash, VersionHash(1));
@@ -1978,7 +2040,7 @@ fn database_scene_prefab_and_physics_mesh_cookers_pass_through_runtime_and_sourc
     assert_eq!(prefab_source_output.version_hash, VersionHash(1));
     assert_eq!(prefab_source_output.metadata, prefab_source_metadata);
     assert_eq!(physics_source_output.bytes, physics_runtime_bytes);
-    assert_eq!(physics_source_output.version_hash, VersionHash(1));
+    assert_eq!(physics_source_output.version_hash, VersionHash(2));
     assert_eq!(physics_source_output.metadata, physics_source_metadata);
 }
 
@@ -2078,6 +2140,7 @@ fn database_builtin_model_importer_reports_missing_material_dependency_path() {
     database.register_builtin_importers();
 
     let error = database.import_asset_path(&model_path).unwrap_err();
+    println!("{error:?}");
 
     assert!(matches!(
         error,
@@ -2904,6 +2967,47 @@ end
         fs::read(config.imported_root.join(proxy_path.path())).unwrap(),
         b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 0.5 0 0\nv 0 0.5 0\ni 0 1 2\n".to_vec()
     );
+}
+
+#[test]
+fn database_model_importer_accepts_target_render_mesh_alias() {
+    let config = database_config("builtin_model_target_render_mesh_alias");
+    let model_path = AssetPath::parse("models/target_render_mesh_alias.model");
+    let mesh_path = AssetPath::parse("models/target_render_mesh_alias.Body.mesh");
+    let material_path = AssetPath::parse("models/target_render_mesh_alias.Hero.material");
+    let model_source = b"NGA_MODEL_V1
+mesh=Body
+v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+end
+material=Hero
+target_render_mesh=Body
+name=hero
+base_color=0.1,0.2,0.3,1
+end
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.dependencies, vec![mesh_id]);
+    assert_eq!(material_metadata.labels, vec!["Hero"]);
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert!(model_dependencies.contains(&mesh_id));
+    assert!(model_dependencies.contains(&material_id));
 }
 
 #[test]
@@ -4249,6 +4353,110 @@ fn database_model_importer_rejects_generated_dependency_cycles() {
                 && message.contains("model generated dependency cycle detected")
                 && message.contains("mesh `Body` on line 2")
                 && message.contains("material `HeroMaterial` on line 9")
+    ));
+}
+
+#[test]
+fn database_model_importer_rejects_cross_kind_typed_mesh_dependencies() {
+    let config = database_config("builtin_model_cross_kind_mesh_dependency");
+    let model_path = AssetPath::parse("models/cross_kind_mesh_dependency.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=HeroMesh\ndepends=skeleton:Collision\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\nphysics_mesh=Collision\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/cross_kind_mesh_dependency.model")
+                && message.contains("model mesh `HeroMesh`")
+                && message.contains("dependency `Collision` expected generated skeleton but found physics_mesh `Collision`")
+    ));
+}
+
+#[test]
+fn database_model_importer_rejects_material_typed_target_mesh_dependency_mismatch() {
+    let config = database_config("builtin_model_cross_kind_material_target_mesh_dependency");
+    let model_path = AssetPath::parse("models/material_target_mesh_mismatch.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=HeroMesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\nmaterial=HeroMaterial\ntarget_mesh=Collision\nname=hero\nbase_color=1,1,1,1\nend\nphysics_mesh=Collision\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/material_target_mesh_mismatch.model")
+                && message.contains("model material `HeroMaterial`")
+                && message.contains("target mesh `Collision` references generated physics_mesh `Collision` instead of a mesh")
+    ));
+}
+
+#[test]
+fn database_model_importer_rejects_physics_mesh_source_mesh_dependency_mismatch() {
+    let config = database_config("builtin_model_cross_kind_physics_mesh_source_mesh_dependency");
+    let model_path = AssetPath::parse("models/physics_source_mesh_mismatch.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=HeroMesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\nmaterial=HeroMaterial\nname=hero\nbase_color=1,1,1,1\nend\nphysics_mesh=Collision\nsource_mesh=HeroMaterial\nNGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/physics_source_mesh_mismatch.model")
+                && message.contains("model physics_mesh `Collision`")
+                && message.contains("target mesh `HeroMaterial` references generated material `HeroMaterial` instead of a mesh")
+    ));
+}
+
+#[test]
+fn database_model_importer_rejects_unknown_generated_dependency_targets() {
+    let config = database_config("builtin_model_unknown_generated_dependency");
+    let model_path = AssetPath::parse("models/unknown_generated_dependency.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nmesh=HeroMesh\ndepends=Missing\nv 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\nend\nmaterial=HeroMaterial\nname=Hero\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/unknown_generated_dependency.model")
+                && message.contains("model mesh `HeroMesh`")
+                && message.contains("references unknown generated dependency `Missing`")
     ));
 }
 
@@ -6083,6 +6291,30 @@ fn database_model_importer_validates_animation_skeleton_targets() {
                 && message.contains("payload is invalid")
                 && message.contains("translation keyframe 0 in track 0 has time 2 beyond duration 1")
     ));
+
+    let rotation_config = database_config("builtin_model_animation_bad_rotation_quaternion");
+    let model_path = AssetPath::parse("models/bad_animation_rotation_quaternion.model");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"NGA_MODEL_V1\nskeleton=Rig\nNGA_SKELETON_V1\nbone=Root\nend\nanimation=Walk\ndepends=Rig\nNGA_ANIMATION_V1\nduration=1\nticks_per_second=24\ntrack=bone:Root\nrotation=0:0,0,0,2\nend\n"
+            .to_vec(),
+    );
+    let mut database = AssetDatabase::new(rotation_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_animation_rotation_quaternion.model")
+                && message.contains("model animation `Walk`")
+                && message.contains("payload is invalid")
+                && message.contains("rotation keyframe 0 in track 0 quaternion length must be normalized")
+    ));
 }
 
 #[test]
@@ -6588,7 +6820,7 @@ f 1/1/1 2/2/1 3/3/1 # triangle comment
 "
     .to_vec();
     let material_source = b"newmtl Red # material name comment
-Kd 0.2 0.3 0.4 # base color comment
+Kd 0.2 0.3 0.4 0.65 # base color comment
 map_Kd textures/red.texture # albedo texture comment
 "
     .to_vec();
@@ -6611,7 +6843,8 @@ i 0 1 2
     let expected_material = b"# mtllib commented.mtl
 name=Red
 texture.albedo=models/textures/red.texture
-base_color=0.2,0.3,0.4,1
+base_color=0.2,0.3,0.4,0.65
+alpha_mode=blend
 "
     .to_vec();
     let mut io = MemoryAssetIo::new();
@@ -6741,7 +6974,8 @@ base_color=0.2,0.3,0.4,1
     assert_eq!(material.textures.len(), 1);
     assert_eq!(material.textures[0].name, "albedo");
     assert_eq!(material.textures[0].texture.id(), albedo_id);
-    assert_eq!(material.properties.base_color, [0.2, 0.3, 0.4, 1.0]);
+    assert_eq!(material.properties.base_color, [0.2, 0.3, 0.4, 0.65]);
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
 }
 
 #[test]
@@ -6948,6 +7182,120 @@ i 3 4 5
 }
 
 #[test]
+fn database_model_importer_parses_obj_directives_case_insensitively() {
+    let config = database_config("builtin_model_obj_case_insensitive_directives");
+    let model_path = AssetPath::parse("models/case_directives.obj");
+    let material_library_path = AssetPath::parse("models/case_directives.mtl");
+    let first_mesh_path = AssetPath::parse("models/case_directives.PanelA.mesh");
+    let second_mesh_path = AssetPath::parse("models/case_directives.PanelB.mesh");
+    let red_material_path = AssetPath::parse("models/case_directives.Material_Red.material");
+    let blue_material_path = AssetPath::parse("models/case_directives.Material_Blue.material");
+
+    let model_source = b"MTLLIB case_directives.mtl
+o PanelA
+V 0 0 0
+V 1 0 0
+V 0 1 0
+USEMTL Red
+F 1 2 3
+g PanelB
+V 0 0 1
+V 1 0 1
+V 0 1 1
+uSemTl Blue
+f 4 5 6
+"
+    .to_vec();
+    let material_source = b"newmtl Red
+KD 1 0 0
+newmtl Blue
+Kd 0 0 1
+"
+    .to_vec();
+    let expected_first_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let expected_second_mesh = b"v 0 0 1
+v 1 0 1
+v 0 1 1
+i 0 1 2
+"
+    .to_vec();
+    let expected_red_material = b"# mtllib case_directives.mtl
+name=Red
+base_color=1,0,0,1
+"
+    .to_vec();
+    let expected_blue_material = b"# mtllib case_directives.mtl
+name=Blue
+base_color=0,0,1,1
+"
+    .to_vec();
+
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(material_library_path.path(), material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let first_mesh = database
+        .registry()
+        .metadata_by_path(&first_mesh_path)
+        .unwrap();
+    let second_mesh = database
+        .registry()
+        .metadata_by_path(&second_mesh_path)
+        .unwrap();
+    let red_material = database
+        .registry()
+        .metadata_by_path(&red_material_path)
+        .unwrap();
+    let blue_material = database
+        .registry()
+        .metadata_by_path(&blue_material_path)
+        .unwrap();
+
+    assert_eq!(first_mesh.labels, vec!["PanelA"]);
+    assert_eq!(second_mesh.labels, vec!["PanelB"]);
+    assert_eq!(first_mesh.dependencies, vec![red_material.id]);
+    assert_eq!(second_mesh.dependencies, vec![blue_material.id]);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![
+            first_mesh.id,
+            second_mesh.id,
+            red_material.id,
+            blue_material.id
+        ]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(first_mesh_path.path())).unwrap(),
+        expected_first_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(second_mesh_path.path())).unwrap(),
+        expected_second_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(red_material_path.path())).unwrap(),
+        expected_red_material
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(blue_material_path.path())).unwrap(),
+        expected_blue_material
+    );
+
+    // No further assertions on cooked bytes are required here; successful import and import-time
+    // material export demonstrates case-insensitive directive parsing for the OBJ source.
+}
+
+#[test]
 #[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_roughness_extensions() {
     let config = database_config("builtin_model_obj_roughness_extensions");
@@ -6966,7 +7314,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Rough
 pR 0.35
-map_Ns -imfchan green -colorspace Non-Color textures/spec_exponent.texture
+map_Ns -imf-chan green -source-channel green -color-space Non-Color textures/spec_exponent.texture
 "
     .to_vec();
     let expected_material = b"# mtllib rough.mtl
@@ -7187,6 +7535,289 @@ alpha_mode=blend
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_alpha_alias_to_alpha_mode() {
+    let config = database_config("builtin_model_obj_alpha_alias_alpha_mode");
+    let model_path = AssetPath::parse("models/alpha_alias.obj");
+    let mesh_path = AssetPath::parse("models/alpha_alias.Panel.mesh");
+    let material_path = AssetPath::parse("models/alpha_alias.Material_Glass.material");
+    let model_source = b"mtllib alpha_alias.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Glass
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Glass
+ALPHA 0.4
+"
+    .to_vec();
+    let expected_material = b"# mtllib alpha_alias.mtl
+name=Glass
+base_color=1,1,1,0.4
+alpha_mode=blend
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/alpha_alias.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Glass"]);
+    assert_eq!(material_metadata.dependencies, Vec::<AssetId>::new());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies, &vec![mesh_id, material_id]);
+
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "alpha_alias_model",
+            vec![mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!((material.properties.base_color), [1.0, 1.0, 1.0, 0.4]);
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_transparency_alias_to_alpha_mode() {
+    let config = database_config("builtin_model_obj_transparency_alias_alpha_mode");
+    let model_path = AssetPath::parse("models/transparency_alias.obj");
+    let mesh_path = AssetPath::parse("models/transparency_alias.Panel.mesh");
+    let material_path = AssetPath::parse("models/transparency_alias.Material_Glass.material");
+    let model_source = b"mtllib transparency_alias.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Glass
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Glass
+transparency 0.4
+"
+    .to_vec();
+    let expected_material = b"# mtllib transparency_alias.mtl
+name=Glass
+base_color=1,1,1,0.6
+alpha_mode=blend
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/transparency_alias.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Glass"]);
+    assert_eq!(material_metadata.dependencies, Vec::<AssetId>::new());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies, &vec![mesh_id, material_id]);
+
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "transparency_alias_model",
+            vec![mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!((material.properties.base_color), [1.0, 1.0, 1.0, 0.6]);
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_maps_obj_transparency_alias_case_insensitive() {
+    let config =
+        database_config("builtin_model_obj_transparency_alias_alpha_mode_case_insensitive");
+    let model_path = AssetPath::parse("models/transparency_alias.obj");
+    let mesh_path = AssetPath::parse("models/transparency_alias.Panel.mesh");
+    let material_path = AssetPath::parse("models/transparency_alias.Material_Glass.material");
+    let model_source = b"mtllib transparency_alias.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Glass
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Glass
+TRANSPARENCY 0.4
+"
+    .to_vec();
+    let expected_material = b"# mtllib transparency_alias.mtl
+name=Glass
+base_color=1,1,1,0.6
+alpha_mode=blend
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/transparency_alias.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Glass"]);
+    assert_eq!(material_metadata.dependencies, Vec::<AssetId>::new());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies, &vec![mesh_id, material_id]);
+
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "transparency_alias_case_insensitive_model",
+            vec![mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!((material.properties.base_color), [1.0, 1.0, 1.0, 0.6]);
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_maps_obj_dissolve_halo_to_alpha_mode() {
     let config = database_config("builtin_model_obj_dissolve_halo_alpha_mode");
     let model_path = AssetPath::parse("models/halo.obj");
@@ -7299,6 +7930,119 @@ alpha_mode=blend
 
 #[test]
 #[cfg(feature = "bundle")]
+fn database_model_importer_treats_d_halo_directive_case_insensitively() {
+    let config = database_config("builtin_model_obj_d_halo_case_insensitive");
+    let model_path = AssetPath::parse("models/halo_case.obj");
+    let mesh_path = AssetPath::parse("models/halo_case.Panel.mesh");
+    let material_path = AssetPath::parse("models/halo_case.Material_Glass.material");
+    let model_source = b"mtllib halo_case.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Glass
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Glass
+D -HALO 0.4
+"
+    .to_vec();
+    let expected_material = b"# mtllib halo_case.mtl
+name=Glass
+custom.dissolve_halo.bool=true
+base_color=1,1,1,0.4
+alpha_mode=blend
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/halo_case.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Glass"]);
+    assert!(material_metadata.dependencies.is_empty());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id, material_id]
+    );
+
+    database.save_all_metadata_sidecars().unwrap();
+    let mut loaded_sidecars = AssetDatabase::new(config.clone());
+    loaded_sidecars.load_metadata_sidecars().unwrap();
+    assert_eq!(
+        loaded_sidecars
+            .registry()
+            .metadata_by_path(&material_path)
+            .unwrap()
+            .dependencies,
+        Vec::<AssetId>::new()
+    );
+
+    database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "halo_case_model",
+            vec![mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.manifest().dependencies(mesh_id),
+        Some([material_id].as_slice())
+    );
+    assert_eq!(
+        reader.manifest().dependencies(material_id),
+        Some([].as_slice())
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let material = server.get_by_id::<Material>(material_id).unwrap();
+    assert_eq!(
+        material.properties.custom.get("dissolve_halo"),
+        Some(&MaterialPropertyValue::Bool(true))
+    );
+    assert!((material.properties.base_color[3] - 0.4).abs() < 0.0001);
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
 fn database_model_importer_preserves_obj_sharpness_and_bump_alias() {
     let config = database_config("builtin_model_obj_sharpness_bump_alias");
     let model_path = AssetPath::parse("models/compat.obj");
@@ -7316,7 +8060,7 @@ f 1 2 3
     .to_vec();
     let material_source = b"newmtl Detail
 SHARPNESS 42
-map_bump -bm 0.2 textures/detail_normal.texture
+map_bump -bump-scale 0.2 textures/detail_normal.texture
 "
     .to_vec();
     let expected_material = b"# mtllib compat.mtl
@@ -7531,6 +8275,104 @@ custom.texture_antialias.bool=false
         material.properties.custom.get("texture_antialias"),
         Some(&MaterialPropertyValue::Bool(false))
     );
+}
+
+#[test]
+fn database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_true_value() {
+    let config = database_config("builtin_model_obj_texture_antialiasing");
+    let model_path = AssetPath::parse("models/antialias_true_case.obj");
+    let mesh_path = AssetPath::parse("models/antialias_true_case.Panel.mesh");
+    let material_path = AssetPath::parse("models/antialias_true_case.Material_Detail.material");
+    let model_source = b"mtllib antialias_true_case.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Detail
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Detail
+map_aAT TRUE
+"
+    .to_vec();
+    let expected_material = b"# mtllib antialias_true_case.mtl
+name=Detail
+custom.texture_antialias.bool=true
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/antialias_true_case.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Detail"]);
+    assert_eq!(material_metadata.dependencies, Vec::<AssetId>::new());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies, &vec![mesh_id, material_id]);
+}
+
+#[test]
+fn database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_false_value() {
+    let config = database_config("builtin_model_obj_texture_antialiasing");
+    let model_path = AssetPath::parse("models/antialias_false_case.obj");
+    let mesh_path = AssetPath::parse("models/antialias_false_case.Panel.mesh");
+    let material_path = AssetPath::parse("models/antialias_false_case.Material_Detail.material");
+    let model_source = b"mtllib antialias_false_case.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Detail
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Detail
+MAP_AAT false
+"
+    .to_vec();
+    let expected_material = b"# mtllib antialias_false_case.mtl
+name=Detail
+custom.texture_antialias.bool=false
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/antialias_false_case.mtl", material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Detail"]);
+    assert_eq!(material_metadata.dependencies, Vec::<AssetId>::new());
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    let model_dependencies = &database.registry().get(model_id).unwrap().dependencies;
+    assert_eq!(model_dependencies, &vec![mesh_id, material_id]);
 }
 
 #[test]
@@ -9272,18 +10114,18 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl AliasSurface
-base_color 0.1 0.2 0.3
+base-color 0.1 0.2 0.3
 opacity 0.7
-ambient_color 0.01 0.02 0.03
-specular_color 0.4 0.5 0.6
-emissive_color 0.05 0.06 0.07
-transmittance_color 0.2 0.25 0.3
+ambient-color 0.01 0.02 0.03
+specular-color 0.4 0.5 0.6
+emissive-color 0.05 0.06 0.07
+transmittance-color 0.2 0.25 0.3
 metalness 0.4
 roughness 0.35
-clear_coat 0.55
-clear_coat_roughness 0.22
+clear-coat 0.55
+clear-coat-roughness 0.22
 anisotropy 0.66
-anisotropyrotation 0.12
+anisotropy-rotation 0.12
 "
     .to_vec();
     let expected_material = b"# mtllib pbr_scalar_aliases.mtl
@@ -9882,6 +10724,12 @@ fn database_model_importer_preserves_obj_pbr_material_extension_long_aliases() {
             38,
         ),
         (
+            "map_clear-coat-roughness",
+            "clearcoat_roughness_hyphen_alias",
+            "clearcoat_roughness",
+            41,
+        ),
+        (
             "map_anisotropy",
             "anisotropy_direct_alias",
             "anisotropy",
@@ -9892,6 +10740,12 @@ fn database_model_importer_preserves_obj_pbr_material_extension_long_aliases() {
             "anisotropy_rotation_direct_alias",
             "anisotropy_rotation",
             40,
+        ),
+        (
+            "map_metallic-roughness",
+            "metallic_roughness_hyphen_alias",
+            "metallic_roughness",
+            42,
         ),
     ] {
         let config = database_config(&format!("builtin_model_obj_{stem}"));
@@ -11041,6 +11895,68 @@ texture.specular.color_space=non_color
 }
 
 #[test]
+fn database_model_importer_parses_obj_quoted_map_path_with_inline_comment() {
+    let config = database_config("builtin_model_obj_quoted_map_path_with_inline_comment");
+    let model_path = AssetPath::parse("models/quoted_map_comment.obj");
+    let mesh_path = AssetPath::parse("models/quoted_map_comment.Panel.mesh");
+    let material_path = AssetPath::parse("models/quoted_map_comment.Material_Quoted.material");
+    let albedo_path = AssetPath::parse("models/textures/painted red.texture");
+    let specular_path = AssetPath::parse("models/textures/glossy blue.texture");
+    let model_source = b"mtllib quoted_map_comment.mtl
+o Panel
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Quoted
+f 1 2 3
+"
+    .to_vec();
+    let material_source = b"newmtl Quoted
+map_Kd \"textures/painted red.texture\" # albedo map comment
+map_Ks 'textures/glossy blue.texture' # specular map comment
+"
+    .to_vec();
+    let expected_material = b"# mtllib quoted_map_comment.mtl
+name=Quoted
+texture.albedo=models/textures/painted red.texture
+texture.specular=models/textures/glossy blue.texture
+"
+    .to_vec();
+    let albedo_source = texture_bytes(1, 1, 129);
+    let specular_source = texture_bytes(1, 1, 130);
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert("models/quoted_map_comment.mtl", material_source);
+    io.insert(albedo_path.path(), albedo_source.clone());
+    io.insert(specular_path.path(), specular_source.clone());
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let albedo_id = database.import_asset_path(&albedo_path).unwrap();
+    let specular_id = database.import_asset_path(&specular_path).unwrap();
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_id = database.registry().metadata_by_path(&mesh_path).unwrap().id;
+    let material_metadata = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let material_id = material_metadata.id;
+
+    assert_eq!(material_metadata.labels, vec!["Material/Quoted"]);
+    assert_eq!(material_metadata.dependencies, vec![albedo_id, specular_id]);
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![albedo_id, specular_id, mesh_id, material_id]
+    );
+}
+
+#[test]
 #[cfg(feature = "bundle")]
 fn database_model_importer_parses_obj_quoted_material_names_and_libraries() {
     let config = database_config("builtin_model_obj_quoted_material_names");
@@ -11788,7 +12704,7 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Xyz
-Kd xyz 0.95047 1.0 1.08883
+Kd xyz 0.95047 1.0 1.08883 0.5
 Ka XYZ 0.190094 0.2 0.217766
 Ks xyz 0.285141 0.3 0.326649
 Ke xyz 0.095047 0.1 0.108883
@@ -11800,7 +12716,8 @@ name=Xyz
 custom.ambient_color.vec3=0.20000045,0.20001522,0.19996691
 custom.specular_color.vec3=0.30000073,0.30002287,0.29995036
 custom.transmission_filter.vec3=0.50000125,0.500038,0.49991727
-base_color=1.0000025,1.000076,0.99983454,1
+base_color=1.0000025,1.000076,0.99983454,0.5
+alpha_mode=blend
 emissive=0.100000225,0.10000761,0.099983454
 "
     .to_vec();
@@ -11874,8 +12791,9 @@ emissive=0.100000225,0.10000761,0.099983454
     let material = server.get_by_id::<Material>(material_id).unwrap();
     assert_eq!(
         material.properties.base_color,
-        [1.0000025, 1.000076, 0.99983454, 1.0]
+        [1.0000025, 1.000076, 0.99983454, 0.5]
     );
+    assert_eq!(material.render_state.alpha_mode, AlphaMode::Blend);
     assert_eq!(
         material.properties.emissive,
         [0.100000225, 0.10000761, 0.099983454]
@@ -14933,6 +15851,132 @@ base_color=1,0,0,1
 }
 
 #[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_preserves_obj_usemtl_across_group_call_boundaries() {
+    let config = database_config("builtin_model_obj_group_call_material_persistence");
+    let model_path = AssetPath::parse("models/group_call.obj");
+    let first_mesh_path = AssetPath::parse("models/group_call.PanelA.mesh");
+    let included_mesh_path = AssetPath::parse("models/group_call.Panel.mesh");
+    let second_mesh_path = AssetPath::parse("models/group_call.PanelB.mesh");
+    let material_path = AssetPath::parse("models/group_call.Material_Blue.material");
+    let include_path = AssetPath::parse("models/group_call/panel.obj");
+    let include_source = b"o Panel\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf -3 -2 -1\n";
+    let include_library_path = AssetPath::parse("models/group_call.mtl");
+    let material_source = b"newmtl Blue\nKd 0 0 1\n";
+    let model_source = b"mtllib group_call.mtl
+usemtl Blue
+g PanelA
+v 0 0 0
+v 1 0 0
+v 0 1 0
+f 1 2 3
+call group_call/panel.obj
+g PanelB
+v 0 0 1
+v 1 0 1
+v 0 1 1
+f -3 -2 -1
+"
+    .to_vec();
+    let first_expected_mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec();
+    let included_expected_mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\ni 0 1 2\n".to_vec();
+    let second_expected_mesh = b"v 0 0 1\nv 1 0 1\nv 0 1 1\ni 0 1 2\n".to_vec();
+    let expected_material = b"# mtllib group_call.mtl\nname=Blue\nbase_color=0,0,1,1\n".to_vec();
+
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(include_path.path(), include_source);
+    io.insert(include_library_path.path(), material_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let first_mesh = database
+        .registry()
+        .metadata_by_path(&first_mesh_path)
+        .unwrap();
+    let included_mesh = database
+        .registry()
+        .metadata_by_path(&included_mesh_path)
+        .unwrap();
+    let second_mesh = database
+        .registry()
+        .metadata_by_path(&second_mesh_path)
+        .unwrap();
+    let material = database
+        .registry()
+        .metadata_by_path(&material_path)
+        .unwrap();
+    let first_mesh_id = first_mesh.id;
+    let included_mesh_id = included_mesh.id;
+    let second_mesh_id = second_mesh.id;
+    let material_id = material.id;
+
+    assert_eq!(first_mesh.labels, vec!["PanelA"]);
+    assert_eq!(included_mesh.labels, vec!["Panel"]);
+    assert_eq!(second_mesh.labels, vec!["PanelB"]);
+    assert_eq!(material.labels, vec!["Material/Blue"]);
+    assert_eq!(first_mesh.dependencies, vec![material_id]);
+    assert_eq!(included_mesh.dependencies, vec![material_id]);
+    assert_eq!(second_mesh.dependencies, vec![material_id]);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![first_mesh_id, included_mesh_id, second_mesh_id, material_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(first_mesh_path.path())).unwrap(),
+        first_expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(included_mesh_path.path())).unwrap(),
+        included_expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(second_mesh_path.path())).unwrap(),
+        second_expected_mesh
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(material_path.path())).unwrap(),
+        expected_material
+    );
+
+    let first_output = database
+        .cook_asset(first_mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let included_output = database
+        .cook_asset(included_mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let second_output = database
+        .cook_asset(second_mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let _ = database
+        .cook_asset(material_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "group_call_boundaries",
+            vec![first_mesh_id, included_mesh_id, second_mesh_id, material_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(
+        reader.read_path(&first_mesh_path).unwrap(),
+        first_output.bytes
+    );
+    assert_eq!(
+        reader.read_path(&included_mesh_path).unwrap(),
+        included_output.bytes
+    );
+    assert_eq!(
+        reader.read_path(&second_mesh_path).unwrap(),
+        second_output.bytes
+    );
+    assert_eq!(reader.read_path(&material_path).unwrap(), expected_material);
+}
+
+#[test]
 fn database_model_importer_combines_obj_multi_group_labels() {
     let config = database_config("builtin_model_obj_multi_group_labels");
     let model_path = AssetPath::parse("models/multi_group.obj");
@@ -16170,6 +17214,140 @@ texture.albedo=models/parts/sub/textures/detail albedo.texture
     assert_eq!(material.textures.len(), 1);
     assert_eq!(material.textures[0].name, "albedo");
     assert_eq!(material.textures[0].texture.id(), nested_texture_id);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_accepts_nested_obj_free_form_attributes() {
+    let config = database_config("builtin_model_obj_nested_free_form_attributes");
+    let model_path = AssetPath::parse("models/assembled_free_form.obj");
+    let include_path = AssetPath::parse("models/parts/free_form.obj");
+    let mesh_path = AssetPath::parse("models/assembled_free_form.NestedFreeForm.mesh");
+    let model_source = b"call parts/free_form.obj\n".to_vec();
+    let include_source = b"o NestedFreeForm
+MAPLIB procedural.map detail.map
+USEMAP CheckerMap
+CTECH cparm 8
+ctech cspace 0.125
+STECH cspace 0.25
+cstype rat bspline
+deg 3 2
+bmat U 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1
+step 4 5
+vp 0 0
+vp 1 0
+vp 1 1
+vp 0 1
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+vn 0 0 1
+curv 0 1 1 2 3
+CURV2 1 2 3
+surf 0 1 0 1 1/1/1 2/2/1 3/3/1 4/4/1
+surf 0 1 0 1 4/4/1 3/3/1 2/2/1 1/1/1
+parm V 0 0.5 1
+trim 0 1 1
+hole 0 1 1
+scrv 0 1 1
+con 1 0 1 1 2 0 1 1
+sp 1
+END
+f 1 2 3
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 1 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(include_path.path(), include_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["NestedFreeForm"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "nested_free_form_attributes",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+}
+
+#[test]
+fn database_model_importer_reports_invalid_nested_obj_free_form_connection_reference() {
+    let config = database_config("builtin_model_obj_nested_free_form_connection_reference");
+    let model_path = AssetPath::parse("models/assembled_bad_free_form.obj");
+    let include_path = AssetPath::parse("models/parts/free_form_bad.obj");
+    let model_source = b"call parts/free_form_bad.obj\n".to_vec();
+    let include_source = b"o NestedBadFreeForm
+vp 0 0
+vp 1 0
+vp 1 1
+vp 0 1
+v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+vt 0 0
+vt 1 0
+vt 1 1
+vt 0 1
+vn 0 0 1
+curv2 1 2 3
+surf 0 1 0 1 1/1/1 2/2/1 3/3/1 4/4/1
+con 1 0 1 1 1 0 1 99
+f 1 2 3
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    io.insert(include_path.path(), include_source);
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/assembled_bad_free_form.obj")
+                && message.contains("OBJ con index 99")
+                && message.contains("references missing curve2")
+    ));
 }
 
 #[test]
@@ -17566,6 +18744,16 @@ fn database_model_importer_reports_invalid_obj_display_attributes() {
             "too many OBJ d_interp values on line 1",
         ),
         (
+            "builtin_model_obj_invalid_smoothing_group",
+            "s smooth\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "invalid OBJ smoothing group number `smooth` on line 1",
+        ),
+        (
+            "builtin_model_obj_negative_smoothing_group",
+            "s -1\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            "OBJ smoothing group number on line 1 must be positive or `off`",
+        ),
+        (
             "builtin_model_obj_negative_lod_attribute",
             "lod -1\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
             "OBJ lod value on line 1 must be non-negative",
@@ -18034,7 +19222,7 @@ fn database_model_importer_accepts_obj_face_outline_aliases() {
 v 0 0 0
 v 1 0 0
 v 0 1 0
-Fo 1 2 3
+fo 1 2 3
 "
     .to_vec();
     let expected_mesh = b"v 0 0 0
@@ -18072,6 +19260,84 @@ i 0 1 2
     let bundle = database
         .build_bundle(&AssetDatabaseBundleBuild::new(
             "face_outline_alias",
+            vec![mesh_id],
+        ))
+        .unwrap();
+    let reader = BundleReader::from_bytes(&bundle.bytes).unwrap();
+    assert_eq!(reader.manifest().dependencies(mesh_id), Some([].as_slice()));
+    assert_eq!(reader.read_path(&mesh_path).unwrap(), mesh_output.bytes);
+
+    let bundle_io = BundleAssetIo::from_bytes(&bundle.bytes).unwrap();
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(bundle_io);
+    server.register_builtin_loaders();
+    let mounted = server.mount_bundle_bytes(&bundle.bytes).unwrap();
+    let group = server.preload_bundle(&mounted);
+    for _ in 0..8 {
+        server.update_loading();
+        finish_uploads(&mut server);
+        if server.group_state(&group) == AssetLoadState::Ready {
+            break;
+        }
+    }
+
+    assert_eq!(server.group_state(&group), AssetLoadState::Ready);
+    let mesh = server.get_by_id::<Mesh>(mesh_id).unwrap();
+    assert_eq!(
+        mesh.vertices,
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    );
+    assert_eq!(mesh.indices, vec![0, 1, 2]);
+}
+
+#[test]
+#[cfg(feature = "bundle")]
+fn database_model_importer_accepts_obj_face_outline_aliases_case_insensitively() {
+    let config = database_config("builtin_model_obj_face_outline_alias_case");
+    let model_path = AssetPath::parse("models/face_outline_case.obj");
+    let mesh_path = AssetPath::parse("models/face_outline_case.Outline.mesh");
+    let model_source = b"o Outline
+V 0 0 0
+v 1 0 0
+v 0 1 0
+Fo 1 2 3
+"
+    .to_vec();
+    let expected_mesh = b"v 0 0 0
+v 1 0 0
+v 0 1 0
+i 0 1 2
+"
+    .to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(model_path.path(), model_source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let model_id = database.import_asset_path(&model_path).unwrap();
+    let mesh_metadata = database.registry().metadata_by_path(&mesh_path).unwrap();
+    let mesh_id = mesh_metadata.id;
+
+    assert_eq!(mesh_metadata.asset_type, AssetTypeId::of::<Mesh>());
+    assert_eq!(mesh_metadata.labels, vec!["Outline"]);
+    assert_eq!(mesh_metadata.importer_version, 111);
+    assert_eq!(
+        database.registry().get(model_id).unwrap().dependencies,
+        vec![mesh_id]
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(mesh_path.path())).unwrap(),
+        expected_mesh
+    );
+
+    let mesh_output = database
+        .cook_asset(mesh_id, TargetPlatform::Windows)
+        .unwrap();
+    let bundle = database
+        .build_bundle(&AssetDatabaseBundleBuild::new(
+            "face_outline_alias_case",
             vec![mesh_id],
         ))
         .unwrap();
@@ -18220,6 +19486,31 @@ fn database_model_importer_reports_invalid_obj_uv_and_normal_data() {
             if message.contains("importer `ModelImporter` failed")
                 && message.contains("models/bad_normal.obj")
                 && message.contains("OBJ normal index 2 on line 5 references missing normal")
+    ));
+}
+
+#[test]
+fn database_model_importer_rejects_non_zero_tiny_obj_texture_coordinate_w() {
+    let config = database_config("builtin_model_obj_invalid_tiny_uv_w");
+    let uv_w_path = AssetPath::parse("models/tiny_uv_w.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        uv_w_path.path(),
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0 0.0000001\nf 1/1 2/1 3/1\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&uv_w_path).unwrap_err();
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/tiny_uv_w.obj")
+                && message.contains(
+                    "OBJ texture coordinate w component is unsupported because runtime mesh UVs are 2D on line 4"
+                )
     ));
 }
 
@@ -18439,6 +19730,47 @@ refl -type cylinder textures/reflection.texture
 }
 
 #[test]
+fn database_model_importer_reports_invalid_obj_material_reflection_projection_option_case() {
+    let config =
+        database_config("builtin_model_obj_invalid_material_reflection_projection_option_case");
+    let model_path = AssetPath::parse("models/bad_texture_projection_case.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_texture_projection_case.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Reflect
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_texture_projection_case.mtl",
+        b"newmtl Reflect
+refl -TYPE cylinder textures/reflection.texture
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_texture_projection_case.obj")
+                && message.contains(
+                    "OBJ material library `bad_texture_projection_case.mtl` at `models/bad_texture_projection_case.mtl` refl option -TYPE value `cylinder` on line 2"
+                )
+    ));
+}
+
+#[test]
 fn database_model_importer_reports_invalid_obj_material_texture_color_space() {
     let config = database_config("builtin_model_obj_invalid_material_texture_colorspace");
     let model_path = AssetPath::parse("models/bad_texture_colorspace.obj");
@@ -18576,7 +19908,7 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Remap
-map_Kd -mm 0.2 0.7 textures/remap_albedo.texture
+map_Kd -color-remap 0.2 0.7 textures/remap_albedo.texture
 "
     .to_vec();
     let expected_material = b"# mtllib remap.mtl
@@ -18943,7 +20275,7 @@ f 1 2 3
 "
     .to_vec();
     let material_source = b"newmtl Texres
-map_Kd -texres 1024 textures/texres_albedo.texture
+map_Kd -texture-resolution 1024 textures/texres_albedo.texture
 "
     .to_vec();
     let expected_material = b"# mtllib texres.mtl
@@ -19947,6 +21279,41 @@ Kd nope 0 0
                 && message.contains("invalid OBJ material library `bad.mtl` at `models/bad.mtl` Kd value on line 2")
     ));
 
+    let alpha_config = database_config("builtin_model_obj_out_of_range_kd_alpha");
+    let model_path = AssetPath::parse("models/bad_kd_alpha.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_kd_alpha.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_kd_alpha.mtl",
+        b"newmtl Red
+Kd 0.1 0.2 0.3 1.2
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(alpha_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_kd_alpha.obj")
+                && message.contains("OBJ material library `bad_kd_alpha.mtl` at `models/bad_kd_alpha.mtl` Kd alpha value `1.2` on line 2 must be between 0 and 1")
+    ));
+
     let roughness_config = database_config("builtin_model_obj_invalid_roughness_property");
     let model_path = AssetPath::parse("models/bad_roughness.obj");
     let mut io = MemoryAssetIo::new();
@@ -20544,6 +21911,81 @@ d -halo 1.25
                 && message.contains("OBJ material library `bad_dissolve_range.mtl` at `models/bad_dissolve_range.mtl` d value `1.25` on line 2 must be between 0 and 1")
     ));
 
+    let dissolve_range_case_config =
+        database_config("builtin_model_obj_out_of_range_dissolve_property_case");
+    let model_path = AssetPath::parse("models/bad_dissolve_range_case.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_dissolve_range_case.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_dissolve_range_case.mtl",
+        b"newmtl Red
+D -HALO 1.25
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(dissolve_range_case_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    match error {
+        AssetError::Import { message } => {
+            let message = message.to_ascii_lowercase();
+            assert!(
+                message.contains("importer `modelimporter` failed")
+                    && message.contains("models/bad_dissolve_range_case.obj")
+                    && message.contains("obj material library `bad_dissolve_range_case.mtl` at `models/bad_dissolve_range_case.mtl` d value `1.25` on line 2 must be between 0 and 1")
+            );
+        }
+        _ => panic!("expected AssetError::Import, got {error:?}"),
+    }
+
+    let alpha_range_config = database_config("builtin_model_obj_out_of_range_alpha_property");
+    let model_path = AssetPath::parse("models/bad_alpha_range.obj");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        model_path.path(),
+        b"mtllib bad_alpha_range.mtl
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Red
+f 1 2 3
+"
+        .to_vec(),
+    );
+    io.insert(
+        "models/bad_alpha_range.mtl",
+        b"newmtl Red
+alpha 1.2
+"
+        .to_vec(),
+    );
+    let mut database = AssetDatabase::new(alpha_range_config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&model_path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `ModelImporter` failed")
+                && message.contains("models/bad_alpha_range.obj")
+                && message.contains("OBJ material library `bad_alpha_range.mtl` at `models/bad_alpha_range.mtl` alpha value `1.2` on line 2 must be between 0 and 1")
+    ));
+
     let transparency_range_config =
         database_config("builtin_model_obj_out_of_range_transparency_property");
     let model_path = AssetPath::parse("models/bad_transparency_range.obj");
@@ -21117,9 +22559,9 @@ fn database_scene_and_prefab_importers_preserve_runtime_documents_and_dependenci
     let material_path = AssetPath::parse("materials/shared.material");
     let mesh_path = AssetPath::parse("meshes/shared.mesh");
     let scene_bytes =
-        b"NGA_SCENE_V1\nname=imported_scene\ndependency=textures/shared.texture\ndependency=materials/shared.material\nentity=Root\ncomponent=Transform|translation=0,0,0\nentity=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/shared.mesh;material=materials/shared.material\n".to_vec();
+        b"NGA_SCENE_V1\nScene Name=imported_scene\nDepends=textures/shared.texture\nReferences=materials/shared.material\nGame Object=Root\nCmp=Transform|translation=0,0,0\nGame-Object=Hero;Parent Index=0\nComponent=Mesh Renderer|MESH=meshes/shared.mesh;Material=materials/shared.material\n".to_vec();
     let prefab_bytes =
-        b"NGA_PREFAB_V1\ndependency=textures/shared.texture\ndependency=materials/shared.material\nroot=Root\ncomponent=Transform|translation=0,0,0\nchild=Hero;parent=0\ncomponent=MeshRenderer|mesh=meshes/shared.mesh;material=materials/shared.material\n".to_vec();
+        b"NGA_PREFAB_V1\nDepends=textures/shared.texture\nReferences=materials/shared.material\nRoot Entity=Root\nCmp=Transform|translation=0,0,0\nChild-Entity=Hero;Parent Index=0\nComponent=Mesh Renderer|MESH=meshes/shared.mesh;Material=materials/shared.material\n".to_vec();
     let texture_id = AssetId::new();
     let material_id = AssetId::new();
     let mesh_id = AssetId::new();
@@ -21311,13 +22753,13 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
     };
     let font_source = SourceAsset {
         path: font_path.clone(),
-        bytes: b"NGA_FONT_SOURCE_V1\n# canonical order should not depend on source order\nglyph = char=B; size=1x1; bitmap=128\nfamily = Debug Sans\nglyph=char=A;size=2x1;bitmap=0, 255\n"
+        bytes: b"NGA_FONT_SOURCE_V1\n# canonical order should not depend on source order\nglyph = char=B; size=1x1; Advance X=2; Offset Y=-1; bitmap=128\nfamily = Debug Sans\nLine Height=8\nKern=First=A;Second=B;Amount=-1\nglyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0, 255\n"
             .to_vec(),
         hash: ContentHash(404),
     };
     let physics_source = SourceAsset {
         path: physics_path.clone(),
-        bytes: b"NGA_PHYSICS_MESH_SOURCE_V1\n# source accepts key/value and directive forms\nkind = tri_mesh\nvertex = 0.0, 0.0, 0.0\nv 1.50 0 0\nv 0 1 0\ntriangle = 0, 1, 2\n"
+        bytes: b"NGA_PHYSICS_MESH_SOURCE_V1\n# source accepts aliases plus key/value and directive forms\nMesh Kind = triangle-mesh\nPosition = 0.0, 0.0, 0.0\nvertex 1.50 0 0\npoint 0 1 0\nFace = 0, 1, 2\n"
             .to_vec(),
         hash: ContentHash(505),
     };
@@ -21373,17 +22815,17 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         font_output.metadata.importer.as_deref(),
         Some("FontImporter")
     );
-    assert_eq!(font_output.metadata.importer_version, 3);
+    assert_eq!(font_output.metadata.importer_version, 5);
     assert_eq!(font_output.metadata.source_path.as_ref(), Some(&font_path));
     assert_eq!(font_output.metadata.cooked_path.as_ref(), Some(&font_path));
     assert_eq!(font_output.metadata.source_hash, Some(ContentHash(404)));
-    assert_eq!(font_output.metadata.version_hash, Some(VersionHash(3)));
-    assert_eq!(font_output.version_hash, VersionHash(3));
+    assert_eq!(font_output.metadata.version_hash, Some(VersionHash(5)));
+    assert_eq!(font_output.version_hash, VersionHash(5));
     assert_eq!(font_output.generated.len(), 1);
     assert_eq!(font_output.generated[0].path, font_path);
     assert_eq!(
         font_output.generated[0].bytes,
-        b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\nglyph=char=B;size=1x1;bitmap=128\n"
+        b"NGA_FONT_V1\nfamily=Debug Sans\nline_height=8\nglyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0,255\nglyph=char=B;size=1x1;advance=2;bearing=0,-1;bitmap=128\nkerning=left=A;right=B;adjust=-1\n"
             .to_vec()
     );
     assert_eq!(font_output.generated[0].asset_type, Font::TYPE_ID);
@@ -21395,7 +22837,7 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         physics_output.metadata.importer.as_deref(),
         Some("PhysicsMeshImporter")
     );
-    assert_eq!(physics_output.metadata.importer_version, 2);
+    assert_eq!(physics_output.metadata.importer_version, 3);
     assert_eq!(
         physics_output.metadata.source_path.as_ref(),
         Some(&physics_path)
@@ -21405,8 +22847,8 @@ fn database_audio_font_and_physics_mesh_importers_preserve_runtime_documents_and
         Some(&physics_path)
     );
     assert_eq!(physics_output.metadata.source_hash, Some(ContentHash(505)));
-    assert_eq!(physics_output.metadata.version_hash, Some(VersionHash(2)));
-    assert_eq!(physics_output.version_hash, VersionHash(2));
+    assert_eq!(physics_output.metadata.version_hash, Some(VersionHash(3)));
+    assert_eq!(physics_output.version_hash, VersionHash(3));
     assert_eq!(physics_output.generated.len(), 1);
     assert_eq!(physics_output.generated[0].path, physics_path);
     assert_eq!(
@@ -21496,6 +22938,63 @@ fn database_builtin_animation_and_skeleton_importers_and_cookers_preserve_runtim
 }
 
 #[test]
+fn database_animation_and_skeleton_importers_accept_document_aliases() {
+    let config = database_config("animation_skeleton_import_alias_documents");
+    let animation_path = AssetPath::parse("animations/alias.animation");
+    let skeleton_path = AssetPath::parse("skeletons/alias.skeleton");
+    let animation_source = b"NGA_ANIMATION_SOURCE_V1\nLength=2\nFrame Rate=30\nChannel=node-index:3\nPosition=0:1,2,3\nQuaternion=0:0,0,0,1\nScaling=1:2,2,2\nTrack=bone:Hand\nLocation=0.5:3,2,1\n".to_vec();
+    let skeleton_source = b"NGA_SKELETON_SOURCE_V1\nJoint=Root;Bind Pose=1,0,0,2,0,1,0,0,0,0,1,0,0,0,0,1;Inverse Bind Pose=1,0,0,-2,0,1,0,0,0,0,1,0,0,0,0,1\nBone=Hand;Parent Index=0;Local Bind Transform=1,0,0,3,0,1,0,0,0,0,1,0,0,0,0,1;Inv-Bind=1,0,0,-5,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec();
+    let animation_runtime = b"NGA_ANIMATION_V1\nLength=2\nFrame Rate=30\nChannel=node-index:3\nPosition=0:1,2,3\nQuaternion=0:0,0,0,1\nScaling=1:2,2,2\nTrack=bone:Hand\nLocation=0.5:3,2,1\n".to_vec();
+    let skeleton_runtime = b"NGA_SKELETON_V1\nJoint=Root;Bind Pose=1,0,0,2,0,1,0,0,0,0,1,0,0,0,0,1;Inverse Bind Pose=1,0,0,-2,0,1,0,0,0,0,1,0,0,0,0,1\nBone=Hand;Parent Index=0;Local Bind Transform=1,0,0,3,0,1,0,0,0,0,1,0,0,0,0,1;Inv-Bind=1,0,0,-5,0,1,0,0,0,0,1,0,0,0,0,1\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(animation_path.path(), animation_source);
+    io.insert(skeleton_path.path(), skeleton_source);
+
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let animation_id = database.import_asset_path(&animation_path).unwrap();
+    let skeleton_id = database.import_asset_path(&skeleton_path).unwrap();
+    assert_eq!(
+        fs::read(config.imported_root.join(animation_path.path())).unwrap(),
+        animation_runtime
+    );
+    assert_eq!(
+        fs::read(config.imported_root.join(skeleton_path.path())).unwrap(),
+        skeleton_runtime
+    );
+
+    let animation_output = database
+        .cook_asset(animation_id, TargetPlatform::Windows)
+        .unwrap();
+    let skeleton_output = database
+        .cook_asset(skeleton_id, TargetPlatform::Windows)
+        .unwrap();
+    assert_eq!(animation_output.bytes, animation_runtime);
+    assert_eq!(skeleton_output.bytes, skeleton_runtime);
+
+    let mut server_io = MemoryAssetIo::new();
+    server_io.insert(animation_path.path(), animation_output.bytes);
+    server_io.insert(skeleton_path.path(), skeleton_output.bytes);
+    let mut server = AssetServer::new(AssetServerConfig::default());
+    server.set_io(server_io);
+    server.register_builtin_loaders();
+    let animation: Handle<AnimationClip> = server.load(animation_path);
+    let skeleton: Handle<Skeleton> = server.load(skeleton_path);
+    server.update_loading();
+
+    assert!(server.is_ready(&animation));
+    assert!(server.is_ready(&skeleton));
+    assert_eq!(
+        server.get(&animation).unwrap().tracks[0].target,
+        AnimationTarget::NodeIndex(3)
+    );
+    assert_eq!(server.get(&skeleton).unwrap().bones[1].parent, Some(0));
+}
+
+#[test]
 fn database_animation_and_skeleton_cookers_canonicalize_source_documents() {
     let config = database_config("animation_skeleton_cooker_source_conversion");
     let animation_path = AssetPath::parse("animations/source.animation");
@@ -21507,7 +23006,7 @@ fn database_animation_and_skeleton_cookers_canonicalize_source_documents() {
     io.insert(skeleton_path.path(), skeleton_source_bytes());
     io.insert(
         invalid_animation_path.path(),
-        b"NGA_ANIMATION_SOURCE_V1\nduration=-1.0\nticks_per_second=24.0\ntrack=node:Hero\ntranslation=0.0:0,0,0\n"
+        b"NGA_ANIMATION_SOURCE_V1\nduration=1.0\nticks_per_second=24.0\ntrack=node:Hero\nrotation=0.0:0,0,0,2\n"
             .to_vec(),
     );
     io.insert(
@@ -21567,7 +23066,7 @@ fn database_animation_and_skeleton_cookers_canonicalize_source_documents() {
         Err(AssetError::Cook { message })
             if message.contains("AnimationCooker")
                 && message.contains("failed to validate animation source")
-                && message.contains("duration must be greater than zero")
+                && message.contains("rotation keyframe 0 in track 0 quaternion length must be normalized")
     ));
     assert!(matches!(
         database.cook_asset(invalid_skeleton_id, TargetPlatform::Windows),
@@ -23655,33 +25154,47 @@ fn database_audio_importer_applies_streaming_setting_override() {
 }
 
 #[test]
-fn database_audio_importer_reports_unsupported_audio_compression() {
-    let config = database_config("audio_importer_unsupported_compression");
-    let path = AssetPath::parse("audio/unsupported.audio");
-    let mut io = MemoryAssetIo::new();
-    io.insert(
-        path.path(),
-        b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=i16\nsamples=0,1\nstreaming=false\n"
-            .to_vec(),
-    );
-    let mut database = AssetDatabase::new(config);
-    database.set_io(io);
-    database.register_builtin_importers();
-    let mut settings = ImporterSettings::default();
-    settings.set("compression", "vorbis");
+fn database_audio_importer_reports_text_source_compression_requires_ogg_payload() {
+    for (compression, expected) in [
+        (
+            "vorbis",
+            "audio import compression `vorbis` requires a supported binary Ogg payload; text-source transcoding is not implemented",
+        ),
+        (
+            "opus",
+            "audio import compression `opus` requires a supported binary Ogg payload; text-source transcoding is not implemented",
+        ),
+    ] {
+        let config = database_config(&format!(
+            "audio_importer_text_source_{compression}_requires_ogg"
+        ));
+        let path_string = format!("audio/unsupported_{compression}.audio");
+        let path = AssetPath::parse(&path_string);
+        let mut io = MemoryAssetIo::new();
+        io.insert(
+            path.path(),
+            b"NGA_AUDIO_SOURCE_V1\nsample_rate=48000\nchannels=1\nformat=i16\nsamples=0,1\nstreaming=false\n"
+                .to_vec(),
+        );
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+        let mut settings = ImporterSettings::default();
+        settings.set("compression", compression);
 
-    let error = database
-        .import_asset_path_with_settings(&path, &settings)
-        .unwrap_err();
+        let error = database
+            .import_asset_path_with_settings(&path, &settings)
+            .unwrap_err();
 
-    assert!(matches!(
-        error,
-        AssetError::Import { message }
-            if message.contains("importer `AudioImporter` failed")
-                && message.contains("audio/unsupported.audio")
-                && message.contains("compression=vorbis")
-                && message.contains("unsupported audio import compression `vorbis`; expected `none`")
-    ));
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `AudioImporter` failed")
+                    && message.contains(&path.display_string())
+                    && message.contains(&format!("compression={compression}"))
+                    && message.contains(expected)
+        ));
+    }
 }
 
 #[test]
@@ -23765,6 +25278,48 @@ fn database_audio_importer_allows_ogg_opus_compression_for_binary_source() {
         output.metadata,
         database.registry().get(id).unwrap().clone()
     );
+}
+
+#[test]
+fn database_audio_importer_rejects_ogg_compression_codec_mismatch() {
+    for (case, compression, source, expected) in [
+        (
+            "vorbis_setting_opus_payload",
+            "vorbis",
+            ogg_opus_audio_bytes(48_000, 1),
+            "audio Ogg payload codec `opus` does not match import compression `vorbis`",
+        ),
+        (
+            "opus_setting_vorbis_payload",
+            "opus",
+            ogg_vorbis_audio_bytes(44_100, 2),
+            "audio Ogg payload codec `vorbis` does not match import compression `opus`",
+        ),
+    ] {
+        let config = database_config(&format!("audio_importer_ogg_codec_mismatch_{case}"));
+        let path_string = format!("audio/{case}.ogg");
+        let path = AssetPath::parse(&path_string);
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), source);
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+        let mut settings = ImporterSettings::default();
+        settings.set("compression", compression);
+
+        let error = database
+            .import_asset_path_with_settings(&path, &settings)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `AudioImporter` failed")
+                    && message.contains(&path.display_string())
+                    && message.contains(&format!("compression={compression}"))
+                    && message.contains(expected)
+        ));
+    }
 }
 
 #[test]
@@ -23908,7 +25463,7 @@ fn database_builtin_font_import_cook_and_runtime_load_preserves_payload() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
     assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
-    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(metadata.importer_version, 5);
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.version_hash, VersionHash(2));
@@ -23963,7 +25518,7 @@ fn database_builtin_binary_font_import_cook_and_runtime_loads() {
         let metadata = database.registry().get(id).unwrap();
         assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
         assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
-        assert_eq!(metadata.importer_version, 3);
+        assert_eq!(metadata.importer_version, 5);
         assert_eq!(
             fs::read(config.imported_root.join(path.path())).unwrap(),
             bytes
@@ -24001,8 +25556,8 @@ fn database_builtin_binary_font_import_cook_and_runtime_loads() {
 fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let config = database_config("font_importer_source_conversion");
     let path = AssetPath::parse("fonts/generated.font");
-    let source = b"NGA_FONT_SOURCE_V1\n# canonical order should not depend on source order\nglyph = char=B; size=1x1; bitmap=128\nfamily = Debug Sans\nglyph=char=A;size=2x1;bitmap=0, 255\n".to_vec();
-    let expected = b"NGA_FONT_V1\nfamily=Debug Sans\nglyph=char=A;size=2x1;bitmap=0,255\nglyph=char=B;size=1x1;bitmap=128\n".to_vec();
+    let source = b"NGA_FONT_SOURCE_V1\n# canonical order should not depend on source order\nCharacter = Code Point=B; Dimensions=1x1; Advance X=2; Offset Y=-1; Pixels=128\nFamily Name = Debug Sans\nLine Height = 8\nKerning Pair=Left=A;Right=B;Adjustment=-1\nglyph=character=A;size=2x1;advance=3;bearing=1,2;alpha=0 255\n".to_vec();
+    let expected = b"NGA_FONT_V1\nfamily=Debug Sans\nline_height=8\nglyph=char=A;size=2x1;advance=3;bearing=1,2;bitmap=0,255\nglyph=char=B;size=1x1;advance=2;bearing=0,-1;bitmap=128\nkerning=left=A;right=B;adjust=-1\n".to_vec();
     let mut io = MemoryAssetIo::new();
     io.insert(path.path(), source);
     let mut database = AssetDatabase::new(config.clone());
@@ -24014,7 +25569,7 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<Font>());
     assert_eq!(metadata.importer.as_deref(), Some("FontImporter"));
-    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(metadata.importer_version, 5);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -24060,11 +25615,43 @@ fn database_font_importer_canonicalizes_source_to_runtime_font_bytes() {
     let FontData::Bitmap(bitmap) = &loaded.data else {
         panic!("font source importer should produce bitmap font bytes");
     };
+    assert_eq!(bitmap.line_height, 8);
     assert_eq!(bitmap.glyphs.len(), 2);
     assert_eq!(bitmap.glyphs[0].codepoint, 'A');
+    assert_eq!(bitmap.glyphs[0].advance_x, 3);
+    assert_eq!(
+        (bitmap.glyphs[0].bearing_x, bitmap.glyphs[0].bearing_y),
+        (1, 2)
+    );
+    assert_eq!((bitmap.glyphs[0].atlas_x, bitmap.glyphs[0].atlas_y), (0, 0));
     assert_eq!(bitmap.glyphs[0].bitmap, vec![0, 255]);
     assert_eq!(bitmap.glyphs[1].codepoint, 'B');
+    assert_eq!(bitmap.glyphs[1].advance_x, 2);
+    assert_eq!(
+        (bitmap.glyphs[1].bearing_x, bitmap.glyphs[1].bearing_y),
+        (0, -1)
+    );
+    assert_eq!((bitmap.glyphs[1].atlas_x, bitmap.glyphs[1].atlas_y), (2, 0));
     assert_eq!(bitmap.glyphs[1].bitmap, vec![128]);
+    assert_eq!(bitmap.kerning_pairs.len(), 1);
+    assert_eq!(bitmap.kerning_pairs[0].left, 'A');
+    assert_eq!(bitmap.kerning_pairs[0].right, 'B');
+    assert_eq!(bitmap.kerning_pairs[0].adjustment, -1);
+    assert_eq!((bitmap.atlas_width, bitmap.atlas_height), (3, 1));
+    assert_eq!(bitmap.atlas_bitmap, vec![0, 255, 128]);
+    let layout = bitmap.layout_text("AB\nA").unwrap();
+    assert_eq!(
+        (layout.advance_width, layout.height, layout.line_count),
+        (4, 16, 2)
+    );
+    assert_eq!(
+        layout
+            .glyphs
+            .iter()
+            .map(|glyph| (glyph.codepoint, glyph.x, glyph.y))
+            .collect::<Vec<_>>(),
+        vec![('A', 1, 2), ('B', 2, -1), ('A', 1, 10)]
+    );
 }
 
 #[test]
@@ -24090,8 +25677,8 @@ fn database_font_importer_preserves_binary_font_bytes() {
     assert_eq!(opentype_metadata.asset_type, AssetTypeId::of::<Font>());
     assert_eq!(truetype_metadata.importer.as_deref(), Some("FontImporter"));
     assert_eq!(opentype_metadata.importer.as_deref(), Some("FontImporter"));
-    assert_eq!(truetype_metadata.importer_version, 3);
-    assert_eq!(opentype_metadata.importer_version, 3);
+    assert_eq!(truetype_metadata.importer_version, 5);
+    assert_eq!(opentype_metadata.importer_version, 5);
     assert_eq!(
         fs::read(config.imported_root.join(truetype_path.path())).unwrap(),
         truetype_bytes
@@ -24176,6 +25763,44 @@ fn database_font_importer_reports_invalid_source_bitmap() {
 }
 
 #[test]
+fn database_font_importer_reports_invalid_source_kerning() {
+    let cases = [
+        (
+            "missing_glyph",
+            b"NGA_FONT_SOURCE_V1\nfamily=Broken\nglyph=char=A;size=1x1;bitmap=255\nkerning=left=A;right=V;adjust=-1\n"
+                .as_slice(),
+            "font source kerning pair 0 references missing right glyph `V`",
+        ),
+        (
+            "duplicate_pair",
+            b"NGA_FONT_SOURCE_V1\nfamily=Broken\nglyph=char=A;size=1x1;bitmap=255\nglyph=char=V;size=1x1;bitmap=255\nkerning=left=A;right=V;adjust=-1\nkern=first=A;second=V;amount=-2\n"
+                .as_slice(),
+            "font source repeats kerning pair `AV`",
+        ),
+    ];
+
+    for (name, bytes, expected) in cases {
+        let config = database_config(&format!("font_importer_invalid_kerning_{name}"));
+        let path = AssetPath::parse(&format!("fonts/{name}.font"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `FontImporter` failed")
+                    && message.contains(expected)
+                    && message.contains(path.path())
+        ));
+    }
+}
+
+#[test]
 fn database_font_importer_reports_invalid_binary_font() {
     let config = database_config("font_importer_invalid_binary_font");
     let path = AssetPath::parse("fonts/broken.otf");
@@ -24212,7 +25837,7 @@ fn database_builtin_physics_mesh_import_cook_and_runtime_load_preserves_payload(
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<PhysicsMesh>());
     assert_eq!(metadata.importer.as_deref(), Some("PhysicsMeshImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
 
     assert_eq!(output.bytes, bytes);
@@ -24255,7 +25880,7 @@ fn database_physics_mesh_importer_canonicalizes_source_to_runtime_bytes() {
     let metadata = database.registry().get(id).unwrap();
     assert_eq!(metadata.asset_type, AssetTypeId::of::<PhysicsMesh>());
     assert_eq!(metadata.importer.as_deref(), Some("PhysicsMeshImporter"));
-    assert_eq!(metadata.importer_version, 2);
+    assert_eq!(metadata.importer_version, 3);
     assert_eq!(metadata.cooked_path.as_ref(), Some(&path));
     assert_eq!(
         fs::read(config.imported_root.join(path.path())).unwrap(),
@@ -24264,7 +25889,7 @@ fn database_physics_mesh_importer_canonicalizes_source_to_runtime_bytes() {
 
     let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
     assert_eq!(output.bytes, expected);
-    assert_eq!(output.version_hash, VersionHash(1));
+    assert_eq!(output.version_hash, VersionHash(2));
     assert_eq!(
         output.metadata,
         database.registry().get(id).unwrap().clone()
@@ -24303,6 +25928,57 @@ fn database_physics_mesh_importer_canonicalizes_source_to_runtime_bytes() {
         vec![[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [0.0, 1.0, 0.0]]
     );
     assert_eq!(loaded.indices, vec![[0, 1, 2]]);
+    assert!(loaded.height_field.is_none());
+}
+
+#[test]
+fn database_physics_mesh_importer_canonicalizes_heightfield_source() {
+    let config = database_config("physics_mesh_importer_heightfield_source_conversion");
+    let path = AssetPath::parse("physics/terrain.physics");
+    let source = b"NGA_PHYSICS_MESH_SOURCE_V1\nCollision Kind = height-field\nRow Count=2\nColumns=3\nCell Scale=1, 2, 0.5\nSamples=0,1,2\nheights 3 4 5\n".to_vec();
+    let expected = b"NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=3\nscale=1 2 0.5\nheights=0,1,2,3,4,5\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    let metadata = database.registry().get(id).unwrap();
+    assert_eq!(metadata.asset_type, AssetTypeId::of::<PhysicsMesh>());
+    assert_eq!(metadata.importer.as_deref(), Some("PhysicsMeshImporter"));
+    assert_eq!(metadata.importer_version, 3);
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.version_hash, VersionHash(2));
+    assert_eq!(output.bytes, expected);
+    assert_eq!(
+        fs::read(config.cooked_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let mesh: Handle<PhysicsMesh> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&mesh));
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.kind, PhysicsMeshKind::HeightField);
+    assert!(loaded.vertices.is_empty());
+    assert!(loaded.indices.is_empty());
+    let height_field = loaded.height_field.as_ref().unwrap();
+    assert_eq!((height_field.rows, height_field.cols), (2, 3));
+    assert_eq!(height_field.scale, [1.0, 2.0, 0.5]);
+    assert_eq!(height_field.heights, vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
 }
 
 #[test]
@@ -24326,6 +26002,81 @@ fn database_physics_mesh_importer_reports_invalid_source_index() {
             if message.contains("importer `PhysicsMeshImporter` failed")
                 && message.contains("physics mesh source index 1 references missing vertex; vertex count is 1")
                 && message.contains("physics/invalid.physics")
+    ));
+}
+
+#[test]
+fn database_physics_mesh_importer_reports_invalid_heightfield_source() {
+    let cases = [
+        (
+            "sample_count",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,1,2\n"
+                .as_slice(),
+            "heightfield physics mesh source has 3 heights, expected 4 for 2x2",
+        ),
+        (
+            "non_positive_scale",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,0,1\nheights=0,0,0,0\n"
+                .as_slice(),
+            "heightfield scale values must be positive on line 5",
+        ),
+        (
+            "mixed_geometry",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,0,0,0\nv 0 0 0\n"
+                .as_slice(),
+            "heightfield physics mesh source cannot contain vertices or triangles",
+        ),
+        (
+            "small_dimension",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=heightfield\nrows=1\ncols=2\nscale=1,1,1\nheights=0,0\n"
+                .as_slice(),
+            "heightfield rows must be at least 2 on line 3",
+        ),
+    ];
+
+    for (name, bytes, expected) in cases {
+        let config = database_config(&format!("physics_mesh_invalid_heightfield_{name}"));
+        let path = AssetPath::parse(&format!("physics/{name}.physics"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `PhysicsMeshImporter` failed")
+                    && message.contains(expected)
+                    && message.contains(path.path())
+        ));
+    }
+}
+
+#[test]
+fn database_physics_mesh_importer_reports_invalid_runtime_payload() {
+    let config = database_config("physics_mesh_importer_invalid_runtime");
+    let path = AssetPath::parse("physics/invalid_runtime.physics");
+    let mut io = MemoryAssetIo::new();
+    io.insert(
+        path.path(),
+        b"NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 NaN 0\ni 0 0 0\n".to_vec(),
+    );
+    let mut database = AssetDatabase::new(config);
+    database.set_io(io);
+    database.register_builtin_importers();
+
+    let error = database.import_asset_path(&path).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Import { message }
+            if message.contains("importer `PhysicsMeshImporter` failed")
+                && message.contains("physics mesh source is invalid")
+                && message.contains("physics mesh vertex value must be finite on line 3")
+                && message.contains("physics/invalid_runtime.physics")
     ));
 }
 

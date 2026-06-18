@@ -467,7 +467,15 @@ fn cooker_feature_gates_match_registration_paths() {
             .with_file("animations/hero.animation", animation_source_bytes())
             .with_file("skeletons/hero.skeleton", skeleton_source_bytes())
             .with_file("scenes/hero.scene", scene_bytes())
-            .with_file("prefabs/hero.prefab", prefab_bytes()),
+            .with_file("prefabs/hero.prefab", prefab_bytes())
+            .with_file(
+                "scenes/invalid.scene",
+                b"NGA_SCENE_V1\ncomponent=MeshRenderer;mesh=meshes/cube.mesh\n".to_vec(),
+            )
+            .with_file(
+                "prefabs/invalid.prefab",
+                b"NGA_PREFAB_V1\nchild=Child\n".to_vec(),
+            ),
     );
 
     if asset_feature_enabled(AssetFeature::Cookers) {
@@ -496,6 +504,18 @@ fn cooker_feature_gates_match_registration_paths() {
     database.registry_mut().insert(AssetMetadata::runtime(
         prefab_id,
         AssetPath::parse("prefabs/hero.prefab"),
+        Prefab::TYPE_ID,
+    ));
+    let invalid_scene_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f006);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        invalid_scene_id,
+        AssetPath::parse("scenes/invalid.scene"),
+        SceneAsset::TYPE_ID,
+    ));
+    let invalid_prefab_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f007);
+    database.registry_mut().insert(AssetMetadata::runtime(
+        invalid_prefab_id,
+        AssetPath::parse("prefabs/invalid.prefab"),
         Prefab::TYPE_ID,
     ));
     let animation_id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_f004);
@@ -606,6 +626,24 @@ fn cooker_feature_gates_match_registration_paths() {
         assert_eq!(prefab_output.bytes, prefab_bytes());
         assert_eq!(animation_output.bytes, animation_runtime_bytes());
         assert_eq!(skeleton_output.bytes, skeleton_runtime_bytes());
+        let invalid_scene_error = database
+            .cook_asset(invalid_scene_id, TargetPlatform::Windows)
+            .unwrap_err();
+        let invalid_prefab_error = database
+            .cook_asset(invalid_prefab_id, TargetPlatform::Windows)
+            .unwrap_err();
+        assert!(matches!(
+            invalid_scene_error,
+            AssetError::Cook { message }
+                if message.contains("cooker `SceneCooker` failed")
+                    && message.contains("scene component on line 2 has no entity")
+        ));
+        assert!(matches!(
+            invalid_prefab_error,
+            AssetError::Cook { message }
+                if message.contains("cooker `PrefabCooker` failed")
+                    && message.contains("prefab child on line 2 has no root")
+        ));
     } else {
         assert!(matches!(
             database.cook_asset(scene_id, TargetPlatform::Windows),

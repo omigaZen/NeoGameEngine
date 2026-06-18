@@ -57,6 +57,12 @@ pub enum AudioCompression {
     Opus,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OggAudioCodec {
+    Vorbis,
+    Opus,
+}
+
 pub struct AudioLoader;
 
 impl AudioLoader {
@@ -267,6 +273,29 @@ fn validate_sample_count(sample_count: usize, channels: u16) -> Result<(), Asset
 }
 
 fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
+    let (packet, granule_position) = parse_ogg_first_packet(bytes)?;
+    let (_codec, channels, sample_rate) = parse_ogg_audio_packet(packet)?;
+    let duration_seconds = if sample_rate == 0 {
+        0.0
+    } else {
+        granule_position as f32 / sample_rate as f32
+    };
+    Ok(AudioClip {
+        sample_rate,
+        channels,
+        samples: AudioSamples::Streaming(AudioStreamHandle(stable_hash(bytes))),
+        duration_seconds,
+        streaming: true,
+    })
+}
+
+pub fn ogg_audio_codec(bytes: &[u8]) -> Result<OggAudioCodec, AssetError> {
+    let (packet, _granule_position) = parse_ogg_first_packet(bytes)?;
+    let (codec, _channels, _sample_rate) = parse_ogg_audio_packet(packet)?;
+    Ok(codec)
+}
+
+fn parse_ogg_first_packet(bytes: &[u8]) -> Result<(&[u8], u64), AssetError> {
     let header_size = 27usize;
     if bytes.len() < header_size {
         return Err(AssetError::Decode {
@@ -336,17 +365,13 @@ fn parse_ogg_audio_clip(bytes: &[u8]) -> Result<AudioClip, AssetError> {
     }
     let packet = &bytes[segment_table_end..packet_end];
 
-    let (channels, sample_rate) = parse_ogg_audio_packet(packet)?;
-    Ok(AudioClip {
-        sample_rate,
-        channels,
-        samples: AudioSamples::Streaming(AudioStreamHandle(stable_hash(bytes))),
-        duration_seconds: 0.0,
-        streaming: true,
-    })
+    let granule_position = u64::from_le_bytes([
+        bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+    ]);
+    Ok((packet, granule_position))
 }
 
-fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(u16, u32), AssetError> {
+fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(OggAudioCodec, u16, u32), AssetError> {
     if packet.len() >= 16 && packet.starts_with(b"OpusHead") {
         let version = packet[8];
         if version != 0 && version != 1 {
@@ -355,18 +380,16 @@ fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(u16, u32), AssetError> {
             });
         }
         let channels = u16::from(packet[9]);
-        let sample_rate = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
+        let mut sample_rate = u32::from_le_bytes([packet[12], packet[13], packet[14], packet[15]]);
         if channels == 0 {
             return Err(AssetError::Decode {
                 message: "OGG Opus header has zero channels".to_owned(),
             });
         }
         if sample_rate == 0 {
-            return Err(AssetError::Decode {
-                message: "OGG Opus header has zero sample rate".to_owned(),
-            });
+            sample_rate = 48_000;
         }
-        return Ok((channels, sample_rate));
+        return Ok((OggAudioCodec::Opus, channels, sample_rate));
     }
 
     if packet.len() >= 16 && packet[0] == 0x01 && packet.get(1..7) == Some(b"vorbis") {
@@ -382,7 +405,7 @@ fn parse_ogg_audio_packet(packet: &[u8]) -> Result<(u16, u32), AssetError> {
                 message: "OGG Vorbis header has zero sample rate".to_owned(),
             });
         }
-        return Ok((channels, sample_rate));
+        return Ok((OggAudioCodec::Vorbis, channels, sample_rate));
     }
 
     Err(AssetError::Decode {

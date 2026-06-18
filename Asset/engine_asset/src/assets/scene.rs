@@ -147,8 +147,8 @@ fn parse_scene_asset(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<SceneAss
         };
         let key = key.trim();
         let value = value.trim();
-        match key {
-            "name" => {
+        match scene_prefab_document_key(key).as_str() {
+            "name" | "scenename" => {
                 if value.is_empty() {
                     return Err(AssetError::Decode {
                         message: format!("scene name is empty on line {line_number}"),
@@ -156,7 +156,7 @@ fn parse_scene_asset(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<SceneAss
                 }
                 name = Some(value.to_owned());
             }
-            "dependency" => {
+            key if is_scene_prefab_dependency_key(key) => {
                 let path = AssetPath::parse(value);
                 let asset_type = dependency_type_for_path(&path, line_number, "scene")?;
                 add_serialized_dependency(
@@ -167,12 +167,12 @@ fn parse_scene_asset(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<SceneAss
                     asset_type,
                 );
             }
-            "entity" => {
+            "entity" | "node" | "gameobject" => {
                 let entity = parse_serialized_entity(value, line_number, "scene")?;
                 entities.push(entity);
                 current_entity = Some(entities.len() - 1);
             }
-            "component" => {
+            "component" | "cmp" => {
                 let Some(entity_index) = current_entity else {
                     return Err(AssetError::Decode {
                         message: format!("scene component on line {line_number} has no entity"),
@@ -192,9 +192,9 @@ fn parse_scene_asset(ctx: &mut LoadContext<'_>, bytes: &[u8]) -> Result<SceneAss
                 }
                 entities[entity_index].components.push(component);
             }
-            other => {
+            _ => {
                 return Err(AssetError::Decode {
-                    message: format!("unknown scene key `{other}` on line {line_number}"),
+                    message: format!("unknown scene key `{key}` on line {line_number}"),
                 })
             }
         }
@@ -229,18 +229,20 @@ pub(crate) fn parse_serialized_entity(
                 message: format!("invalid {asset_kind} entity field on line {line_number}"),
             });
         };
-        match (key.trim(), value.trim()) {
-            ("parent", value) => {
+        let key = key.trim();
+        let value = value.trim();
+        match scene_prefab_document_key(key).as_str() {
+            "parent" | "parentid" | "parentindex" => {
                 parent = Some(value.parse().map_err(|error| AssetError::Decode {
                     message: format!(
                         "invalid {asset_kind} entity parent on line {line_number}: {error}"
                     ),
                 })?);
             }
-            (other, _) => {
+            _ => {
                 return Err(AssetError::Decode {
                     message: format!(
-                        "unknown {asset_kind} entity field `{other}` on line {line_number}"
+                        "unknown {asset_kind} entity field `{key}` on line {line_number}"
                     ),
                 })
             }
@@ -370,7 +372,7 @@ fn serialized_component_asset_references_with_context(
 
 pub fn serialized_component_type_has_asset_fields(type_name: &str) -> bool {
     matches!(
-        type_name.to_ascii_lowercase().as_str(),
+        scene_prefab_document_key(type_name).as_str(),
         "meshrenderer"
             | "skinnedmeshrenderer"
             | "audiosource"
@@ -382,16 +384,16 @@ pub fn serialized_component_type_has_asset_fields(type_name: &str) -> bool {
 
 pub fn serialized_component_asset_field_type(type_name: &str, field: &str) -> Option<AssetTypeId> {
     match (
-        type_name.to_ascii_lowercase().as_str(),
-        field.to_ascii_lowercase().as_str(),
+        scene_prefab_document_key(type_name).as_str(),
+        scene_prefab_document_key(field).as_str(),
     ) {
         ("meshrenderer", "mesh") => Some(Mesh::TYPE_ID),
         ("meshrenderer", "material") => Some(Material::TYPE_ID),
         ("skinnedmeshrenderer", "mesh") => Some(Mesh::TYPE_ID),
         ("skinnedmeshrenderer", "skeleton") => Some(Skeleton::TYPE_ID),
         ("skinnedmeshrenderer", "material") => Some(Material::TYPE_ID),
-        ("audiosource", "clip") => Some(AudioClip::TYPE_ID),
-        ("physicscollider", "mesh" | "physics_mesh") => Some(PhysicsMesh::TYPE_ID),
+        ("audiosource", "clip" | "audio" | "audioclip") => Some(AudioClip::TYPE_ID),
+        ("physicscollider", "mesh" | "physicsmesh" | "collisionmesh") => Some(PhysicsMesh::TYPE_ID),
         ("sceneinstance", "scene") => Some(SceneAsset::TYPE_ID),
         ("prefabinstance", "prefab") => Some(Prefab::TYPE_ID),
         _ => None,
@@ -399,7 +401,7 @@ pub fn serialized_component_asset_field_type(type_name: &str, field: &str) -> Op
 }
 
 pub fn serialized_component_asset_fields(type_name: &str) -> Vec<SerializedComponentAssetField> {
-    let fields: &[(&str, &str, AssetTypeId)] = match type_name.to_ascii_lowercase().as_str() {
+    let fields: &[(&str, &str, AssetTypeId)] = match scene_prefab_document_key(type_name).as_str() {
         "meshrenderer" => &[
             ("MeshRenderer", "mesh", Mesh::TYPE_ID),
             ("MeshRenderer", "material", Material::TYPE_ID),
@@ -429,6 +431,30 @@ pub fn serialized_component_asset_fields(type_name: &str) -> Vec<SerializedCompo
             },
         )
         .collect()
+}
+
+pub(crate) fn scene_prefab_document_key(key: &str) -> String {
+    key.chars()
+        .filter(|character| {
+            !character.is_ascii_whitespace() && *character != '_' && *character != '-'
+        })
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+pub(crate) fn is_scene_prefab_dependency_key(key: &str) -> bool {
+    let key = scene_prefab_document_key(key);
+    matches!(
+        key.as_str(),
+        "dependency"
+            | "dependencies"
+            | "depends"
+            | "depend"
+            | "reference"
+            | "references"
+            | "ref"
+            | "refs"
+    )
 }
 
 fn add_serialized_dependency(

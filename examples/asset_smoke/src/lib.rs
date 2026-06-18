@@ -1474,6 +1474,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn heightfield_asset_bridges_into_engine_physics() {
+        use engine_physics::prelude::HeightFieldDesc;
+
+        let source = b"NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,0,0,0\n"
+            .to_vec();
+        let io = MemoryAssetIo::new().with_file("physics/terrain.physics", source);
+        let mut assets = AssetServer::new(AssetServerConfig::default());
+        assets.set_io(io);
+        assets.register_builtin_loaders();
+
+        let handle: Handle<PhysicsMesh> = assets.load("physics/terrain.physics");
+        assets.update_loading();
+
+        assert!(assets.is_ready(&handle));
+        let mesh = assets.get(&handle).unwrap();
+        assert_eq!(mesh.kind, PhysicsMeshKind::HeightField);
+        let height_field = mesh.height_field.as_ref().unwrap();
+
+        let mut world = PhysicsWorld::new(PhysicsConfig::default());
+        let physics_mesh = world
+            .create_heightfield(HeightFieldDesc {
+                heights: height_field.heights.clone(),
+                rows: height_field.rows,
+                cols: height_field.cols,
+                scale: PhysicsVec3::new(
+                    height_field.scale[0],
+                    height_field.scale[1],
+                    height_field.scale[2],
+                ),
+            })
+            .unwrap();
+        let collider = world
+            .create_collider(ColliderDesc::heightfield(physics_mesh))
+            .unwrap();
+        let hit = world.query().cast_ray(
+            Ray {
+                origin: PhysicsVec3::new(0.0, 1.0, 0.0),
+                direction: -PhysicsVec3::Y,
+                max_toi: 2.0,
+            },
+            QueryFilter::default(),
+        );
+
+        assert!(world.contains_mesh(physics_mesh));
+        assert!(world.contains_collider(collider));
+        assert!(hit.is_some());
+    }
+
+    #[test]
     fn smoke_consumers_observe_ready_assets_without_owning_resources() {
         let report = run_smoke();
 
