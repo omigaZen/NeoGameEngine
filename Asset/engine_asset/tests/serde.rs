@@ -30,6 +30,8 @@ fn serde_feature_round_trips_asset_reference_identity_path_and_metadata() {
     assert_eq!(round_trip(&ContentHash(123)), ContentHash(123));
     assert_eq!(round_trip(&VersionHash(456)), VersionHash(456));
     assert_eq!(round_trip(&path), path);
+    let key = AssetKey::new(id, Some(path.clone()), Texture::TYPE_ID);
+    assert_eq!(round_trip(&key), key);
 
     let metadata = AssetMetadata {
         id,

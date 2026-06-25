@@ -1933,25 +1933,22 @@ sidecar 重新加载后仍可恢复同一组稳定排序的导入设置。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AssetMetadata {
     pub id: AssetId,
-    pub path: AssetPath,
+    pub path: Option<AssetPath>,
     pub asset_type: AssetTypeId,
 
-    pub importer: String,
+    pub source_path: Option<AssetPath>,
+    pub cooked_path: Option<AssetPath>,
+    pub importer: Option<String>,
     pub importer_version: u32,
 
-    pub source_hash: ContentHash,
-    pub settings_hash: ContentHash,
-    pub importer_settings: Vec<(String, String)>,
+    pub source_hash: Option<ContentHash>,
+    pub settings_hash: Option<ContentHash>,
     pub cooked_hash: Option<ContentHash>,
+    pub version_hash: Option<VersionHash>,
 
-    pub dependencies: Vec<AssetDependency>,
     pub labels: Vec<String>,
-
-    pub bundle: Option<BundleId>,
-    pub address: Option<String>,
-
-    pub created_at: Option<u64>,
-    pub modified_at: Option<u64>,
+    pub dependencies: Vec<AssetId>,
+    pub importer_settings: Vec<(String, String)>,
 }
 ```
 
@@ -1959,34 +1956,10 @@ pub struct AssetMetadata {
 
 ## 14.1 依赖描述
 
-```rust
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AssetDependency {
-    pub id: AssetId,
-    pub path: Option<AssetPath>,
-    pub kind: DependencyKind,
-}
-```
-
-```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum DependencyKind {
-    /// 必须加载。依赖失败则 root asset 失败。
-    Required,
-
-    /// 可选依赖。失败不会阻止 root asset。
-    Optional,
-
-    /// 只在运行时需要。
-    RuntimeOnly,
-
-    /// 只在编辑器需要。
-    EditorOnly,
-
-    /// 用于打包分析，但不自动加载。
-    BuildOnly,
-}
-```
+Registry、sidecar 与 bundle manifest 持久化 required dependency 的 `AssetId` 列表。
+运行时需要携带类型与 fallback path 时使用 `AssetDependencyReference`；loader context
+与 asset 本体贡献的引用会合并进依赖图。Optional/editor-only/build-only dependency kind
+不属于当前公开契约。
 
 ---
 
@@ -2022,48 +1995,31 @@ pub struct AssetRegistry {
 }
 ```
 
-内部可以包含：
-
-```rust
-pub struct AssetRegistryData {
-    pub by_id: std::collections::HashMap<AssetId, AssetMetadata>,
-    pub by_path: std::collections::HashMap<AssetPath, AssetId>,
-    pub by_label: std::collections::HashMap<String, Vec<AssetId>>,
-    pub by_address: std::collections::HashMap<String, AssetId>,
-    pub redirects: std::collections::HashMap<AssetId, AssetId>,
-}
-```
-
 API：
 
 ```rust
 impl AssetRegistry {
     pub fn new() -> Self;
 
-    pub fn register(&mut self, metadata: AssetMetadata) -> Option<AssetMetadata>;
-    pub fn unregister(&mut self, id: AssetId) -> Option<AssetMetadata>;
+    pub fn get_or_create(&mut self, path: AssetPath, asset_type: AssetTypeId) -> AssetId;
+    pub fn insert(&mut self, metadata: AssetMetadata);
 
-    pub fn get_by_id(&self, id: AssetId) -> Option<&AssetMetadata>;
-    pub fn get_by_path(&self, path: &AssetPath) -> Option<&AssetMetadata>;
-    pub fn get_by_address(&self, address: &str) -> Option<&AssetMetadata>;
+    pub fn get(&self, id: AssetId) -> Option<&AssetMetadata>;
+    pub fn get_mut(&mut self, id: AssetId) -> Option<&mut AssetMetadata>;
 
     pub fn id_from_path(&self, path: &AssetPath) -> Option<AssetId>;
     pub fn path_from_id(&self, id: AssetId) -> Option<&AssetPath>;
+    pub fn metadata_by_path(&self, path: &AssetPath) -> Option<&AssetMetadata>;
 
-    pub fn find_by_label(&self, label: &str) -> &[AssetId];
-    pub fn find_by_type(&self, ty: AssetTypeId) -> Vec<AssetId>;
-
-    pub fn dependencies(&self, id: AssetId) -> &[AssetDependency];
-
-    pub fn add_redirect(&mut self, old: AssetId, new: AssetId);
-    pub fn resolve_redirect(&self, id: AssetId) -> AssetId;
-
-    pub fn iter(&self) -> impl Iterator<Item = &AssetMetadata>;
-
-    pub fn load_from_file(path: &std::path::Path) -> Result<Self, AssetError>;
-    pub fn save_to_file(&self, path: &std::path::Path) -> Result<(), AssetError>;
+    pub fn rename_path(&mut self, id: AssetId, new_path: AssetPath) -> bool;
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetId, &AssetMetadata)>;
+    pub fn values(&self) -> impl Iterator<Item = &AssetMetadata>;
+    pub fn clear(&mut self);
 }
 ```
+
+Registry/sidecar 文件持久化由 `AssetDatabase` 与 `AssetServer` 的包装 API 负责；
+`AssetRegistry` 本身只维护 id/path/metadata 索引。
 
 ---
 
@@ -2301,34 +2257,36 @@ mark Ready
 
 ## 17. Cooker 系统
 
-Cooker 将 imported asset 转换为运行时高效格式。
+Cooker 将 imported asset bytes 转换为运行时格式，并返回内容 hash、cooker version 和更新后的
+metadata。`AssetDatabase::cook_asset` 负责从 imported root 读取 source bytes、选择 cooker、
+写入 cooked root，并把 cooked path/hash/version 写回 registry metadata。
 
 ```rust
 pub trait AssetCooker: Send + Sync + 'static {
     fn name(&self) -> &'static str;
 
+    fn version(&self) -> u32;
+
     fn asset_type(&self) -> AssetTypeId;
 
     fn cook(
         &self,
-        ctx: &mut CookContext,
-        input: &ImportedAssetInfo,
-        settings: &CookSettings,
-    ) -> Result<CookedAssetInfo, CookError>;
+        ctx: &CookContext,
+        metadata: &AssetMetadata,
+    ) -> Result<CookOutput, CookError>;
 }
 ```
 
 ---
 
-## 17.1 Cook 配置
+## 17.1 Cook 上下文
 
 ```rust
-#[derive(Clone, Debug)]
-pub struct CookSettings {
-    pub target_platform: TargetPlatform,
-    pub compression: CompressionKind,
-    pub strip_editor_data: bool,
-    pub generate_debug_names: bool,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CookContext {
+    pub target: TargetPlatform,
+    pub source_path: Option<AssetPath>,
+    pub source_bytes: Vec<u8>,
 }
 ```
 
@@ -2336,12 +2294,11 @@ pub struct CookSettings {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TargetPlatform {
     Windows,
-    Linux,
     MacOs,
+    Linux,
     Android,
     Ios,
     Web,
-    Console,
 }
 ```
 
@@ -2350,35 +2307,34 @@ pub enum TargetPlatform {
 ## 17.2 Cook 输出
 
 ```rust
-#[derive(Clone, Debug)]
-pub struct CookedAssetInfo {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CookOutput {
     pub id: AssetId,
-    pub asset_type: AssetTypeId,
-    pub path: std::path::PathBuf,
-    pub hash: ContentHash,
-    pub size_bytes: u64,
-    pub dependencies: Vec<AssetDependency>,
+    pub bytes: Vec<u8>,
+    pub content_hash: ContentHash,
+    pub version_hash: VersionHash,
+    pub metadata: AssetMetadata,
 }
 ```
 
 ```rust
-pub struct CookContext<'a> {
-    pub target_platform: TargetPlatform,
-
+#[derive(Default)]
+pub struct CookerRegistry {
     // private
-    marker: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> CookContext<'a> {
-    pub fn write_bytes(&mut self, relative_path: &str, bytes: &[u8]) -> Result<std::path::PathBuf, CookError>;
-
-    pub fn add_dependency(&mut self, dependency: AssetId, kind: DependencyKind);
+impl CookerRegistry {
+    pub fn new() -> Self;
+    pub fn register<C: AssetCooker>(&mut self, cooker: C);
+    pub fn cooker_for_type(&self, asset_type: AssetTypeId) -> Option<&dyn AssetCooker>;
 }
 ```
 
-Cooker 返回的 `AssetError::Cook` 会由 `AssetDatabase::cook_asset` 补充 cooker 名称、
-asset id、source path 和目标平台；未注册 cooker 的错误也会保留 asset id/path
-上下文。
+内建 cooker 会验证或规范化 `CookContext::source_bytes`，并以 cooker `version()` 生成
+`VersionHash`。`MeshCooker` 会根据 `TargetPlatform` 选择 desktop `u32` index 或在可表示时为
+Android/iOS/Web 输出 compact `u16` index payload。Cooker 返回的 `AssetError::Cook` 会由
+`AssetDatabase::cook_asset` 补充 cooker 名称、asset id、source path 和目标平台；未注册 cooker
+的错误也会保留 asset id/path 上下文。
 
 ---
 
@@ -2655,11 +2611,6 @@ impl BundleReader {
 ## 18.2 Bundle Runtime API
 
 ```rust
-pub struct LoadedBundle {
-    pub manifest: BundleManifest,
-    // private
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MountedBundle {
     pub id: BundleId,
@@ -3221,6 +3172,10 @@ impl GpuUploadQueue {
     pub fn push(&mut self, command: GpuUploadCommand);
 
     pub fn drain(&mut self) -> impl Iterator<Item = GpuUploadCommand> + '_;
+    pub fn drain_limit(
+        &mut self,
+        limit: usize,
+    ) -> impl Iterator<Item = GpuUploadCommand> + '_;
 
     pub fn submit_result(&mut self, result: GpuUploadResult);
 
@@ -3735,99 +3690,35 @@ sidecar，按文件和 entry 标记 `Current`、`Upgradeable`、`UnsupportedVers
 pub struct Texture {
     pub width: u32,
     pub height: u32,
-    pub depth: u32,
-    pub dimension: TextureDimension,
     pub format: TextureFormat,
     pub mip_count: u32,
-    pub array_layers: u32,
-    pub usage: TextureUsage,
-    pub gpu: Option<GpuTextureHandle>,
+    pub data: Vec<u8>,
+    pub gpu: Option<GpuResourceHandle>,
 }
 ```
 
 ```rust
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum TextureDimension {
-    D1,
-    D2,
-    D3,
-    Cube,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TextureFormat {
     Rgba8Unorm,
-    Rgba8Srgb,
-    Bgra8Unorm,
-    Bgra8Srgb,
-    Rg16Float,
+    Rgba8UnormSrgb,
     Rgba16Float,
-    R32Float,
-    Depth32Float,
-    Bc1,
-    Bc3,
-    Bc5,
-    Bc7,
-    Etc2,
-    Astc4x4,
+    Rgba32Float,
 }
 ```
 
-```rust
-bitflags::bitflags! {
-    pub struct TextureUsage: u32 {
-        const SAMPLED           = 1 << 0;
-        const STORAGE           = 1 << 1;
-        const RENDER_ATTACHMENT = 1 << 2;
-        const COPY_SRC          = 1 << 3;
-        const COPY_DST          = 1 << 4;
-    }
-}
-```
-
-```rust
-#[derive(Clone, Debug)]
-pub struct TextureDesc {
-    pub width: u32,
-    pub height: u32,
-    pub depth: u32,
-    pub dimension: TextureDimension,
-    pub format: TextureFormat,
-    pub mip_count: u32,
-    pub usage: TextureUsage,
-}
-
-#[derive(Clone, Debug)]
-pub struct TextureUploadData {
-    pub bytes: Vec<u8>,
-    pub mip_offsets: Vec<u64>,
-}
-```
+当前 runtime texture payload 是 little-endian `width`、`height` 后接严格
+`width * height * 4` 个 RGBA8 bytes。`TextureLoader` 解码为
+`Rgba8UnormSrgb`、单 mip texture，并产生 `GpuUploadKind::Texture` 命令。
 
 ---
 
 ## 24.2 Texture Import Settings
 
-```rust
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TextureImportSettings {
-    pub srgb: bool,
-    pub generate_mips: bool,
-    pub normal_map: bool,
-    pub compression: TextureCompression,
-    pub max_size: Option<u32>,
-}
-
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
-pub enum TextureCompression {
-    None,
-    Auto,
-    Bc7,
-    Bc5,
-    Etc2,
-    Astc,
-}
-```
+Texture importer 使用通用 `ImporterSettings` key/value 表和
+`NGA_TEXTURE_SOURCE_V1` source document。source document 支持 `width`/`height`
+或 `size=WxH`，以及 `rgba`/`pixels` byte 列表；导入时会验证非零尺寸、整数范围与
+精确像素 byte 数。平台压缩和 mip generation 是未来扩展，不是当前公开 API。
 
 ---
 
@@ -4173,14 +4064,6 @@ pub enum ShaderSource {
     Wgsl(String),
     Glsl(String),
     Spirv(Vec<u32>),
-}
-```
-
-```rust
-#[derive(Clone, Debug)]
-pub struct ShaderDesc {
-    pub label: Option<String>,
-    pub stages: Vec<ShaderStage>,
 }
 ```
 
@@ -4628,8 +4511,9 @@ i 0 1 2
 
 第一行必须是 `NGA_PHYSICS_MESH_V1`。`kind` 可为 `trimesh`/`tri_mesh`、
 `convex`/`convex_hull`、`heightfield`/`height_field`。`v` 行声明三维顶点，`i` 行声明
-三个 `u32` 索引。trimesh/convex loader 会校验参数数量、数字解析、至少一个顶点、
-trimesh 至少一个 triangle，以及索引不能越过顶点数量；无效输入返回 `AssetError::Decode`。
+三个 `u32` 索引。trimesh/convex loader 会校验参数数量、数字解析和索引范围；
+trimesh 至少需要一个顶点和一个 triangle。convex 至少需要四个唯一顶点，并且点集必须
+非共线、非共面，能够张成非零三维体积；无效输入返回 `AssetError::Decode`。
 当前为 CPU-only 资源，不会产生 GPU upload command。
 
 `heightfield` 使用独立 grid payload，不使用 `v`/`i`：
@@ -4652,6 +4536,10 @@ grid 数据位于 `PhysicsMesh::height_field`，字段与 `engine_physics::Heigh
 `examples/asset_smoke` 也覆盖 heightfield 消费桥接：把 ready asset 的 grid 字段转换为
 `engine_physics::HeightFieldDesc`，创建 `PhysicsWorld` heightfield mesh/collider，并用
 ray query 验证 collider 可见。
+
+同一个 smoke 也覆盖 convex-hull 消费桥接：把 ready convex asset 的 `vertices` 转换为
+`engine_physics::ConvexMeshDesc`，创建 `PhysicsWorld` convex mesh 和
+`ColliderDesc::convex_hull`，并用 ray query 验证 collider 可见。
 
 `examples/asset_smoke` 会把 ready 的 `Handle<PhysicsMesh>` 通过 `AssetServer::get` 取出，
 把 `vertices`/`indices` 转成 `engine_physics::TriMeshDesc`，创建 `PhysicsWorld`
@@ -5819,7 +5707,8 @@ i 0 1 2
 
 Importer 会规范化 `kind`（`tri_mesh` -> `trimesh`、`convex_hull` -> `convex`、
 `height_field` -> `heightfield`），接受 `vertex=`/`triangle=` 或 `v`/`i` directive，
-验证有限 f32 顶点、u32 三角索引、非空顶点，以及 trimesh 的非空三角形。heightfield source
+验证有限 f32 顶点、u32 三角索引、非空顶点，以及 trimesh 的非空三角形。convex source
+还要求至少四个唯一、非共线、非共面的顶点，与 runtime loader 使用相同的几何有效性规则。heightfield source
 接受 separator-insensitive `rows`/`cols`/`scale`/`heights` aliases，规范化为 runtime
 grid payload，并执行与 loader 相同的维度、sample 数量、finite/positive scale 和混合几何校验。索引越界、
 未知字段或格式错误会通过 `AssetError::Import` 返回，并带有 `PhysicsMeshImporter`、

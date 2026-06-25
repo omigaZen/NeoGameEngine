@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::id::{AssetId, AssetTypeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -120,5 +122,46 @@ impl GpuUploadResult {
             id,
             result: Err(message.into()),
         }
+    }
+}
+
+#[derive(Default)]
+pub struct GpuUploadQueue {
+    commands: VecDeque<GpuUploadCommand>,
+    results: VecDeque<GpuUploadResult>,
+}
+
+impl GpuUploadQueue {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, command: GpuUploadCommand) {
+        self.commands.push_back(command);
+    }
+
+    pub fn drain(&mut self) -> impl Iterator<Item = GpuUploadCommand> + '_ {
+        self.commands.drain(..)
+    }
+
+    pub fn drain_limit(&mut self, limit: usize) -> impl Iterator<Item = GpuUploadCommand> + '_ {
+        let count = limit.min(self.commands.len());
+        self.commands.drain(..count)
+    }
+
+    pub fn submit_result(&mut self, result: GpuUploadResult) {
+        self.results.push_back(result);
+    }
+
+    pub fn drain_results(&mut self) -> impl Iterator<Item = GpuUploadResult> + '_ {
+        self.results.drain(..)
+    }
+
+    pub fn len(&self) -> usize {
+        self.commands.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.commands.is_empty()
     }
 }

@@ -261,6 +261,11 @@ pub(crate) fn parse_physics_mesh(bytes: &[u8]) -> Result<PhysicsMesh, AssetError
                 }
             }
         }
+        if kind == PhysicsMeshKind::ConvexHull {
+            validate_convex_hull_vertices(&vertices).map_err(|message| AssetError::Decode {
+                message: message.to_owned(),
+            })?;
+        }
         None
     };
     Ok(PhysicsMesh {
@@ -269,6 +274,92 @@ pub(crate) fn parse_physics_mesh(bytes: &[u8]) -> Result<PhysicsMesh, AssetError
         kind,
         height_field,
     })
+}
+
+pub(crate) fn validate_convex_hull_vertices(vertices: &[[f32; 3]]) -> Result<(), &'static str> {
+    if vertices.len() < 4 {
+        return Err("convex physics mesh must contain at least four vertices");
+    }
+
+    let mut unique = Vec::with_capacity(vertices.len());
+    for vertex in vertices {
+        if !unique.contains(vertex) {
+            unique.push(*vertex);
+        }
+    }
+    if unique.len() < 4 {
+        return Err("convex physics mesh must contain at least four unique vertices");
+    }
+
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for vertex in &unique {
+        for axis in 0..3 {
+            let value = vertex[axis] as f64;
+            min[axis] = min[axis].min(value);
+            max[axis] = max[axis].max(value);
+        }
+    }
+    let scale = (0..3)
+        .map(|axis| max[axis] - min[axis])
+        .fold(0.0_f64, f64::max);
+    let line_tolerance = scale.powi(2) * 1.0e-12;
+    let area_tolerance = scale.powi(4) * 1.0e-12;
+    let volume_tolerance = scale.powi(3) * 1.0e-9;
+
+    let origin = to_f64_point(unique[0]);
+    let Some(line_point) = unique
+        .iter()
+        .skip(1)
+        .map(|vertex| to_f64_point(*vertex))
+        .find(|vertex| length_squared(subtract(*vertex, origin)) > line_tolerance)
+    else {
+        return Err("convex physics mesh vertices must span a line");
+    };
+    let line = subtract(line_point, origin);
+    let Some(plane_point) = unique
+        .iter()
+        .skip(1)
+        .map(|vertex| to_f64_point(*vertex))
+        .find(|vertex| length_squared(cross(line, subtract(*vertex, origin))) > area_tolerance)
+    else {
+        return Err("convex physics mesh vertices are collinear");
+    };
+    let normal = cross(line, subtract(plane_point, origin));
+    if unique
+        .iter()
+        .skip(1)
+        .map(|vertex| to_f64_point(*vertex))
+        .all(|vertex| dot(normal, subtract(vertex, origin)).abs() <= volume_tolerance)
+    {
+        return Err("convex physics mesh vertices are coplanar");
+    }
+
+    Ok(())
+}
+
+fn to_f64_point(vertex: [f32; 3]) -> [f64; 3] {
+    [vertex[0] as f64, vertex[1] as f64, vertex[2] as f64]
+}
+
+fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+}
+
+fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+}
+
+fn length_squared(value: [f64; 3]) -> f64 {
+    dot(value, value)
 }
 
 fn parse_kind(value: &str, line_number: usize) -> Result<PhysicsMeshKind, AssetError> {

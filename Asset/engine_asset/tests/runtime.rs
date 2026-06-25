@@ -11,6 +11,17 @@ fn io_source_hash(io: &MemoryAssetIo, path: &str) -> ContentHash {
     io.metadata(path).unwrap().hash.unwrap()
 }
 
+#[test]
+fn asset_key_preserves_stable_identity_path_and_type() {
+    let id = AssetId::from_u128(0x4e47_4153_5345_5400_0000_0000_0000_0201);
+    let path = AssetPath::with_label("models\\hero.model", "Mesh0");
+    let key = AssetKey::new(id, Some(path.clone()), Mesh::TYPE_ID);
+
+    assert_eq!(key.id, id);
+    assert_eq!(key.path, Some(AssetPath::parse("models/hero.model#Mesh0")));
+    assert_eq!(key.asset_type, Mesh::TYPE_ID);
+}
+
 fn texture_bytes(width: u32, height: u32, value: u8) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(&width.to_le_bytes());
@@ -2649,6 +2660,23 @@ fn physics_mesh_load_accepts_document_key_and_directive_aliases() {
 }
 
 #[test]
+fn convex_physics_mesh_load_requires_non_coplanar_hull_vertices() {
+    let source = b"NGA_PHYSICS_MESH_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n".to_vec();
+    let io = MemoryAssetIo::new().with_file("physics/tetrahedron.physics", source);
+    let mut server = server_with_io(io);
+
+    let mesh: Handle<PhysicsMesh> = server.load("physics/tetrahedron.physics");
+    server.update_loading();
+
+    assert!(server.is_ready(&mesh));
+    assert!(server.drain_gpu_uploads().next().is_none());
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.kind, PhysicsMeshKind::ConvexHull);
+    assert_eq!(loaded.vertices.len(), 4);
+    assert!(loaded.indices.is_empty());
+}
+
+#[test]
 fn heightfield_physics_mesh_load_reaches_ready_with_validated_grid_data() {
     let source = b"NGA_PHYSICS_MESH_V1\nMesh Kind=height-field\nRows=2\nColumns=3\nCell Scale=1,2,0.5\nSamples=0,1,2\nheights 3 4 5\n"
         .to_vec();
@@ -2679,6 +2707,14 @@ fn invalid_physics_mesh_payload_fails_with_decode_error_and_event() {
     assert_physics_mesh_decode_error(
         "NGA_PHYSICS_MESH_V1\nkind=trimesh\nv 0 NaN 0\ni 0 0 0\n",
         "physics mesh vertex value must be finite on line 3",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\n",
+        "convex physics mesh must contain at least four vertices",
+    );
+    assert_physics_mesh_decode_error(
+        "NGA_PHYSICS_MESH_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n",
+        "convex physics mesh vertices are coplanar",
     );
     assert_physics_mesh_decode_error(
         "NGA_PHYSICS_MESH_V1\nkind=heightfield\nrows=2\ncols=2\nscale=1,1,1\nheights=0,1,2\n",

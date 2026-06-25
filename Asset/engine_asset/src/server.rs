@@ -1,8 +1,11 @@
 use std::{
     any::Any,
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
 };
+
+#[cfg(feature = "hot_reload")]
+use std::collections::VecDeque;
 
 #[cfg(feature = "async_loading")]
 use std::{
@@ -29,7 +32,7 @@ use crate::{
     error::{AssetError, AssetResult},
     events::{AssetEvent, AssetEventCursor, AssetLoadState},
     features::{require_asset_feature, AssetFeature},
-    gpu_upload::{GpuUploadCommand, GpuUploadResult},
+    gpu_upload::{GpuUploadCommand, GpuUploadQueue, GpuUploadResult},
     handle::{Handle, HandleLifecycleTracker, HandleStrength, UntypedHandle},
     hot_reload::{
         HotReloadAsyncWatchReport, HotReloadChange, HotReloadDependencyPlan,
@@ -237,7 +240,7 @@ pub struct AssetServer {
     events: Vec<AssetEvent>,
     dependencies: DependencyGraph,
     waiting_assets: HashMap<AssetId, WaitingAsset>,
-    gpu_uploads: VecDeque<GpuUploadCommand>,
+    gpu_uploads: GpuUploadQueue,
     pending_gpu: HashMap<AssetId, PendingGpuUpload>,
     #[cfg(feature = "async_loading")]
     async_worker_pool: Option<AsyncWorkerPool>,
@@ -307,7 +310,7 @@ impl AssetServer {
             events: Vec::new(),
             dependencies: DependencyGraph::new(),
             waiting_assets: HashMap::new(),
-            gpu_uploads: VecDeque::new(),
+            gpu_uploads: GpuUploadQueue::new(),
             pending_gpu: HashMap::new(),
             #[cfg(feature = "async_loading")]
             async_worker_pool: None,
@@ -2628,17 +2631,14 @@ impl AssetServer {
 
     pub fn drain_gpu_uploads(&mut self) -> impl Iterator<Item = GpuUploadCommand> + '_ {
         let max = self.config.max_gpu_uploads_per_frame.max(1);
-        let mut uploads = Vec::new();
-        for _ in 0..max {
-            let Some(upload) = self.gpu_uploads.pop_front() else {
-                break;
-            };
-            uploads.push(upload);
-        }
-        uploads.into_iter()
+        self.gpu_uploads.drain_limit(max)
     }
 
     pub fn finish_gpu_uploads(&mut self, results: impl IntoIterator<Item = GpuUploadResult>) {
+        for result in results {
+            self.gpu_uploads.submit_result(result);
+        }
+        let results = self.gpu_uploads.drain_results().collect::<Vec<_>>();
         for result in results {
             let Some(pending) = self.pending_gpu.remove(&result.id) else {
                 continue;
@@ -3258,7 +3258,7 @@ impl AssetServer {
                     reloaded,
                 },
             );
-            self.gpu_uploads.push_back(upload);
+            self.gpu_uploads.push(upload);
             self.events.push(AssetEvent::GpuUploadQueued { id });
         } else {
             if let Some(storage) = self.storages.get_mut(&asset_type) {

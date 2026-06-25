@@ -1,8 +1,28 @@
+use crate::id::{AssetId, AssetTypeId};
+
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct AssetPath {
     pub path: String,
     pub label: Option<String>,
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AssetKey {
+    pub id: AssetId,
+    pub path: Option<AssetPath>,
+    pub asset_type: AssetTypeId,
+}
+
+impl AssetKey {
+    pub fn new(id: AssetId, path: Option<AssetPath>, asset_type: AssetTypeId) -> Self {
+        Self {
+            id,
+            path,
+            asset_type,
+        }
+    }
 }
 
 impl AssetPath {

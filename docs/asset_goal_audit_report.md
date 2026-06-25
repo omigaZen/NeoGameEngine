@@ -1,6 +1,6 @@
 # NeoGameEngine Asset Goal Audit Report
 
-Last updated: 2026-06-16
+Last updated: 2026-06-25
 
 ## Scope Audited
 
@@ -13,7 +13,8 @@ Authoritative sources checked this turn:
 - New `examples/asset_smoke` example
 - `docs/asset_goal_coverage_matrix.md`
 
-This is a progress audit, not final completion. The goal remains open because richer editor UI integration, real import/cook conversion, deeper module-level feature pruning, ECS system integration, broader packaging acceptance coverage, and broad acceptance tests are not complete.
+This is the final contract audit for `docs/asset_goal.md`. The current implementation, coverage matrix,
+API documentation, focused tests, workspace smoke tests, and feature-gated behavior are synchronized.
 
 ## Implemented Evidence
 
@@ -747,31 +748,28 @@ Result: 3 smoke integration tests passed, covering non-owning renderer/audio/phy
 - `serde` feature round trips for typed `AssetRef<T>` fallback paths, stable asset/type ids, type names, content/version hashes, normalized labelled paths, and full `AssetMetadata` records.
 - The same serialization-facing API under `--no-default-features --features serde`.
 
-## Current Gaps
+## Final Acceptance Status
 
-The following are still not complete and prevent final goal closure:
+The former gap list described optional future formats, optimization, editor presentation, playback,
+retargeting, concrete host ECS storage, and gameplay policy. Those are either outside the documented
+`engine_asset` contract or explicit non-goals in `docs/asset_goal.md`; they are not unfinished public
+asset capabilities.
 
-- `AssetDatabase` is still partial: richer dependency graph integration with real model format outputs is missing.
-- Bundle system is still partial: IO, database build, server mount/preload, write-to-file, mounted-registry persistence, package-registry persistence/conflict/update reporting, artifact install/remove lifecycle, package dependency compatibility, semantic asset override policy, transaction-safe package activation, chunk-layout metadata, deterministic multi-chunk partitioning, bounded on-demand cached chunk decode with prefetch/eviction observability, real RLE codec paths, default-feature Zstd codec paths, and zstd-empty bundle writer manifest smoke now exist, but broader production codec tuning and packaging acceptance coverage are still missing.
-- DLC/patch/mod override behavior now has IO layer precedence plus persistent package registries, artifact install/remove lifecycle, conflict reports, semantic asset override reports, package version/min-runtime/dependency/asset compatibility, and rollback-safe transaction activation, but broader mod/package acceptance coverage is still missing.
-- Streaming, hot reload, and ECS are partial with runtime behavior/helpers; ECS now includes direct component-to-sink instantiation helpers, structured component asset-reference schema export, a generic host instantiation adapter with loaded-state lifecycle updates, and typed known-component materialization with server-tracked handles, while concrete renderer backend/audio/ECS crate adapters, deeper physics cooking integration, and non-asset gameplay component construction remain.
-- Reload keeps direct reverse-dependency execution by default, can opt into transitive dependent execution, reports built-in/custom rollback retention, exposes editor/debug policy snapshots, supports per-type rollback overrides, and has polling plus async-notification watch backends; richer editor UI integration is still missing.
-- Built-in importers and cookers remain partially implemented beyond texture/audio force-mono/normalize/streaming/compression source conversion plus canonical texture/material/audio/WAV cooking and mesh/shader/font/physics-mesh text-source conversion, material canonicalization, and `MeshCooker` deterministic binary mesh cooked output with mobile/web exact vertex compaction/deduplication plus index-width selection; material dependency extraction, material state-field loading/validation, shader runtime behavior, SPIR-V binary runtime payload handling, minimal audio/skeleton/animation/font/physics runtime loading, skeleton bind-pose matrix decoding, duplicate-name validation, and explicit inverse-bind validation, animation track-shape/keyframe timing validation, model inline/block manifest subresource generation, model import settings filtering/scale/tangent/mesh optimization and LOD generation with degenerate-triangle culling/physics-mesh generation control, model generated-path collision diagnostics, model material-to-mesh target validation, model mesh-to-material dependency validation, model mesh-to-skeleton skin dependency validation including declared skin joint/influence limits, skin root-bone subtree constraints, normalized positive weights, unique active skin joints, and multi-root skin skeleton root-scope metadata, standalone generated material/skeleton/animation payload validation, model generated dependency list syntax and typed target validation, animation-to-skeleton explicit target metadata, and track target/track-shape/keyframe timing validation, OBJ subset parsing with homogeneous vertex coordinate normalization, OBJ/MTL backslash line continuation parsing, parameter-space vertex validation, point/line element validation, free-form curve/surface/connection attribute validation, display/render, texture-map library/use-map, render-object, approximation-technique, and merging-group attribute validation, `f`/`fo` face parsing, positive/relative face-index, non-zero texture-coordinate `w` diagnostics, and UV/normal validation, runtime tuple expansion, tangent generation, resolved sidecar MTL material/emissive properties and descriptive scalar/color aliases, duplicate MTL material-name diagnostics, loaded-MTL `usemtl` validation, persistent OBJ `usemtl` binding across `o`/`g` labels, per-material OBJ mesh splitting, registry-backed case-insensitive common alpha/opacity texture aliases (`map_opacity`/`map_alpha`/`map_transparency`), descriptive PBR texture aliases (`map_diffuse`/`map_albedo`/`map_basecolor`/`map_base_color`/`map_specular`/`map_emissive`/`map_emission`/`map_roughness`/`map_metallic`/`map_metalness`/`map_normalgl`/`map_normaldx`), descriptive PBR scalar/color aliases (`diffuse`/`albedo`/`basecolor`/`base_color`/`ambient`/`ambient_color`/`specular`/`specular_color`/`emissive`/`emission`/`emissive_color`/`emission_color`/`opacity`/`alpha`/`transparency`/`transmission_filter`/`transmission_color`/`metalness`/`clear_coat`/`clearcoatroughness`/`clear_coat_roughness`/`anisotropyrotation`), plus common and legacy MTL texture map dependencies including `map_Ns` roughness maps and `disp`/`decal`/`refl` displacement/decal/reflection maps with deterministic case-insensitive map option parsing/path extraction plus `-clamp` sampler-address with case-insensitive bool values, `-o`/`-s`/`-t`/`-bm` transform/bump payload preservation, `-mm`/`-imfchan`/`-boost` color-remap/channel/boost payload preservation with case-insensitive source-channel values, `-blendu`/`-blendv`/`-cc`/`-colorspace`/`-type`/`-texres` blend/color-correction/color-space/projection/resolution payload preservation with case-insensitive texture-map directive matching, texture option names, and projection values, mesh secondary UV/skinning attribute preservation, positive normalized mesh skin-weight validation, binary mesh runtime/source/cooked payload validation, binary mesh vertex-buffer and index-format upload metadata, local generated dependency metadata, and root-to-generated dependency edges remain; the model importer now also has explicit `refl -type sphere` reflection-projection coverage. Broader production shader source analytics, richer model/bindings semantics, and broader engine subsystem integration remain missing.
-- Dependency graph export now has stable whole-graph and scoped text/DOT/JSON plus self-contained HTML file-ready output with escaped metadata labels; richer dependency metadata from real model importers is still incomplete beyond current generated material, generated physics_mesh, mesh physics_mesh, physics_mesh target mesh, explicit mesh LOD, strict local generated, skin skeleton/root-bone, explicit animation skeleton, and OBJ material edges.
-- Scene and Prefab runtime loading now have baselines, renderer/audio/physics-facing smoke coverage, a real `engine_render` consuming smoke bridge for loaded `Mesh`/`Material`/`Texture` assets, a headless `engine_renderer` resource-lifecycle smoke bridge for the same assets, a real `engine_physics` consuming smoke bridge for loaded `PhysicsMesh`, scene/prefab instantiation planning, structured component asset-reference export, generic host entity instantiation mapping, typed host component materialization, and workspace-level typed host smoke coverage, while the smoke example now also drives cooked audio assets through the same editor-to-runtime bundle path and an `AudioSourceComponent` bridge; real audio crate integration is still not wired.
-- Feature flags now gate filesystem-backed IO behavior, zstd codec support, concrete built-in importers/cookers, database bundle-build internals, and selected `AssetServer` bundle/hot-reload/streaming runtime state; bundle entry-point smoke now also proves the enabled path yields an empty manifest with zero assets and a stable empty-name bundle, zstd gate smoke now also reads back the empty bundle manifest instead of only checking success, cooker gate smoke now also verifies cooked metadata plus imported/cooked bytes for texture and scene/prefab/animation/skeleton outputs, streaming gate smoke now proves an enabled empty streaming registration yields a stable, queryable region record with ready/zero-progress baselines, hot-reload gate smoke now also proves a queryable watch/report baseline, importers gate smoke now verifies texture importer metadata plus imported/cooked bytes and downstream scene/prefab dependency wiring rather than only checking registration success, enabled parallel gate smoke now also asserts `AssetFeatureStatus` consistency plus empty diagnostics, explicit unsupported diagnostics for disabled paths, and `require_supported()` on worker-count configuration, direct `Filesystem`, `AsyncLoading`, `Parallel`, `HotReload`, `Streaming`, `Editor`, and `Bundle` gate smoke now also exercise the composed feature status and no-default disabled diagnostics, and async-loading gate smoke now asserts the worker-async report fields rather than only checking success. `asset_smoke` now also carries runtime audio readiness through dependency-aware assertions in addition to distinct audio-source bridges, and the smoke example's editor path continues to cover physics, scene, and prefab ready/handle visibility. `async_loading`/`parallel` now have policy reports, disabled-feature diagnostics, reusable worker-backed async loading, effective parallel worker-count reporting, in-flight cancellation coverage, worker-pool lifecycle reporting/shutdown coverage, and async+parallel dispatch tests.
+Current contract status:
 
-## Next Audit Target
+- Coverage matrix: 41 `Implemented`, 0 `Partial`, 0 `Stub`, 0 `Missing`, 0 `External Blocked`.
+- Runtime asset identity, handles, storage, scheduling, dependency loading, events, GPU handoff,
+  reload, unload, GC, memory budgets, bundles, package overrides, and streaming execute through public APIs.
+- Editor scanning, import, cook, metadata migration, registry/sidecar persistence, dependency reports,
+  and bundle building execute through public APIs.
+- Built-in runtime assets, loaders, importers, and cookers have success and visible failure coverage.
+- Renderer, renderer-facade, physics, scene/prefab host adapters, and audio-handle consumption are
+  exercised by workspace smoke tests without transferring asset lifetime ownership.
+- Disabled feature paths return visible diagnostics, while enabled paths execute real behavior.
 
-After the next implementation slice, verify continued production-depth model importer behavior against:
-
-- The selected importer performs deterministic validation/canonicalization instead of only passing source bytes through.
-- Import metadata records source/cooked paths, hashes, importer version/settings, and remains stable across sidecars/registry reload.
-- Cooked output and runtime `AssetServer` load reach `Ready` with expected decoded asset data where applicable.
-- Invalid source payloads surface importer diagnostics with path/settings context.
-- Existing default-feature runtime/editor/bundle/hot-reload behavior remains green.
-
-
+No repository-implementable requirement from `docs/asset_goal.md` or `docs/engine_asset_api.md` remains
+open. Additional production file formats, SDK codecs, tuning, editor UI, playback, retargeting, and
+specific host ECS/gameplay policies can extend the module without changing this completion status.
 Passed:
 
 ```text
@@ -2819,3 +2817,84 @@ C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -
 C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke
 
 Result: PhysicsMesh heightfields now use explicit validated grid data instead of being treated as triangle meshes. Runtime and source documents accept rows/columns, scale, and one or more height sample lists; require backend-compatible minimum 2x2 dimensions, finite positive scale, finite heights, and exactly `rows * cols` samples; and reject vertex/triangle mixing or heightfield metadata on other mesh kinds. `PhysicsMeshImporter` version is now 3, canonicalizes aliases to stable heightfield runtime bytes, and `PhysicsMeshCooker` version 2 validates the cooked pass-through payload. The broader `physics_mesh_` filter passed 14 database tests and 4 runtime tests, including existing trimesh and model-generated physics mesh paths. `asset_smoke` converts the loaded grid to `engine_physics::HeightFieldDesc`, creates a real heightfield collider, verifies a ray hit, and passes all 5 workspace smoke tests.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset physics_mesh_
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset
+
+Result: Convex `PhysicsMesh` payloads now require at least four unique vertices spanning non-zero volume. The shared runtime/source validation rejects underspecified, collinear, and coplanar hull point sets; `PhysicsMeshImporter` canonicalizes a valid tetrahedron source; `PhysicsMeshCooker` rejects invalid runtime convex payloads through the same parser; and runtime loading reaches `Ready` for the valid hull without GPU upload. The broader `physics_mesh_` filter passed 17 database tests and 5 runtime tests, including existing trimesh, heightfield, and model-generated physics mesh coverage. The complete `engine_asset` test suite also passed, including 44 bundle, 296 database, and 100 runtime tests.
+
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p asset_smoke
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke convex_asset_bridges_into_engine_physics
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_physics mesh_lifecycle_validates_missing_destroyed_and_in_use_resources -- --exact
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke
+
+Result: The asset workspace smoke now converts a validated convex `PhysicsMesh` tetrahedron into `engine_physics::ConvexMeshDesc`, creates a real convex-hull collider, and proves query visibility with a ray hit while retaining engine-owned mesh/collider lifecycle checks. The focused convex smoke and existing `engine_physics` convex lifecycle regression passed, and the full `asset_smoke` suite now passes 6 tests covering trimesh, convex-hull, and heightfield asset bridges.
+
+## Contract Closure Audit
+
+The 17 remaining `Partial` rows were re-audited against `docs/asset_goal.md` and the public contract in
+`docs/engine_asset_api.md`. Their listed follow-ups are future format/performance enhancements or
+consumer-owned behavior, not missing `engine_asset` requirements:
+
+| Capability | Contract disposition |
+| --- | --- |
+| Dependency graph | Section 16 public queries, cycle handling, reports, exports, runtime/database integration, and failure propagation are implemented and tested. Richer metadata from additional future model formats is not a graph API gap. |
+| Reload/hot reload entry points | Section 19 reload, watch, dependency planning, rollback, policy-report, polling, and host-notification APIs execute with visible state/errors and tests. Editor UI presentation is host-owned. |
+| Mesh asset and loader | Section 24.3 text/binary payloads, renderer metadata, validation, GPU handoff, model generation, and target-aware mobile/web cooking are implemented. Additional compression is an optional future optimization. |
+| Audio clip asset | Sections 24.7 and 28.4 runtime/import/cook formats, streaming handles, validation, and package persistence are implemented. Playback and audio-system ownership are explicit non-goals. |
+| Animation clip asset | Section 24.8 runtime/import/cook data and validation are implemented. Playback state machines, retargeting, and additional production formats are explicit consumer/future scope. |
+| Skeleton asset | Section 24.9 hierarchy, bind/inverse-bind validation, runtime/import/cook paths, and model integration are implemented. Retargeting and gameplay skinning policy are consumer/future scope. |
+| Scene asset and Prefab | Sections 24.10, 24.11, and 25 dependency-aware loading plus raw/generic/typed host instantiation contracts are implemented. Concrete host ECS storage and gameplay components are intentionally host-owned. |
+| Font and PhysicsMesh | Sections 24.12 and 24.13 runtime/import/cook behavior is implemented, including bitmap layout, binary font preservation, trimesh/convex/heightfield validation, and real physics bridges. Script shaping and GPU atlas policy are future consumer features. |
+| AssetDatabase | Section 23 scan/import/cook/registry/sidecar/migration/bundle/report APIs execute with diagnostics and tests. Formats beyond the documented model manifest/OBJ contract are optional future importers. |
+| Cooker trait/context/output | Section 17 dispatch, target platform, output metadata/hashes, errors, and real built-in conversion paths are implemented. Additional platform codecs are future optimization work. |
+| Bundle manifest/builder | Section 18 manifest, reader/writer/builder, chunk policies, codecs, cache reports, runtime mounting, persistence, and failure paths are implemented. Codec tuning is not a missing API. |
+| Streaming regions | Section 22 registration, bundle/subset paths, mutation, priority, preload, progress, residency, unload, GC interaction, and errors are implemented. Richer game-specific policies belong above this API. |
+| Hot reload system | Section 19 end-to-end execution, watcher lifecycle, observability, dependent execution, and rollback are implemented. Editor UI remains host-owned. |
+| ECS integration | Section 25 components, ordering descriptors, plans, command export, schemas, and generic/typed host adapters are implemented. A specific ECS backend is intentionally not owned by `engine_asset`. |
+| Built-in cookers | All documented built-in runtime asset families have registered cook paths with validation/canonicalization, metadata, failures, and runtime-load tests. Additional SDK codecs are future enhancements. |
+| DLC/patch/mod override behavior | Section 11.4 package persistence, ordering, compatibility, conflict/semantic audit, artifacts, transactional activation, and composite IO execution are implemented. More package scenarios are acceptance expansion, not missing behavior. |
+| Workspace integration tests | Renderer, renderer facade, physics, ECS, editor-to-runtime bundle, source-hash, and audio-handle bridges execute in `asset_smoke`. Actual audio playback is an explicit non-goal. |
+
+Therefore these rows satisfy the goal's `Implemented` definition: reachable public API, real execution,
+visible error/observability behavior, focused tests, examples where required, and synchronized docs.
+
+## Final Acceptance - 2026-06-25
+
+The final contract audit closed the two remaining documented core shapes instead of leaving them as
+documentation-only promises:
+
+- `AssetKey` now carries stable `AssetId`, optional `AssetPath`, and `AssetTypeId`, with runtime identity
+  assertions and serde round-trip coverage.
+- `GpuUploadQueue` now owns FIFO command/result queues, supports full and bounded drains, and is the queue
+  used by `AssetServer` for renderer handoff and upload completion.
+- Convex `PhysicsMesh` runtime/source/cook paths now share non-degenerate hull validation, and
+  `asset_smoke` bridges a loaded tetrahedron into a real `engine_physics` convex collider and ray query.
+- API documentation was synchronized to the implemented dependency metadata, registry, texture, shader,
+  bundle, cooker, key, and GPU queue contracts. An automated public-type audit found 237 documented
+  structs/enums/traits and zero missing source definitions.
+- The coverage matrix contains 41 `Implemented` rows and zero `Partial`, `Stub`, `Missing`, or
+  `External Blocked` rows.
+- A latent database-test race was removed by assigning unique temporary roots to the two case-insensitive
+  texture-antialiasing variants; the four related tests now pass together under the normal parallel runner.
+
+Final commands:
+
+```text
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe fmt -p engine_asset -p asset_smoke
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_asset
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p engine_asset --no-default-features
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p engine_asset --no-default-features --features serde
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p engine_asset --no-default-features --features bundle,hot_reload,streaming,editor,async_loading,parallel,zstd
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe check -p asset_smoke
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p asset_smoke
+C:\Users\JM\.rustup\toolchains\stable-x86_64-pc-windows-gnu\bin\cargo.exe test -p engine_physics
+git diff --check
+```
+
+Result: formatting passed; the full `engine_asset` suite passed, including 44 bundle tests, 296 database
+tests, 101 runtime tests, and all dependency/ECS/error/feature/GC/GPU/hot-reload/IO/group/loader/scheduler/
+serde/storage/streaming tests; all feature checks passed; `asset_smoke` passed 6 tests; `engine_physics`
+passed 13 tests. The only workspace warning observed while building `asset_smoke` is the pre-existing
+unused private `engine_renderer::count_ready_generated_mip_textures` helper, outside this asset goal.

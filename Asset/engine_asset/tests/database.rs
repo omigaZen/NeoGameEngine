@@ -1905,6 +1905,28 @@ fn database_physics_mesh_cooker_reports_invalid_runtime_bytes() {
 }
 
 #[test]
+fn database_physics_mesh_cooker_rejects_degenerate_convex_hull() {
+    let path = AssetPath::parse("physics/cooked_invalid_convex.physics");
+    let source = b"NGA_PHYSICS_MESH_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n".to_vec();
+    let ctx = CookContext {
+        target: TargetPlatform::Windows,
+        source_path: Some(path.clone()),
+        source_bytes: source,
+    };
+    let metadata = AssetMetadata::runtime(AssetId::new(), path, AssetTypeId::of::<PhysicsMesh>());
+    let cooker = PhysicsMeshCooker::new();
+
+    let error = cooker.cook(&ctx, &metadata).unwrap_err();
+
+    assert!(matches!(
+        error,
+        AssetError::Cook { message }
+            if message.contains("PhysicsMeshCooker failed to validate physics mesh source")
+                && message.contains("convex physics mesh vertices are coplanar")
+    ));
+}
+
+#[test]
 fn database_font_cooker_canonicalizes_runtime_and_source_bytes() {
     let runtime_path = AssetPath::parse("fonts/cooked_runtime.font");
     let runtime_bytes = font_bytes();
@@ -8279,7 +8301,7 @@ custom.texture_antialias.bool=false
 
 #[test]
 fn database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_true_value() {
-    let config = database_config("builtin_model_obj_texture_antialiasing");
+    let config = database_config("builtin_model_obj_texture_antialiasing_true_case");
     let model_path = AssetPath::parse("models/antialias_true_case.obj");
     let mesh_path = AssetPath::parse("models/antialias_true_case.Panel.mesh");
     let material_path = AssetPath::parse("models/antialias_true_case.Material_Detail.material");
@@ -8328,7 +8350,7 @@ custom.texture_antialias.bool=true
 
 #[test]
 fn database_model_importer_preserves_obj_texture_antialiasing_case_insensitive_false_value() {
-    let config = database_config("builtin_model_obj_texture_antialiasing");
+    let config = database_config("builtin_model_obj_texture_antialiasing_false_case");
     let model_path = AssetPath::parse("models/antialias_false_case.obj");
     let mesh_path = AssetPath::parse("models/antialias_false_case.Panel.mesh");
     let material_path = AssetPath::parse("models/antialias_false_case.Material_Detail.material");
@@ -11645,6 +11667,12 @@ fn database_model_importer_maps_obj_packed_pbr_long_name_texture_aliases() {
             "roughness_metallic_alias",
             "metallic_roughness",
             126,
+        ),
+        (
+            "map_RM",
+            "roughness_metallic_short_alias",
+            "metallic_roughness",
+            127,
         ),
     ] {
         let config = database_config(&format!("builtin_model_obj_{stem}"));
@@ -25932,6 +25960,44 @@ fn database_physics_mesh_importer_canonicalizes_source_to_runtime_bytes() {
 }
 
 #[test]
+fn database_physics_mesh_importer_canonicalizes_convex_source() {
+    let config = database_config("physics_mesh_importer_convex_source_conversion");
+    let path = AssetPath::parse("physics/tetrahedron.physics");
+    let source = b"NGA_PHYSICS_MESH_SOURCE_V1\nCollision Kind=convex-hull\nPoint=0,0,0\nPoint=1,0,0\nPoint=0,1,0\nPoint=0,0,1\n".to_vec();
+    let expected =
+        b"NGA_PHYSICS_MESH_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n".to_vec();
+    let mut io = MemoryAssetIo::new();
+    io.insert(path.path(), source);
+    let mut database = AssetDatabase::new(config.clone());
+    database.set_io(io);
+    database.register_builtin_importers();
+    database.register_builtin_cookers();
+
+    let id = database.import_asset_path(&path).unwrap();
+    assert_eq!(
+        fs::read(config.imported_root.join(path.path())).unwrap(),
+        expected
+    );
+
+    let output = database.cook_asset(id, TargetPlatform::Windows).unwrap();
+    assert_eq!(output.bytes, expected);
+
+    let mut server = AssetServer::new(AssetServerConfig {
+        root: config.cooked_root.clone(),
+        ..AssetServerConfig::default()
+    });
+    server.register_builtin_loaders();
+    let mesh: Handle<PhysicsMesh> = server.load(path);
+    server.update_loading();
+
+    assert!(server.is_ready(&mesh));
+    let loaded = server.get(&mesh).unwrap();
+    assert_eq!(loaded.kind, PhysicsMeshKind::ConvexHull);
+    assert_eq!(loaded.vertices.len(), 4);
+    assert!(loaded.indices.is_empty());
+}
+
+#[test]
 fn database_physics_mesh_importer_canonicalizes_heightfield_source() {
     let config = database_config("physics_mesh_importer_heightfield_source_conversion");
     let path = AssetPath::parse("physics/terrain.physics");
@@ -26003,6 +26069,43 @@ fn database_physics_mesh_importer_reports_invalid_source_index() {
                 && message.contains("physics mesh source index 1 references missing vertex; vertex count is 1")
                 && message.contains("physics/invalid.physics")
     ));
+}
+
+#[test]
+fn database_physics_mesh_importer_reports_degenerate_convex_source() {
+    let cases = [
+        (
+            "too_few",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\n".as_slice(),
+            "convex physics mesh must contain at least four vertices",
+        ),
+        (
+            "coplanar",
+            b"NGA_PHYSICS_MESH_SOURCE_V1\nkind=convex\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 1 1 0\n"
+                .as_slice(),
+            "convex physics mesh vertices are coplanar",
+        ),
+    ];
+
+    for (name, bytes, expected) in cases {
+        let config = database_config(&format!("physics_mesh_invalid_convex_{name}"));
+        let path = AssetPath::parse(&format!("physics/{name}.physics"));
+        let mut io = MemoryAssetIo::new();
+        io.insert(path.path(), bytes.to_vec());
+        let mut database = AssetDatabase::new(config);
+        database.set_io(io);
+        database.register_builtin_importers();
+
+        let error = database.import_asset_path(&path).unwrap_err();
+
+        assert!(matches!(
+            error,
+            AssetError::Import { message }
+                if message.contains("importer `PhysicsMeshImporter` failed")
+                    && message.contains(expected)
+                    && message.contains(path.path())
+        ));
+    }
 }
 
 #[test]

@@ -16,6 +16,62 @@ fn server_with_io(io: MemoryAssetIo) -> AssetServer {
 }
 
 #[test]
+fn gpu_upload_queue_preserves_fifo_commands_and_results() {
+    let first = AssetId::new();
+    let second = AssetId::new();
+    let mut queue = GpuUploadQueue::new();
+    queue.push(GpuUploadCommand {
+        id: first,
+        asset_type: Texture::TYPE_ID,
+        kind: GpuUploadKind::Texture,
+        label: Some("first".to_owned()),
+        metadata: GpuUploadMetadata::None,
+        bytes: vec![1],
+    });
+    queue.push(GpuUploadCommand {
+        id: second,
+        asset_type: Texture::TYPE_ID,
+        kind: GpuUploadKind::Texture,
+        label: Some("second".to_owned()),
+        metadata: GpuUploadMetadata::None,
+        bytes: vec![2],
+    });
+
+    assert_eq!(queue.len(), 2);
+    let first_batch = queue.drain_limit(1).collect::<Vec<_>>();
+    assert_eq!(
+        first_batch
+            .iter()
+            .map(|upload| upload.id)
+            .collect::<Vec<_>>(),
+        vec![first]
+    );
+    assert_eq!(queue.len(), 1);
+    assert_eq!(
+        queue.drain().map(|upload| upload.id).collect::<Vec<_>>(),
+        vec![second]
+    );
+    assert!(queue.is_empty());
+
+    queue.submit_result(GpuUploadResult::ok(first, GpuResourceHandle(7)));
+    queue.submit_result(GpuUploadResult::failed(second, "device lost"));
+    let results = queue.drain_results().collect::<Vec<_>>();
+    assert!(matches!(
+        results.as_slice(),
+        [
+            GpuUploadResult {
+                id: first_id,
+                result: Ok(GpuResourceHandle(7))
+            },
+            GpuUploadResult {
+                id: second_id,
+                result: Err(message)
+            }
+        ] if *first_id == first && *second_id == second && message == "device lost"
+    ));
+}
+
+#[test]
 fn initial_gpu_upload_failure_marks_asset_failed_without_ready_storage() {
     let io = MemoryAssetIo::new().with_file("textures/fail.texture", texture_bytes(1, 1, 1));
     let mut server = server_with_io(io);

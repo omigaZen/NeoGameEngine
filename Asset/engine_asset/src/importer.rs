@@ -1909,6 +1909,13 @@ fn canonical_physics_mesh_source(source_text: &str) -> Result<String, ImportErro
             }
         }
     }
+    if kind == CanonicalPhysicsMeshKind::ConvexHull {
+        crate::assets::physics_mesh::validate_convex_hull_vertices(&vertices).map_err(
+            |message| AssetError::Import {
+                message: message.to_owned(),
+            },
+        )?;
+    }
 
     let mut canonical = format!("NGA_PHYSICS_MESH_V1\nkind={}\n", kind.runtime_name());
     for vertex in vertices {
@@ -9007,6 +9014,7 @@ fn obj_material_texture_channel(directive: &str) -> Option<&'static str> {
             Some("orm")
         }
         "map_mr"
+        | "map_rm"
         | "map_metallicroughness"
         | "map_metallic_roughness"
         | "map_roughnessmetallic"
